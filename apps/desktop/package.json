@@ -1,0 +1,30 @@
+{
+  "name": "@thuminal/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "thuminal 데스크톱 앱 (Tauri). 어댑터를 골라 끼우는 곳이다.",
+  "scripts": {
+    "dev:web": "vite",
+    "build:web": "tsc -p . && vite build",
+    "typecheck": "tsc -p .",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "@thuminal/engine-ghostty-wasm": "workspace:*",
+    "@thuminal/renderer-webgl": "workspace:*",
+    "@thuminal/term-core": "workspace:*",
+    "@thuminal/ui": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}
