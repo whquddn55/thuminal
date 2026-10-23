@@ -1,0 +1,19 @@
+[package]
+name = "thuminald"
+description = "thuminal 데몬 실행 파일. 엔진과 PTY 어댑터를 고르는 유일한 곳이다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thuminal-daemon.workspace = true
+thuminal-protocol.workspace = true
+thuminal-engine-ghostty.workspace = true
+thuminal-pty-portable.workspace = true
+thuminal-vcs-git.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+clap.workspace = true
