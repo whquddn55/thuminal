@@ -1,0 +1,19 @@
+[package]
+name = "thuminal-cli"
+description = "thuminal 명령. 데몬에 붙어 터미널을 만들고, 보내고, 읽고, 기다린다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "thuminal"
+path = "src/main.rs"
+
+[dependencies]
+thuminal-client.workspace = true
+thuminal-protocol.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+libc.workspace = true

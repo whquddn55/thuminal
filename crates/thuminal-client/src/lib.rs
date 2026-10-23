@@ -1,0 +1,325 @@
+//! thuminal 데몬 클라이언트.
+//!
+//! 연결 하나에 읽기 작업 하나가 붙어, 들어온 프레임을 나눠 준다.
+//! - 응답은 요청 id 로 기다리는 쪽에
+//! - 이벤트는 [`Client::events`] 구독자에게
+//! - 세션 출력은 [`Client::attach`] 가 돌려준 줄에
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use thuminal_protocol::paths::Paths;
+use thuminal_protocol::{
+    ClientMessage, CreateSession, ErrorBody, Event, Frame, PROTOCOL_MAJOR, PROTOCOL_MINOR, RepoInfo, Request, Response,
+    ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SnapshotFormat, WorktreeInfo,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
+use tokio::net::unix::OwnedWriteHalf;
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    #[error("데몬에 붙지 못했다 ({path}): {source}")]
+    Connect { path: PathBuf, source: std::io::Error },
+    #[error("데몬을 띄우지 못했다: {0}")]
+    Spawn(String),
+    #[error("데몬이 오류로 답했다: {0:?} {1}")]
+    Daemon(thuminal_protocol::ErrorCode, String),
+    #[error("데몬과 연결이 끊겼다")]
+    Disconnected,
+    #[error("예상하지 못한 응답: {0:?}")]
+    Unexpected(Box<Response>),
+    #[error("입출력 오류: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<ErrorBody> for ClientError {
+    fn from(e: ErrorBody) -> Self {
+        ClientError::Daemon(e.code, e.message)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, ClientError>;
+
+type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<ResponseResult>>>>;
+type Outputs = Arc<Mutex<HashMap<SessionId, mpsc::UnboundedSender<Vec<u8>>>>>;
+type Snapshots = Arc<Mutex<HashMap<SessionId, Vec<u8>>>>;
+
+/// 붙은 세션: 저장본 + 그 뒤로 이어지는 출력
+pub struct Attachment {
+    pub session: SessionInfo,
+    pub format: SnapshotFormat,
+    pub snapshot: Vec<u8>,
+    pub output: mpsc::UnboundedReceiver<Vec<u8>>,
+}
+
+pub struct Client {
+    writer: tokio::sync::Mutex<OwnedWriteHalf>,
+    next_id: AtomicU64,
+    pending: Pending,
+    outputs: Outputs,
+    snapshots: Snapshots,
+    events: broadcast::Sender<Event>,
+    closed: Arc<std::sync::atomic::AtomicBool>,
+    /// `hello` 응답
+    pub daemon: Response,
+}
+
+impl Client {
+    /// 이미 떠 있는 데몬에 붙는다.
+    pub async fn connect(paths: &Paths, client_name: &str) -> Result<Client> {
+        let path = paths.socket();
+        let stream = UnixStream::connect(&path).await.map_err(|source| ClientError::Connect { path, source })?;
+        let (mut rd, wr) = stream.into_split();
+        let pending: Pending = Default::default();
+        let outputs: Outputs = Default::default();
+        let snapshots: Snapshots = Default::default();
+        let events = broadcast::channel(1024).0;
+
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (p, o, s, e, done) = (pending.clone(), outputs.clone(), snapshots.clone(), events.clone(), closed.clone());
+        tokio::spawn(async move {
+            while let Ok(Some(frame)) = read_frame(&mut rd).await {
+                match frame {
+                    Frame::Json(bytes) => match serde_json::from_slice::<ServerMessage>(&bytes) {
+                        Ok(ServerMessage::Response { id, result }) => {
+                            if let Some(tx) = p.lock().unwrap().remove(&id) {
+                                let _ = tx.send(result);
+                            }
+                        }
+                        Ok(ServerMessage::Event { event }) => {
+                            let _ = e.send(event);
+                        }
+                        Err(err) => tracing::warn!(error = %err, "데몬 메시지를 읽지 못했다"),
+                    },
+                    Frame::Output { session, data } => {
+                        let mut outs = o.lock().unwrap();
+                        if let Some(tx) = outs.get(&session) {
+                            if tx.send(data).is_err() {
+                                outs.remove(&session);
+                            }
+                        }
+                    }
+                    Frame::Snapshot { session, data, .. } => {
+                        s.lock().unwrap().insert(session, data);
+                    }
+                    Frame::Input { .. } => {}
+                }
+            }
+            // 연결이 끊기면 기다리던 요청을 모두 깨운다
+            done.store(true, Ordering::SeqCst);
+            p.lock().unwrap().clear();
+            o.lock().unwrap().clear();
+        });
+
+        let mut client = Client {
+            writer: tokio::sync::Mutex::new(wr),
+            next_id: AtomicU64::new(1),
+            pending,
+            outputs,
+            snapshots,
+            events,
+            closed,
+            daemon: Response::Ok,
+        };
+        client.daemon = client
+            .request(Request::Hello { protocol_major: PROTOCOL_MAJOR, protocol_minor: PROTOCOL_MINOR, client: client_name.into() })
+            .await?;
+        Ok(client)
+    }
+
+    /// 데몬에 붙고, 없으면 `daemon_bin` 을 떼어 띄운 뒤 붙는다.
+    pub async fn connect_or_spawn(paths: &Paths, client_name: &str, daemon_bin: &Path) -> Result<Client> {
+        if let Ok(c) = Client::connect(paths, client_name).await {
+            return Ok(c);
+        }
+        spawn_daemon(paths, daemon_bin)?;
+        let mut last = None;
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            match Client::connect(paths, client_name).await {
+                Ok(c) => return Ok(c),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or(ClientError::Disconnected))
+    }
+
+    /// 데몬과 연결이 끊겼는지 (데몬이 내려갔거나 다시 떴다)
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    pub fn events(&self) -> broadcast::Receiver<Event> {
+        self.events.subscribe()
+    }
+
+    async fn write(&self, frame: Frame) -> Result<()> {
+        self.writer.lock().await.write_all(&frame.encode()).await.map_err(|_| ClientError::Disconnected)
+    }
+
+    pub async fn request(&self, request: Request) -> Result<Response> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        self.write(Frame::json(&ClientMessage::Request { id, request })).await?;
+        match rx.await.map_err(|_| ClientError::Disconnected)? {
+            ResponseResult::Ok(r) => Ok(r),
+            ResponseResult::Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn create(&self, req: CreateSession) -> Result<SessionInfo> {
+        match self.request(Request::CreateSession(req)).await? {
+            Response::Session { session } => Ok(session),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn list(&self) -> Result<Vec<SessionInfo>> {
+        match self.request(Request::ListSessions).await? {
+            Response::Sessions { sessions } => Ok(sessions),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn attach(&self, session: SessionId, format: SnapshotFormat) -> Result<Attachment> {
+        // 출력 줄을 먼저 걸어 둔다. 데몬은 저장본 → 응답 → 출력 순서로 보낸다
+        let (tx, output) = mpsc::unbounded_channel();
+        self.outputs.lock().unwrap().insert(session, tx);
+        let info = match self.request(Request::Attach { session, snapshot: format }).await {
+            Ok(Response::Attached { session }) => session,
+            Ok(other) => return Err(ClientError::Unexpected(Box::new(other))),
+            Err(e) => {
+                self.outputs.lock().unwrap().remove(&session);
+                return Err(e);
+            }
+        };
+        let snapshot = self.snapshots.lock().unwrap().remove(&session).unwrap_or_default();
+        Ok(Attachment { session: info, format, snapshot, output })
+    }
+
+    pub async fn detach(&self, session: SessionId) -> Result<()> {
+        self.outputs.lock().unwrap().remove(&session);
+        self.request(Request::Detach { session }).await.map(|_| ())
+    }
+
+    pub async fn input(&self, session: SessionId, data: impl Into<Vec<u8>>) -> Result<()> {
+        self.write(Frame::Input { session, data: data.into() }).await
+    }
+
+    pub async fn send_text(&self, session: SessionId, text: impl Into<String>) -> Result<()> {
+        self.request(Request::SendText { session, text: text.into() }).await.map(|_| ())
+    }
+
+    pub async fn resize(&self, session: SessionId, cols: u16, rows: u16) -> Result<SessionInfo> {
+        match self.request(Request::Resize { session, cols, rows }).await? {
+            Response::Session { session } => Ok(session),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn read_screen(&self, session: SessionId, format: ScreenFormat, scrollback: bool) -> Result<String> {
+        match self.request(Request::ReadScreen { session, format, scrollback }).await? {
+            Response::Screen { text } => Ok(text),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn kill(&self, session: SessionId) -> Result<()> {
+        self.request(Request::Kill { session }).await.map(|_| ())
+    }
+
+    pub async fn remove(&self, session: SessionId) -> Result<()> {
+        self.request(Request::Remove { session }).await.map(|_| ())
+    }
+
+    pub async fn repos(&self) -> Result<Vec<RepoInfo>> {
+        match self.request(Request::ListRepos).await? {
+            Response::Repos { repos } => Ok(repos),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn add_repo(&self, path: impl Into<String>) -> Result<RepoInfo> {
+        match self.request(Request::AddRepo { path: path.into() }).await? {
+            Response::Repo { repo } => Ok(repo),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn worktrees(&self, repo: Option<String>) -> Result<Vec<WorktreeInfo>> {
+        match self.request(Request::ListWorktrees { repo }).await? {
+            Response::Worktrees { worktrees } => Ok(worktrees),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn create_worktree(&self, repo: String, branch: String, base: Option<String>) -> Result<WorktreeInfo> {
+        match self.request(Request::CreateWorktree { repo, branch, base }).await? {
+            Response::Worktree { worktree } => Ok(worktree),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn remove_worktree(&self, repo: String, path: String, force: bool, delete_branch: bool) -> Result<()> {
+        self.request(Request::RemoveWorktree { repo, path, force, delete_branch }).await.map(|_| ())
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        self.request(Request::Shutdown).await.map(|_| ())
+    }
+}
+
+async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<Option<Frame>> {
+    let mut header = [0u8; 4];
+    match rd.read_exact(&mut header).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let n = Frame::body_len(header).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut body = vec![0u8; n];
+    rd.read_exact(&mut body).await?;
+    Frame::decode(&body).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// 데몬을 새 세션(`setsid`)으로 떼어 띄운다. 띄운 쪽(CLI, 앱)이 끝나도 데몬은 산다.
+pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    std::fs::create_dir_all(paths.logs()).map_err(|e| ClientError::Spawn(e.to_string()))?;
+    let stderr = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths.logs().join("daemon.stderr.log"))
+        .map_err(|e| ClientError::Spawn(e.to_string()))?;
+    let mut cmd = Command::new(daemon_bin);
+    cmd.arg("--home").arg(&paths.home).stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
+    // SAFETY: fork 뒤 exec 전에 setsid 만 부른다 (async-signal-safe)
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    cmd.spawn().map_err(|e| ClientError::Spawn(format!("{}: {e}", daemon_bin.display())))?;
+    Ok(())
+}
+
+/// 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald`.
+pub fn default_daemon_bin() -> PathBuf {
+    if let Some(p) = std::env::var_os("THUMINAL_DAEMON_BIN") {
+        return PathBuf::from(p);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("thuminald")))
+        .unwrap_or_else(|| PathBuf::from("thuminald"))
+}

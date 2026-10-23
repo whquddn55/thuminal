@@ -1,0 +1,23 @@
+[package]
+name = "thuminal-client"
+description = "thuminal 데몬 클라이언트. CLI 와 앱이 같이 쓴다. 데몬이 없으면 떼어서 띄운다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thuminal-protocol.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+libc.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+thuminal-daemon.workspace = true
+thuminal-engine-ghostty.workspace = true
+thuminal-pty-portable.workspace = true
+thuminal-vcs-git.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
