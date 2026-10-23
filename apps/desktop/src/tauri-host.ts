@@ -1,8 +1,16 @@
 // term-core HostApi 의 Tauri 구현. src-tauri/src/lib.rs 의 명령을 부른다.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   Attachment,
+  BranchList,
+  DirEntry,
+  FileContent,
+  FilesApi,
+  GitApi,
+  GitStatus,
   CreateSession,
   DaemonEvent,
   DaemonInfo,
@@ -14,7 +22,29 @@ import type {
   WorktreeInfo,
 } from "@thuminal/term-core";
 
+/** 데몬 요청을 그대로 넘긴다 (src-tauri daemon_request). 응답은 `{ type, ... }` 모양이다 */
+async function req<T>(request: Record<string, unknown>, pick: (r: Record<string, unknown>) => unknown = () => undefined): Promise<T> {
+  const r = await invoke<Record<string, unknown>>("daemon_request", { request });
+  return pick(r) as T;
+}
+
 export class TauriHostApi implements HostApi {
+  readonly git: GitApi = {
+    status: (worktree) => req<GitStatus>({ type: "git_status", worktree }, (r) => r.status),
+    diff: (worktree, file, staged) => req<string>({ type: "git_diff", worktree, file, staged }, (r) => r.text),
+    stage: (worktree, files) => req({ type: "git_stage", worktree, files }),
+    unstage: (worktree, files) => req({ type: "git_unstage", worktree, files }),
+    discard: (worktree, files) => req({ type: "git_discard", worktree, files }),
+    commit: (worktree, message, all) => req<string>({ type: "git_commit", worktree, message, all }, (r) => r.text),
+    push: (worktree) => req<string>({ type: "git_push", worktree }, (r) => r.text),
+    branches: (repo) => req<BranchList>({ type: "list_branches", repo }, (r) => r.branches),
+  };
+
+  readonly files: FilesApi = {
+    list: (worktree, dir) => req<DirEntry[]>({ type: "list_dir", worktree, dir }, (r) => r.entries),
+    read: (worktree, file) => req<FileContent>({ type: "read_file", worktree, file }, (r) => r.file),
+  };
+
   private listeners = new Set<(e: DaemonEvent) => void>();
   private subscribed: Promise<void> | null = null;
   private info: Promise<DaemonInfo> | null = null;
@@ -93,8 +123,28 @@ export class TauriHostApi implements HostApi {
     return invoke("list_worktrees");
   }
 
-  createWorktree(repo: string, branch: string, base?: string): Promise<WorktreeInfo> {
-    return invoke("create_worktree", { repo, branch, base: base ?? null });
+  createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string }): Promise<WorktreeInfo> {
+    return req<WorktreeInfo>(
+      { type: "create_worktree", repo, branch, base: opts?.base ?? null, name: opts?.name ?? null },
+      (r) => r.worktree,
+    );
+  }
+
+  addRepos(path: string): Promise<RepoInfo[]> {
+    return req<RepoInfo[]>({ type: "add_repos", path }, (r) => r.repos);
+  }
+
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean }): Promise<void> {
+    return req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null });
+  }
+
+  async pickFolder(): Promise<string | null> {
+    const r = await openDialog({ directory: true, multiple: false, title: "프로젝트 폴더 고르기" });
+    return typeof r === "string" ? r : null;
+  }
+
+  reveal(path: string): Promise<void> {
+    return revealItemInDir(path);
   }
 
   removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean }): Promise<void> {

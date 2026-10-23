@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "메인 창 권한",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "\uba54\uc778 \ucc3d \uad8c\ud55c",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir"
+  ]
 }

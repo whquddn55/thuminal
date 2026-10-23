@@ -191,6 +191,13 @@ async fn remove_worktree(state: State<'_, AppState>, repo: String, path: String,
     state.client().await?.remove_worktree(repo, path, force, delete_branch).await.map_err(err)
 }
 
+/// 데몬 요청을 그대로 넘긴다 (git, 파일, 워크트리 정보 등). 화면 쪽이 프로토콜 모양대로 요청을 만든다.
+/// 요청마다 명령을 따로 만들지 않아 껍데기가 얇게 남는다.
+#[tauri::command]
+async fn daemon_request(state: State<'_, AppState>, request: Request) -> CmdResult<Response> {
+    state.client().await?.request(request).await.map_err(err)
+}
+
 /// 데몬 이벤트를 채널로 흘린다. 화면이 새로 고쳐지면 다시 부른다.
 /// 데몬 이벤트 말고도 `{"type":"daemon_reconnected"}` 가 온다.
 #[tauri::command]
@@ -262,6 +269,8 @@ async fn font_face_data(id: usize) -> CmdResult<tauri::ipc::Response> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AppState::default());
             // 데몬이 내려가거나 다시 뜨면 2초 안에 다시 붙는다
@@ -302,7 +311,8 @@ pub fn run() {
             remove_repo,
             list_worktrees,
             create_worktree,
-            remove_worktree
+            remove_worktree,
+            daemon_request
         ])
         .run(tauri::generate_context!())
         .expect("thuminal 앱을 띄우지 못했다");

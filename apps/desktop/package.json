@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "@thuminal/engine-ghostty-wasm": "workspace:*",
     "@thuminal/renderer-webgl": "workspace:*",
     "@thuminal/term-core": "workspace:*",
