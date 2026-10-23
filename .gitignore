@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+dist/
+
+# Tauri 가 만드는 파일
+apps/desktop/src-tauri/gen/
+
+# 시제품의 내려받은 파일과 빌드 결과
+spikes/assets/*.html
+spikes/assets/*.c
+spikes/assets/*.h
+spikes/assets/type.json
+
+.DS_Store
+apps/desktop/src-tauri/binaries/
+__pycache__/
+
+# 시제품의 wasm 은 packages/engine-ghostty-wasm/src/assets 의 것을 복사해 쓴다 (spikes/README.md)
+spikes/**/ghostty-vt.wasm

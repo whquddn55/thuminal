@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# 설치 스크립트를 돌려도 되는 의존성 (vite 가 쓰는 esbuild 바이너리)
+allowBuilds:
+  esbuild: true

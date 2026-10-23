@@ -1,0 +1,11 @@
+{
+  "name": "thuminal",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "scripts/prepare-sidecars.sh debug && cd apps/desktop && THUMINAL_HOME=$HOME/scratch/thuminal/main/dev-home pnpm tauri dev",
+    "build:app": "scripts/build-app.sh"
+  }
+}
