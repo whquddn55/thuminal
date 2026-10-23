@@ -1,0 +1,346 @@
+:root {
+  --bg: #0f1115;
+  --panel: #161a20;
+  --line: #262b33;
+  --ink: #d8dde5;
+  --ink2: #8b94a3;
+  --accent: #eb6c36;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px -apple-system, "Apple SD Gothic Neo", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+.thm-app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100%;
+}
+
+.thm-sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.thm-sidebar-head {
+  height: 38px;
+  padding: 0 12px 0 80px; /* 창 신호등 버튼 자리 */
+  display: flex;
+  align-items: center;
+  color: var(--ink2);
+  font-weight: 600;
+}
+
+.thm-groups {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+}
+
+.thm-groups button,
+.thm-add-group {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thm-groups button.active {
+  background: #232934;
+}
+
+.thm-groups .count {
+  color: var(--ink2);
+}
+
+.thm-add-group {
+  color: var(--ink2);
+  margin: 6px;
+  width: auto;
+}
+
+.thm-main {
+  display: grid;
+  grid-template-rows: 38px 1fr;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.thm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.thm-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--ink2);
+  cursor: pointer;
+}
+
+.thm-tab.active {
+  background: #232934;
+  color: var(--ink);
+}
+
+.thm-tab.exited .title {
+  text-decoration: line-through;
+}
+
+.thm-tab .idx {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.thm-tab .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thm-tab .close,
+.thm-new-tab {
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.thm-stage {
+  position: relative;
+  min-height: 0;
+  padding: 6px 8px;
+}
+
+.thm-pane {
+  position: absolute;
+  inset: 6px 8px;
+}
+
+.thm-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--bg);
+  z-index: 2;
+}
+
+/* 한글 조합 중에는 조합 글자를 커서 자리에 보인다 */
+.thm-input.composing {
+  opacity: 1;
+  width: 200px;
+}
+
+.thm-empty {
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--ink2);
+  text-align: center;
+}
+
+.thm-empty button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.thm-error {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  max-width: 50%;
+  background: #3a1d1d;
+  border: 1px solid #6b2a2a;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.thm-repo {
+  margin-bottom: 10px;
+}
+
+.thm-repo-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.thm-repo-head button,
+.thm-wt .rm {
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.thm-wt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.thm-wt.active {
+  background: #232934;
+}
+
+.thm-wt .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thm-wt .count {
+  color: var(--ink2);
+  font-size: 11px;
+}
+
+.thm-wt .rm {
+  visibility: hidden;
+}
+
+.thm-wt:hover .rm,
+.thm-wt .rm.armed {
+  visibility: visible;
+}
+
+.thm-wt .rm.armed {
+  color: #ff7b72;
+  font-size: 11px;
+}
+
+.thm-wt .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.thm-wt .dot.on {
+  background: #4a5262;
+}
+
+.thm-wt .dot.busy {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.thm-inline-input {
+  margin: 4px 8px;
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 6px 8px;
+  outline: none;
+  font: inherit;
+}
+
+.thm-wt .dot.waiting,
+.thm-tab .agent.idle {
+  background: #4c8dff;
+  border-color: #4c8dff;
+}
+
+.thm-wt .dot.attention,
+.thm-tab .agent.needs_attention {
+  background: #ff5f56;
+  border-color: #ff5f56;
+}
+
+.thm-tab .agent {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.thm-tab .agent.working {
+  background: var(--accent);
+  animation: thm-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thm-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.thm-floating {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: 26px 1fr;
+  border-top: 2px solid var(--accent);
+}
+
+.thm-floating-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--ink2);
+  font-size: 12px;
+}
+
+.thm-floating-pane {
+  position: relative;
+  margin: 4px 8px 6px;
+}
