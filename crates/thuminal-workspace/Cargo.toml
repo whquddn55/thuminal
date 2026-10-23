@@ -1,0 +1,18 @@
+[package]
+name = "thuminal-workspace"
+description = "저장소 목록과 워크트리 관리. 버전 관리 도구는 Vcs 인터페이스로만 안다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thuminal-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+thuminal-vcs-git.workspace = true
+tempfile.workspace = true
