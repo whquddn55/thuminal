@@ -133,6 +133,73 @@ pub struct WorktreeInfo {
     pub head: String,
     /// 저장소를 처음 만든 메인 워크트리인지
     pub is_main: bool,
+    /// 사용자가 붙인 이름 (없으면 브랜치 이름으로 보인다)
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 프로젝트 맨 위에 고정
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Untracked,
+    Conflicted,
+}
+
+/// 바뀐 파일 하나. `staged` 는 스테이지된 변경, `unstaged` 는 작업 폴더의 변경
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileChange {
+    /// 워크트리 기준 상대 경로
+    pub path: String,
+    /// 이름이 바뀌었으면 이전 경로
+    pub orig_path: Option<String>,
+    pub staged: Option<ChangeKind>,
+    pub unstaged: Option<ChangeKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct GitStatus {
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub files: Vec<FileChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BranchList {
+    pub local: Vec<String>,
+    /// `origin/main` 꼴
+    pub remote: Vec<String>,
+    pub current: Option<String>,
+    /// 원격의 기본 브랜치 (`origin/HEAD` 가 가리키는 것)
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+    /// git 이 무시하는 파일 (.gitignore)
+    #[serde(default)]
+    pub ignored: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileContent {
+    /// 글자 파일이면 내용 (너무 크면 앞부분만)
+    pub text: Option<String>,
+    pub binary: bool,
+    pub truncated: bool,
+    pub size: u64,
 }
 
 /// 세션 꼬리표 중 워크트리 경로를 담는 키. 데몬이 세션을 만들 때 시작 폴더로 채운다
@@ -196,6 +263,8 @@ pub enum Request {
     /// 경로가 든 git 저장소를 등록한다 (워크트리 안의 경로여도 메인 저장소를 찾는다)
     AddRepo { path: String },
     RemoveRepo { repo: String },
+    /// 폴더가 git 저장소가 아니면 바로 아래 폴더들에서 저장소를 찾아 모두 등록한다
+    AddRepos { path: String },
     /// `repo` 를 비우면 모든 저장소
     ListWorktrees {
         #[serde(default)]
@@ -207,7 +276,46 @@ pub enum Request {
         branch: String,
         #[serde(default)]
         base: Option<String>,
+        /// 사용자가 붙인 이름
+        #[serde(default)]
+        name: Option<String>,
     },
+    /// 워크트리 이름이나 고정을 바꾼다 (None 이면 그대로 둔다. 이름을 빈 글로 주면 지운다)
+    UpdateWorktree {
+        path: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pinned: Option<bool>,
+    },
+    GitStatus { worktree: String },
+    /// 파일 하나의 diff. `staged` 면 스테이지된 변경, 아니면 작업 폴더 변경 (새 파일 포함)
+    GitDiff {
+        worktree: String,
+        file: String,
+        #[serde(default)]
+        staged: bool,
+    },
+    GitStage { worktree: String, files: Vec<String> },
+    GitUnstage { worktree: String, files: Vec<String> },
+    /// 작업 폴더 변경을 버린다 (새 파일은 지운다)
+    GitDiscard { worktree: String, files: Vec<String> },
+    GitCommit {
+        worktree: String,
+        message: String,
+        /// 스테이지된 것이 없으면 바뀐 파일을 모두 담는다
+        #[serde(default)]
+        all: bool,
+    },
+    GitPush { worktree: String },
+    ListBranches { repo: String },
+    /// 워크트리 안 폴더 목록. `dir` 은 워크트리 기준 상대 경로 (빈 글이면 맨 위)
+    ListDir {
+        worktree: String,
+        #[serde(default)]
+        dir: String,
+    },
+    ReadFile { worktree: String, file: String },
     RemoveWorktree {
         repo: String,
         path: String,
@@ -229,6 +337,11 @@ pub enum Response {
     Screen { text: String },
     Repos { repos: Vec<RepoInfo> },
     Repo { repo: RepoInfo },
+    Text { text: String },
+    GitStatus { status: GitStatus },
+    Branches { branches: BranchList },
+    Dir { entries: Vec<DirEntry> },
+    File { file: FileContent },
     Worktrees { worktrees: Vec<WorktreeInfo> },
     Worktree { worktree: WorktreeInfo },
     Ok,
@@ -244,6 +357,8 @@ pub enum Event {
     SessionRemoved { session: SessionId },
     /// 저장소나 워크트리 목록이 바뀌었다. 다시 읽는다
     WorkspaceChanged,
+    /// 이 워크트리의 git 상태가 바뀌었다 (스테이지, 커밋, 푸시 등)
+    GitChanged { worktree: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
