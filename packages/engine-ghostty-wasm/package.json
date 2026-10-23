@@ -1,0 +1,26 @@
+{
+  "name": "@thuminal/engine-ghostty-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "term-core TerminalEngine \uc758 ghostty-vt.wasm \uc5b4\ub311\ud130",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@thuminal/term-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vite": "^7",
+    "vitest": "^5.0.5"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  }
+}

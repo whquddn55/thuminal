@@ -1,0 +1,12 @@
+{
+  "name": "@thuminal/renderer-webgl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "term-core Renderer 의 WebGL2 구현: canvas 하나에 여러 터미널을 글자 그림판(atlas)으로 그린다",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "@thuminal/term-core": "workspace:*" },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

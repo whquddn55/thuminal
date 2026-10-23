@@ -1,0 +1,11 @@
+{
+  "name": "@thuminal/term-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "thuminal 앱의 인터페이스: 터미널 엔진, 렌더러, 입력 인코더, 앱 껍데기(HostApi). 구현은 없다.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p ." },
+  "devDependencies": { "typescript": "^7.0.2" }
+}
