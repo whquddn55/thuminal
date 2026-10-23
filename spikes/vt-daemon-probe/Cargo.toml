@@ -1,0 +1,7 @@
+[package]
+name = "vt-daemon-probe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs", rev = "0ef80413de1326685743378efbfa06d849e041a7", version = "0.2.1" }
