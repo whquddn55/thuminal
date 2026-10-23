@@ -1,0 +1,11 @@
+[package]
+name = "thuminal-pty-portable"
+description = "thuminal-pty 의 portable-pty 어댑터"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thuminal-pty.workspace = true
+portable-pty.workspace = true

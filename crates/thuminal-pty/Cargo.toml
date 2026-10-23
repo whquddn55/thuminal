@@ -1,0 +1,10 @@
+[package]
+name = "thuminal-pty"
+description = "데몬이 쓰는 PTY 인터페이스. 구현은 어댑터 크레이트에 있다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
