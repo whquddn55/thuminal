@@ -51,6 +51,12 @@ pub enum WtCmd {
         #[arg(long)]
         delete_branch: bool,
     },
+    /// 지금 폴더(또는 준 경로)가 든 워크트리의 git 상태
+    Status {
+        path: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// 워크트리마다 돌고 있는 터미널
     Ps {
         #[arg(long)]
@@ -148,6 +154,36 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
             }
             c.remove_worktree(w.repo.clone(), w.path.clone(), force, delete_branch).await?;
             println!("지웠다: {}", w.path);
+        }
+        WtCmd::Status { path, json } => {
+            let here = std::fs::canonicalize(path.unwrap_or_else(|| ".".into()))?;
+            let all = c.worktrees(None).await?;
+            // 가장 깊은(긴) 워크트리 경로가 지금 폴더를 품는 것을 고른다
+            let w = all
+                .iter()
+                .filter(|w| here.starts_with(&w.path))
+                .max_by_key(|w| w.path.len())
+                .ok_or("등록한 저장소의 워크트리 안이 아니다 (thuminal repo add 로 등록한다)")?;
+            let st = match c.request(thuminal_protocol::Request::GitStatus { worktree: w.path.clone() }).await? {
+                thuminal_protocol::Response::GitStatus { status } => status,
+                other => return Err(format!("예상하지 못한 응답: {other:?}").into()),
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&st)?);
+                return Ok(());
+            }
+            let sync = match &st.upstream {
+                Some(u) => format!("{u} ↑{} ↓{}", st.ahead, st.behind),
+                None => "원격 없음".into(),
+            };
+            println!("{}  {}  ({sync})", w.branch.as_deref().unwrap_or("(detached)"), w.path);
+            for f in &st.files {
+                let k = |k: Option<thuminal_protocol::ChangeKind>| k.map(|k| format!("{k:?}")).unwrap_or_else(|| "-".into());
+                println!("  {:<10} {:<10} {}", k(f.staged), k(f.unstaged), f.path);
+            }
+            if st.files.is_empty() {
+                println!("  바뀐 파일이 없다");
+            }
         }
         WtCmd::Ps { json } => {
             let worktrees = c.worktrees(None).await?;

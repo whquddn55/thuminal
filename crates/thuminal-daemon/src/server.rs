@@ -199,10 +199,22 @@ impl Server {
             Request::Remove { session } => m.remove(session).map(|_| Response::Ok),
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             req @ (Request::AddRepo { .. }
+            | Request::AddRepos { .. }
             | Request::RemoveRepo { .. }
             | Request::ListWorktrees { .. }
             | Request::CreateWorktree { .. }
-            | Request::RemoveWorktree { .. }) => self.workspace_request(req).await,
+            | Request::RemoveWorktree { .. }
+            | Request::UpdateWorktree { .. }
+            | Request::GitStatus { .. }
+            | Request::GitDiff { .. }
+            | Request::GitStage { .. }
+            | Request::GitUnstage { .. }
+            | Request::GitDiscard { .. }
+            | Request::GitCommit { .. }
+            | Request::GitPush { .. }
+            | Request::ListBranches { .. }
+            | Request::ListDir { .. }
+            | Request::ReadFile { .. }) => self.workspace_request(req).await,
             Request::Shutdown => {
                 info!(event = "shutdown_requested", conn);
                 *self.stop_mode.lock().unwrap() = StopMode::Clear;
@@ -225,17 +237,58 @@ impl Server {
     /// 저장소와 워크트리 요청. git 명령이 막을 수 있어 블로킹 스레드에서 돌린다
     async fn workspace_request(&self, req: Request) -> Result<Response, ErrorBody> {
         let ws = self.workspace.clone();
-        let changes = !matches!(req, Request::ListWorktrees { .. });
+        // 목록이 바뀌는 요청과 git 상태가 바뀌는 요청을 나눠 알린다
+        let changes = matches!(
+            req,
+            Request::AddRepo { .. }
+                | Request::AddRepos { .. }
+                | Request::RemoveRepo { .. }
+                | Request::CreateWorktree { .. }
+                | Request::RemoveWorktree { .. }
+                | Request::UpdateWorktree { .. }
+        );
+        let git_changed = match &req {
+            Request::GitStage { worktree, .. }
+            | Request::GitUnstage { worktree, .. }
+            | Request::GitDiscard { worktree, .. }
+            | Request::GitCommit { worktree, .. }
+            | Request::GitPush { worktree } => Some(worktree.clone()),
+            _ => None,
+        };
         let result = tokio::task::spawn_blocking(move || -> Result<Response, WorkspaceError> {
             Ok(match req {
                 Request::AddRepo { path } => Response::Repo { repo: ws.add_repo(std::path::Path::new(&path))? },
+                Request::AddRepos { path } => Response::Repos { repos: ws.add_repos(std::path::Path::new(&path))? },
+                Request::UpdateWorktree { path, name, pinned } => {
+                    ws.update_worktree(&path, name, pinned)?;
+                    Response::Ok
+                }
+                Request::GitStatus { worktree } => Response::GitStatus { status: ws.status(&worktree)? },
+                Request::GitDiff { worktree, file, staged } => Response::Text { text: ws.diff(&worktree, &file, staged)? },
+                Request::GitStage { worktree, files } => {
+                    ws.stage(&worktree, &files)?;
+                    Response::Ok
+                }
+                Request::GitUnstage { worktree, files } => {
+                    ws.unstage(&worktree, &files)?;
+                    Response::Ok
+                }
+                Request::GitDiscard { worktree, files } => {
+                    ws.discard(&worktree, &files)?;
+                    Response::Ok
+                }
+                Request::GitCommit { worktree, message, all } => Response::Text { text: ws.commit(&worktree, &message, all)? },
+                Request::GitPush { worktree } => Response::Text { text: ws.push(&worktree)? },
+                Request::ListBranches { repo } => Response::Branches { branches: ws.branches(&repo)? },
+                Request::ListDir { worktree, dir } => Response::Dir { entries: ws.list_dir(&worktree, &dir)? },
+                Request::ReadFile { worktree, file } => Response::File { file: ws.read_file(&worktree, &file)? },
                 Request::RemoveRepo { repo } => {
                     ws.remove_repo(&repo)?;
                     Response::Ok
                 }
                 Request::ListWorktrees { repo } => Response::Worktrees { worktrees: ws.worktrees(repo.as_deref())? },
-                Request::CreateWorktree { repo, branch, base } => {
-                    Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref())? }
+                Request::CreateWorktree { repo, branch, base, name } => {
+                    Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref(), name.as_deref())? }
                 }
                 Request::RemoveWorktree { repo, path, force, delete_branch } => {
                     ws.remove_worktree(&repo, std::path::Path::new(&path), force, delete_branch)?;
@@ -256,6 +309,9 @@ impl Server {
         })?;
         if changes {
             let _ = self.manager.events.send(Event::WorkspaceChanged);
+        }
+        if let Some(worktree) = git_changed {
+            let _ = self.manager.events.send(Event::GitChanged { worktree });
         }
         Ok(result)
     }
@@ -279,6 +335,18 @@ fn request_kind(r: &Request) -> &'static str {
         Request::Shutdown => "shutdown",
         Request::ListRepos => "list_repos",
         Request::AddRepo { .. } => "add_repo",
+        Request::AddRepos { .. } => "add_repos",
+        Request::UpdateWorktree { .. } => "update_worktree",
+        Request::GitStatus { .. } => "git_status",
+        Request::GitDiff { .. } => "git_diff",
+        Request::GitStage { .. } => "git_stage",
+        Request::GitUnstage { .. } => "git_unstage",
+        Request::GitDiscard { .. } => "git_discard",
+        Request::GitCommit { .. } => "git_commit",
+        Request::GitPush { .. } => "git_push",
+        Request::ListBranches { .. } => "list_branches",
+        Request::ListDir { .. } => "list_dir",
+        Request::ReadFile { .. } => "read_file",
         Request::RemoveRepo { .. } => "remove_repo",
         Request::ListWorktrees { .. } => "list_worktrees",
         Request::CreateWorktree { .. } => "create_worktree",
