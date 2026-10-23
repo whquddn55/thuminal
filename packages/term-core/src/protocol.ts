@@ -58,6 +58,47 @@ export interface WorktreeInfo {
   branch: string | null;
   head: string;
   is_main: boolean;
+  /** 사용자가 붙인 이름 */
+  name: string | null;
+  pinned: boolean;
+}
+
+export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed" | "untracked" | "conflicted";
+
+export interface FileChange {
+  path: string;
+  orig_path: string | null;
+  staged: ChangeKind | null;
+  unstaged: ChangeKind | null;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: FileChange[];
+}
+
+export interface BranchList {
+  local: string[];
+  remote: string[];
+  current: string | null;
+  default: string | null;
+}
+
+export interface DirEntry {
+  name: string;
+  is_dir: boolean;
+  /** git 이 무시하는 파일 */
+  ignored: boolean;
+}
+
+export interface FileContent {
+  text: string | null;
+  binary: boolean;
+  truncated: boolean;
+  size: number;
 }
 
 /** 세션 꼬리표 중 워크트리 경로를 담는 키 (데몬이 시작 폴더로 채운다) */
@@ -69,5 +110,6 @@ export type DaemonEvent =
   | { type: "session_exited"; session: SessionId; code: number | null }
   | { type: "session_removed"; session: SessionId }
   | { type: "workspace_changed" }
+  | { type: "git_changed"; worktree: string }
   /** 앱 껍데기가 데몬에 다시 붙었다 (데몬이 다시 떴다). 세션 목록을 다시 읽고 다시 붙는다 */
   | { type: "daemon_reconnected" };

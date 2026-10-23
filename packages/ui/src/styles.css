@@ -1,10 +1,17 @@
 :root {
   --bg: #0f1115;
   --panel: #161a20;
+  --panel2: #1c2128;
   --line: #262b33;
   --ink: #d8dde5;
   --ink2: #8b94a3;
+  --ink3: #5d6573;
   --accent: #eb6c36;
+  --sel: #232934;
+  --add: #3fb950;
+  --del: #f85149;
+  --mod: #d29922;
+  --blue: #4c8dff;
   color-scheme: dark;
 }
 
@@ -18,63 +25,275 @@ body,
   font: 13px -apple-system, "Apple SD Gothic Neo", sans-serif;
   overflow: hidden;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  font: inherit;
+}
+
+code {
+  font-family: Menlo, monospace;
+  font-size: 12px;
+  background: var(--panel2);
+  padding: 1px 4px;
+  border-radius: 4px;
 }
 
 .thm-app {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 240px 1fr;
   height: 100%;
 }
+
+.thm-app.with-panel {
+  grid-template-columns: 240px 1fr 320px;
+}
+
+/* ── 사이드바 ── */
 
 .thm-sidebar {
   background: var(--panel);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .thm-sidebar-head {
   height: 38px;
-  padding: 0 12px 0 80px; /* 창 신호등 버튼 자리 */
+  padding: 0 8px 0 80px; /* 창 신호등 버튼 자리 */
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.thm-icon {
+  border: 0;
+  background: none;
   color: var(--ink2);
-  font-weight: 600;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.thm-icon:hover {
+  background: var(--sel);
+  color: var(--ink);
+}
+
+.thm-filter {
+  margin: 0 8px 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 5px 8px;
+  outline: none;
+  font: inherit;
+}
+
+.thm-filter:focus {
+  border-color: var(--accent);
 }
 
 .thm-groups {
   flex: 1;
   overflow: auto;
-  padding: 6px;
+  padding: 0 6px 6px;
 }
 
-.thm-groups button,
-.thm-add-group {
+.thm-repo {
+  margin-bottom: 8px;
+}
+
+.thm-repo-head {
   display: flex;
-  width: 100%;
-  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.thm-repo-head:hover {
+  background: #1a1f26;
+}
+
+.thm-repo-head .caret {
+  width: 10px;
+  font-size: 9px;
+}
+
+.thm-repo-head .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thm-repo-head button {
   border: 0;
   background: none;
-  color: var(--ink);
-  padding: 7px 10px;
-  border-radius: 6px;
-  text-align: left;
+  color: var(--ink2);
   cursor: pointer;
+  font-size: 15px;
+  opacity: 0.45;
 }
 
-.thm-groups button.active {
-  background: #232934;
+.thm-repo-head:hover button {
+  opacity: 1;
 }
 
-.thm-groups .count {
+.thm-wt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.thm-wt:hover {
+  background: #1a1f26;
+}
+
+.thm-wt.active {
+  background: var(--sel);
+}
+
+.thm-wt.creating {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.thm-wt .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.thm-wt .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thm-wt.unread .title {
+  font-weight: 700;
+  color: #fff;
+}
+
+.thm-wt .pin {
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+.thm-wt .meta {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.thm-wt .meta .branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thm-wt .meta .badge {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.thm-wt .meta .changes {
+  color: var(--mod);
+}
+
+.thm-wt .meta .ahead {
+  color: var(--add);
+}
+
+.thm-wt .meta .behind {
+  color: var(--blue);
+}
+
+.thm-wt .count {
   color: var(--ink2);
+  font-size: 11px;
 }
 
-.thm-add-group {
-  color: var(--ink2);
-  margin: 6px;
-  width: auto;
+.thm-rename {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 2px 4px;
+  font: inherit;
+  outline: none;
 }
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  border: 1px solid var(--line);
+}
+
+.dot.on {
+  background: #4a5262;
+}
+
+.dot.busy {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: thm-pulse 1.2s ease-in-out infinite;
+}
+
+.dot.waiting {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.dot.attention {
+  background: #ff5f56;
+  border-color: #ff5f56;
+}
+
+.thm-add-project {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-top: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  padding: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thm-add-project small {
+  color: var(--ink3);
+}
+
+/* ── 탭 ── */
 
 .thm-main {
   display: grid;
@@ -93,6 +312,11 @@ body,
   overflow-x: auto;
 }
 
+.thm-tabs-spacer {
+  flex: 1;
+  align-self: stretch;
+}
+
 .thm-tab {
   display: flex;
   align-items: center;
@@ -103,11 +327,16 @@ body,
   border-radius: 6px;
   color: var(--ink2);
   cursor: pointer;
+  flex: none;
 }
 
 .thm-tab.active {
-  background: #232934;
+  background: var(--sel);
   color: var(--ink);
+}
+
+.thm-tab.doc .title {
+  font-style: italic;
 }
 
 .thm-tab.exited .title {
@@ -133,6 +362,60 @@ body,
   cursor: pointer;
   font-size: 15px;
 }
+
+.thm-tab .agent {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.thm-tab .agent.idle {
+  background: var(--blue);
+}
+
+.thm-tab .agent.needs_attention {
+  background: #ff5f56;
+}
+
+.thm-tab .agent.working {
+  background: var(--accent);
+  animation: thm-pulse 1.2s ease-in-out infinite;
+}
+
+.thm-panel-btn {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--ink2);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  flex: none;
+}
+
+.thm-panel-btn.on {
+  background: var(--sel);
+  color: var(--ink);
+  border-color: #3a4250;
+}
+
+.thm-panel-btn .n {
+  margin-left: 6px;
+  background: var(--mod);
+  color: #000;
+  border-radius: 8px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@keyframes thm-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── 터미널 자리 ── */
 
 .thm-stage {
   position: relative;
@@ -178,148 +461,38 @@ body,
   text-align: center;
 }
 
-.thm-empty button {
+.thm-empty .row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.thm-empty button,
+.thm-modal-actions button,
+.thm-commit-actions button {
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--ink);
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-radius: 6px;
   cursor: pointer;
 }
 
-.thm-error {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  max-width: 50%;
-  background: #3a1d1d;
-  border: 1px solid #6b2a2a;
-  padding: 8px 12px;
-  border-radius: 6px;
+button.primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
 }
 
-.thm-repo {
-  margin-bottom: 10px;
+button.danger {
+  background: #8a2b2b !important;
+  border-color: #a33 !important;
+  color: #fff !important;
 }
 
-.thm-repo-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 10px;
-  color: var(--ink2);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.thm-repo-head button,
-.thm-wt .rm {
-  border: 0;
-  background: none;
-  color: var(--ink2);
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.thm-wt {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.thm-wt.active {
-  background: #232934;
-}
-
-.thm-wt .name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thm-wt .count {
-  color: var(--ink2);
-  font-size: 11px;
-}
-
-.thm-wt .rm {
-  visibility: hidden;
-}
-
-.thm-wt:hover .rm,
-.thm-wt .rm.armed {
-  visibility: visible;
-}
-
-.thm-wt .rm.armed {
-  color: #ff7b72;
-  font-size: 11px;
-}
-
-.thm-wt .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: transparent;
-  border: 1px solid var(--line);
-}
-
-.thm-wt .dot.on {
-  background: #4a5262;
-}
-
-.thm-wt .dot.busy {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.thm-inline-input {
-  margin: 4px 8px;
-  width: calc(100% - 16px);
-  box-sizing: border-box;
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  color: var(--ink);
-  padding: 6px 8px;
-  outline: none;
-  font: inherit;
-}
-
-.thm-wt .dot.waiting,
-.thm-tab .agent.idle {
-  background: #4c8dff;
-  border-color: #4c8dff;
-}
-
-.thm-wt .dot.attention,
-.thm-tab .agent.needs_attention {
-  background: #ff5f56;
-  border-color: #ff5f56;
-}
-
-.thm-tab .agent {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-}
-
-.thm-tab .agent.working {
-  background: var(--accent);
-  animation: thm-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes thm-pulse {
-  50% {
-    opacity: 0.35;
-  }
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .thm-floating {
@@ -343,4 +516,500 @@ body,
 .thm-floating-pane {
   position: relative;
   margin: 4px 8px 6px;
+}
+
+.thm-error {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  max-width: 50%;
+  background: #3a1d1d;
+  border: 1px solid #6b2a2a;
+  padding: 8px 12px;
+  border-radius: 6px;
+  z-index: 10;
+  cursor: pointer;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* ── 문서 탭 (diff, 파일) ── */
+
+.thm-doc {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+  z-index: 6;
+  user-select: text;
+}
+
+.thm-doc-error {
+  padding: 16px;
+  color: var(--del);
+}
+
+.thm-doc-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.thm-doc-head .path {
+  font-family: Menlo, monospace;
+  flex: 1;
+}
+
+.thm-doc-head .tag {
+  color: var(--ink2);
+}
+
+.thm-doc-head .tag.warn {
+  color: var(--mod);
+}
+
+.thm-doc-head .add {
+  color: var(--add);
+}
+
+.thm-doc-head .del {
+  color: var(--del);
+}
+
+.thm-diff {
+  border-collapse: collapse;
+  width: 100%;
+  font: 12px/1.5 Menlo, "Apple SD Gothic Neo", monospace;
+}
+
+.thm-diff td {
+  padding: 0 8px;
+  vertical-align: top;
+}
+
+.thm-diff .ln {
+  width: 1%;
+  color: var(--ink3);
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.thm-diff .sign {
+  width: 1%;
+  user-select: none;
+}
+
+.thm-diff .code {
+  white-space: pre;
+}
+
+.thm-diff tr.add {
+  background: rgba(63, 185, 80, 0.13);
+}
+
+.thm-diff tr.add .sign {
+  color: var(--add);
+}
+
+.thm-diff tr.del {
+  background: rgba(248, 81, 73, 0.13);
+}
+
+.thm-diff tr.del .sign {
+  color: var(--del);
+}
+
+.thm-diff tr.hunk td {
+  color: var(--blue);
+  background: #15202e;
+  padding: 4px 8px;
+}
+
+.thm-empty-note {
+  padding: 16px;
+  color: var(--ink3);
+}
+
+/* ── 오른쪽 패널 ── */
+
+.thm-right {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  overflow: auto;
+  min-height: 0;
+}
+
+.thm-changes {
+  display: flex;
+  flex-direction: column;
+}
+
+.thm-branchline {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  font-size: 12px;
+}
+
+.thm-branchline .sync {
+  color: var(--ink2);
+}
+
+.thm-commit-msg {
+  margin: 0 12px;
+  min-height: 56px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 8px;
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+
+.thm-commit-msg:focus {
+  border-color: var(--accent);
+}
+
+.thm-commit-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.thm-commit-actions button {
+  flex: 1;
+  padding: 6px 8px;
+}
+
+.thm-note {
+  margin: 0 12px 6px;
+  color: var(--ink2);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.thm-change-group .head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px 4px;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.thm-change-group .head button {
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.thm-change {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.thm-change:hover {
+  background: var(--sel);
+}
+
+.thm-change .name {
+  white-space: nowrap;
+}
+
+.thm-change .dir {
+  flex: 1;
+  color: var(--ink3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.thm-change .acts {
+  display: none;
+  gap: 2px;
+}
+
+.thm-change:hover .acts {
+  display: flex;
+}
+
+.thm-change .acts button {
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+  width: 20px;
+}
+
+.thm-change .letter {
+  width: 14px;
+  text-align: center;
+  font-family: Menlo, monospace;
+  font-size: 11px;
+}
+
+.k-added .letter,
+.k-untracked .letter,
+.thm-file.k-added .name,
+.thm-file.k-untracked .name {
+  color: var(--add);
+}
+
+.k-modified .letter,
+.k-renamed .letter,
+.k-type_changed .letter,
+.thm-file.k-modified .name,
+.thm-file.k-renamed .name {
+  color: var(--mod);
+}
+
+.k-deleted .letter,
+.k-conflicted .letter,
+.thm-file.k-deleted .name,
+.thm-file.k-conflicted .name {
+  color: var(--del);
+}
+
+.thm-files-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.thm-files-head button {
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+}
+
+.thm-file {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.thm-file:hover {
+  background: var(--sel);
+}
+
+.thm-file.ignored .name {
+  color: var(--ink3);
+}
+
+.thm-file .caret {
+  width: 10px;
+  font-size: 9px;
+  color: var(--ink3);
+}
+
+/* ── 메뉴, 모달 ── */
+
+.thm-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  background: #1f242c;
+  border: 1px solid #333a45;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.thm-menu button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thm-menu button:hover:not(:disabled) {
+  background: var(--blue);
+}
+
+.thm-menu button.danger {
+  background: none !important;
+  border: 0 !important;
+  color: #ff7b72 !important;
+}
+
+.thm-menu button.danger:hover {
+  background: #8a2b2b !important;
+  color: #fff !important;
+}
+
+.thm-menu .hint {
+  color: var(--ink3);
+}
+
+.thm-menu .sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 6px;
+}
+
+.thm-modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+}
+
+.thm-modal {
+  background: var(--panel);
+  border: 1px solid #333a45;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thm-modal-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.thm-field {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.thm-field > span {
+  color: var(--ink2);
+}
+
+.thm-field input,
+.thm-field select,
+.thm-palette-input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 6px 8px;
+  font: inherit;
+  outline: none;
+}
+
+.thm-field input:focus,
+.thm-palette-input:focus {
+  border-color: var(--accent);
+}
+
+.thm-seg {
+  display: flex;
+  gap: 4px;
+}
+
+.thm-seg button {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--ink2);
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.thm-seg button.on {
+  background: var(--sel);
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.thm-link {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.thm-modal-note {
+  color: var(--ink2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.warn {
+  color: var(--mod);
+}
+
+.thm-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.thm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.thm-palette-list {
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.thm-palette-list .item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.thm-palette-list .item.sel {
+  background: var(--sel);
+}
+
+.thm-palette-list .meta {
+  color: var(--ink3);
+  font-size: 12px;
+}
+
+.thm-palette-list .empty {
+  padding: 12px;
+  color: var(--ink3);
 }
