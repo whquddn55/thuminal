@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 thuminal-client.workspace = true
 thuminal-protocol.workspace = true
+thuminal-layout.workspace = true
+serde.workspace = true
 tokio.workspace = true
 clap.workspace = true
 serde_json.workspace = true

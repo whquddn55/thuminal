@@ -70,6 +70,19 @@ async fn repo_here(c: &Client) -> Res<RepoInfo> {
     Ok(c.add_repo(cwd.to_string_lossy()).await?)
 }
 
+/// 워크트리 경로나 브랜치 이름으로 워크트리를 찾는다. `nested` 면 워크트리 안 폴더도 받아 그것을 품는 가장 깊은 워크트리를 고른다
+pub async fn find_worktree(c: &Client, target: &str, nested: bool) -> Res<WorktreeInfo> {
+    let all = c.worktrees(None).await?;
+    let abs = std::fs::canonicalize(target).ok();
+    let abs_str = abs.as_ref().map(|p| p.to_string_lossy().into_owned());
+    if let Some(w) = all.iter().find(|w| Some(&w.path) == abs_str.as_ref() || w.path == target || w.branch.as_deref() == Some(target)) {
+        return Ok(w.clone());
+    }
+    abs.filter(|_| nested)
+        .and_then(|abs| all.iter().filter(|w| abs.starts_with(&w.path)).max_by_key(|w| w.path.len()).cloned())
+        .ok_or_else(|| format!("워크트리를 찾지 못했다: {target}").into())
+}
+
 async fn resolve_repo(c: &Client, repo: Option<String>) -> Res<RepoInfo> {
     match repo {
         None => repo_here(c).await,
@@ -140,12 +153,7 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
             }
         }
         WtCmd::Rm { target, force, delete_branch } => {
-            let all = c.worktrees(None).await?;
-            let abs = std::fs::canonicalize(&target).ok().map(|p| p.to_string_lossy().into_owned());
-            let w = all
-                .iter()
-                .find(|w| Some(&w.path) == abs.as_ref() || w.path == target || w.branch.as_deref() == Some(target.as_str()))
-                .ok_or(format!("워크트리를 찾지 못했다: {target}"))?;
+            let w = &find_worktree(c, &target, false).await?;
             // 그 워크트리에서 돌던 세션을 먼저 끝낸다
             for s in c.list().await? {
                 if s.labels.get(WORKTREE_LABEL) == Some(&w.path) {

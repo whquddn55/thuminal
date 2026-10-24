@@ -1,9 +1,10 @@
 //! `thuminal` 명령.
 //!
 //! 데몬이 없으면 같은 폴더의 `thuminald` 를 떼어 띄운다. 세션 번호 자리에 `.` 을 쓰면
-//! 지금 셸이 들어 있는 세션(`THUMINAL_SESSION_ID`)을 가리킨다.
+//! 지금 셸이 들어 있는 세션(`THUMINAL_SESSION_ID`)을 가리킨다. 칸·탭 명령에서는 이 셸이 든 칸과 탭이다.
 
 mod attach;
+mod layout;
 mod workspace;
 
 use std::collections::BTreeMap;
@@ -30,6 +31,12 @@ enum Command {
     /// 터미널 세션 다루기
     #[command(subcommand, alias = "t")]
     Term(TermCmd),
+    /// 칸 나누기, 옮기기, 크기, 포커스 (p7 = 칸, `.` = 이 셸이 든 칸)
+    Pane(layout::PaneArgs),
+    /// 탭 만들기, 고르기, 옮기기 (t3 = 탭)
+    Tab(layout::TabArgs),
+    /// 탭 배치를 한 줄로 보고 적용하기 (예: 'row(claude, col(zsh, "npm run dev"):40%)')
+    Layout(layout::LayoutArgs),
     /// 저장소 등록
     #[command(subcommand)]
     Repo(workspace::RepoCmd),
@@ -226,6 +233,9 @@ async fn run(cli: Cli) -> Res<ExitCode> {
         Command::Term(cmd) => return term(cmd).await,
         Command::Repo(cmd) => workspace::repo(&connect().await?, cmd).await?,
         Command::Wt(cmd) => workspace::wt(&connect().await?, cmd).await?,
+        Command::Pane(args) => layout::pane(&connect().await?, args).await?,
+        Command::Tab(args) => layout::tab(&connect().await?, args).await?,
+        Command::Layout(args) => layout::layout(&connect().await?, args).await?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -235,15 +245,7 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
     match cmd {
         TermCmd::New { cwd, worktree, size, labels, json, command } => {
             let cwd = match worktree {
-                Some(w) => {
-                    let all = c.worktrees(None).await?;
-                    let abs = std::fs::canonicalize(&w).ok().map(|p| p.to_string_lossy().into_owned());
-                    let found = all
-                        .iter()
-                        .find(|x| Some(&x.path) == abs.as_ref() || x.path == w || x.branch.as_deref() == Some(w.as_str()))
-                        .ok_or(format!("워크트리를 찾지 못했다: {w}"))?;
-                    Some(found.path.clone())
-                }
+                Some(w) => Some(workspace::find_worktree(&c, &w, false).await?.path),
                 None => cwd,
             };
             let (cols, rows) = size.split_once('x').ok_or("--size 는 120x40 처럼 쓴다")?;
