@@ -48,6 +48,12 @@ enum Command {
     /// 에이전트 훅이 부르는 명령
     #[command(subcommand)]
     Agent(AgentCmd),
+    /// claude 에이전트 팀이 부르는 가짜 tmux (`shell/teams-bin/tmux` 가 넘긴다)
+    #[command(hide = true, disable_help_flag = true, disable_version_flag = true)]
+    Tmux {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -294,8 +300,44 @@ async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// 가짜 tmux: 명령 하나를 데몬에 넘기고 tmux 처럼 출력·종료 코드를 낸다
+async fn tmux(argv: Vec<String>) -> ExitCode {
+    let Some(session) = std::env::var("THUMINAL_SESSION_ID").ok().and_then(|s| s.parse::<u64>().ok()) else {
+        eprintln!("thuminal tmux: thuminal 세션 밖이다");
+        return ExitCode::from(1);
+    };
+    let env = ["PATH", "TMUX", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
+        .collect();
+    let request = thuminal_protocol::Request::Tmux {
+        session: SessionId(session),
+        pane: std::env::var("TMUX_PANE").ok(),
+        argv,
+        cwd: std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()),
+        env,
+    };
+    let reply = async { Client::connect(&Paths::default_home(), "tmux").await?.request(request).await };
+    match reply.await {
+        Ok(thuminal_protocol::Response::Tmux { stdout, stderr, code }) => {
+            print!("{stdout}");
+            eprint!("{stderr}");
+            ExitCode::from(code.clamp(0, 255) as u8)
+        }
+        Ok(other) => {
+            eprintln!("thuminal tmux: 뜻밖의 응답 {other:?}");
+            ExitCode::from(1)
+        }
+        Err(e) => {
+            eprintln!("thuminal tmux: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 async fn run(cli: Cli) -> Res<ExitCode> {
     match cli.command {
+        Command::Tmux { argv } => return Ok(tmux(argv).await),
         Command::Agent(AgentCmd::Report { kind, event }) => return Ok(agent_report(kind, event).await),
         Command::Daemon(DaemonCmd::Status { json }) => {
             match Client::connect(&Paths::default_home(), "cli").await {

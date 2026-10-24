@@ -41,7 +41,8 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - **workspace** 는 워크트리 절대 경로, `"floating"`(플로팅 패널), `"other"`(워크트리 밖) 중 하나다. `CreateSession` 으로 만든 세션은 꼬리표(`worktree`, `floating`)로 정한 workspace 의 새 탭에 들어간다.
 - **칸 내용**은 `terminal { session }` 또는 `doc { doc: map }` 이다. 문서 칸 종류는 `doc.kind` 로 가른다: `diff`, `file`, `browser`(`url`). 데몬은 doc 의 뜻을 모른다.
 - **세션 하나 = PTY 하나 + 엔진 하나**, 세션 전용 스레드(actor)가 엔진을 혼자 든다 (`daemon/src/session.rs`). 터미널 질의(커서 위치, OSC 10/11 색 등)는 데몬 엔진만 답한다. 앱 엔진은 답하지 않는다.
-- **에이전트 상태**는 claude 훅이 알려 준다. 훅 이벤트 → 상태 규칙은 `daemon/src/manager.rs` 의 `next_agent` 에 있고, 세션 환경의 `THUMINAL_HOME`·`THUMINAL_SESSION_ID`·`THUMINAL_CLI` 로 그 데몬에 닿는다. claude 는 셸 함수가 `--plugin-dir` 로 이 플러그인을 그 실행에만 얹는다 (`daemon/src/shell.rs`).
+- **에이전트 상태**는 claude 훅이 알려 준다. 훅 이벤트 → 상태 규칙은 `daemon/src/manager.rs` 의 `next_agent` 에 있고, 세션 환경의 `THUMINAL_HOME`·`THUMINAL_SESSION_ID`·`THUMINAL_CLI` 로 그 데몬에 닿는다. claude 는 셸 함수가 부르는 실행기 `shell/claude-launch` 가 `--plugin-dir` 로 이 플러그인을 그 실행에만 얹고, 에이전트 설정(권한 옵션·팀)을 붙인다 (`daemon/src/shell.rs`).
+- **에이전트 팀**: claude 에게 가짜 tmux 를 보여 팀원 칸 명령(`split-window`, `respawn-pane`, `kill-pane` …)을 데몬이 받는다 (`daemon/src/teams.rs`). 팀원은 칸 트리에 없는 세션이고(`layout=none`, 꼬리표 `team.*`), 화면은 리더 칸 위 팝업(목록 → 팀원 터미널)으로 그린다 (`ui/src/TeamPanel.tsx`). 터미널끼리 겹치면 `RenderTarget.layer` 가 큰 것을 위에 그린다.
 
 ### 화면 (`packages/ui`)
 

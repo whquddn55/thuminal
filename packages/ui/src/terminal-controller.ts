@@ -79,15 +79,16 @@ export class TerminalController {
     for (const chunk of this.pending) e.feed(chunk);
     this.pending = [];
     this.engine = e;
-    if (this.host) this.show(this.host);
+    if (this.host) this.show(this.host, undefined, this.layer);
   }
 
   /** 화면에 보인다. 엔진이 아직 없으면 붙은 뒤 보인다 */
-  show(host: HTMLElement, renderer?: Renderer): void {
+  show(host: HTMLElement, renderer?: Renderer, layer = 0): void {
     if (renderer) this.renderer = renderer;
     this.host = host;
+    this.layer = layer;
     if (!this.engine || !this.renderer || this.unrender) return;
-    this.unrender = this.renderer.add({ host, engine: this.engine });
+    this.unrender = this.renderer.add({ host, engine: this.engine, layer });
     this.mountInput(host);
     this.resizeObs = new ResizeObserver(() => this.scheduleFit());
     this.resizeObs.observe(host);
@@ -95,6 +96,8 @@ export class TerminalController {
   }
 
   private renderer: Renderer | null = null;
+  /** 겹칠 때 그릴 차례 (팝업 안 터미널은 1) */
+  private layer = 0;
 
   hide(): void {
     for (const f of this.cleanup) f();

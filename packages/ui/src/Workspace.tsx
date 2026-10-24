@@ -28,13 +28,14 @@ import { beginDrag, useDrag } from "./dnd";
 import { activeTab, dropRect, panesOf } from "./layout";
 import { cn } from "./lib/utils";
 import { NewTabMenu } from "./NewTabMenu";
-import { FLOATING_WORKSPACE, useApp, useModel } from "./store";
+import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
 import { StatusIndicator } from "./Sidebar";
+import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { type DocSpec, DocView } from "./viewers";
 
 type Surface = "main" | "floating";
 
-const RendererContext = createContext<{ renderer: Renderer | null; surface: Surface }>({ renderer: null, surface: "main" });
+export const RendererContext = createContext<{ renderer: Renderer | null; surface: Surface }>({ renderer: null, surface: "main" });
 
 /** 터미널 그림판 하나를 띄우고 그 안에 children 을 그린다. children 의 칸 자리는 모두 이 면 안에 있어야 한다 */
 export function TerminalSurface({ surface, className, children }: { surface: Surface; className?: string; children: React.ReactNode }) {
@@ -333,6 +334,9 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
   const session = useApp((s) => (pane.type === "terminal" ? s.sessions[pane.session] : undefined));
   const drop = useDrag((d) => (d.target?.kind === "pane" && d.target.pane === pane.id ? d.target.side : null));
   const dragging = useDrag((d) => d.source?.kind === "pane" && d.source.pane === pane.id);
+  const mates = useTeammates(pane.type === "terminal" ? pane.session : -1);
+  const teamOpen = useApp((s) => pane.type === "terminal" && teamView(s, pane.session).open);
+  // 머리 줄이 있으면 팀원 단추를 거기 둔다 (없으면 팀원 팝업 쪽이 칸 오른쪽 위에 띄운다)
   const id = { by: "id" as const, value: pane.id };
 
   return (
@@ -356,6 +360,18 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             </>
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
+          {mates.length > 0 && pane.type === "terminal" && (
+            <button
+              className="flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
+              title={`팀원 ${mates.map(mateName).join(", ")} — 눌러서 목록 ${teamOpen ? "닫기" : "보기"}`}
+              onClick={() => model.toggleTeam(pane.session)}
+            >
+              {mates.map((m) => (
+                <span key={m.id} className="size-1.5 rounded-full" style={{ background: mateColor(m) }} />
+              ))}
+              팀원 {mates.length}
+            </button>
+          )}
           <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
             <PaneButton title="오른쪽에 나누기 (⌘D)" onClick={() => void model.split("right", id)}>
               <SquareSplitHorizontalIcon />
@@ -374,9 +390,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
       )}
       <div className="relative min-h-0 min-w-0 flex-1 bg-terminal" data-drop-pane={pane.id}>
         {pane.type === "terminal" ? (
-          <TerminalMenu tab={tab} paneId={pane.id} session={pane.session}>
-            <TerminalPane ws={ws} paneId={pane.id} session={pane.session} focused={focused} />
-          </TerminalMenu>
+          <TeamTerminal ws={ws} tab={tab} paneId={pane.id} session={pane.session} focused={focused} header={header} />
         ) : pane.doc.kind === "browser" ? (
           <BrowserPane paneId={pane.id} url={pane.doc.url ?? "about:blank"} focused={focused} inFloating={ws === FLOATING_WORKSPACE} />
         ) : (
@@ -409,7 +423,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
 }
 
 /** 터미널 오른쪽 클릭 메뉴 (Orca 와 같은 항목) */
-function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; paneId: number; session: number; children: React.ReactNode }) {
+export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; paneId: number; session: number; children: React.ReactNode }) {
   const model = useModel();
   const [selected, setSelected] = useState(false);
   const id = { by: "id" as const, value: paneId };
@@ -474,6 +488,11 @@ function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; paneId: nu
   );
 }
 
+/** 칸이 그 탭의 포커스 칸인지 (팀원을 눌러도 리더 칸이 포커스가 되게 할 때 본다) */
+function isFocusedPane(model: ReturnType<typeof useModel>, ws: WorkspaceId, paneId: number) {
+  return activeTab(model.get().layouts[ws])?.focused === paneId;
+}
+
 function PaneButton({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -486,15 +505,32 @@ function PaneButton({ title, onClick, children }: { title: string; onClick: () =
   );
 }
 
-function TerminalPane({ ws, paneId, session, focused }: { ws: WorkspaceId; paneId: number; session: number; focused: boolean }) {
+/** 터미널 하나를 칸 자리에 그린다. 에이전트 팀원도 이것으로 그린다 (paneId 는 리더 칸) */
+export function TerminalPane({
+  ws,
+  paneId,
+  session,
+  focused,
+  onActivate,
+  layer = 0,
+}: {
+  ws: WorkspaceId;
+  paneId: number;
+  session: number;
+  focused: boolean;
+  /** 눌러서 키보드를 가져갈 때 (팀원·리더가 키보드를 주고받는다) */
+  onActivate?: () => void;
+  /** 다른 터미널 위에 뜨면 1 (팀원 팝업) */
+  layer?: number;
+}) {
   const model = useModel();
   const { renderer, surface } = useContext(RendererContext);
   const ref = useRef<HTMLDivElement>(null);
   const generation = useApp((s) => s.generation);
   // 키보드를 받을 칸: 이 면이 키보드를 받고, 이 칸이 포커스 칸이고, 창이 열려 있지 않을 때
   const keyboard = useApp((s) => focused && s.focusArea === surface && s.dialog === null);
-  const state = useRef({ focused, surface, ws });
-  state.current = { focused, surface, ws };
+  const state = useRef({ surface, ws, onActivate });
+  state.current = { surface, ws, onActivate };
 
   useLayoutEffect(() => {
     if (!renderer || !ref.current) return;
@@ -502,14 +538,15 @@ function TerminalPane({ ws, paneId, session, focused }: { ws: WorkspaceId; paneI
     c.onActivate = () => {
       const cur = state.current;
       if (model.get().focusArea !== cur.surface) model.setFocusArea(cur.surface);
-      if (!cur.focused) model.focusPane(paneId);
+      cur.onActivate?.();
+      if (!isFocusedPane(model, cur.ws, paneId)) model.focusPane(paneId);
     };
-    c.show(ref.current, renderer);
+    c.show(ref.current, renderer, layer);
     return () => {
       c.onActivate = null;
       c.hide();
     };
-  }, [model, renderer, session, paneId, generation]);
+  }, [model, renderer, session, paneId, generation, layer]);
 
   useEffect(() => {
     const c = model.controller(session);

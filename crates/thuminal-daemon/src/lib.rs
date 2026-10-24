@@ -10,6 +10,7 @@ pub mod persist;
 pub mod server;
 pub mod session;
 pub mod shell;
+pub mod teams;
 
 use std::sync::Arc;
 
@@ -64,7 +65,8 @@ impl Daemon {
         let workspace = Arc::new(Workspace::open(config.vcs, &paths.home));
         let layouts = Arc::new(layout::Layouts::load(&paths.home));
         info!(event = "daemon_started", pid = std::process::id(), socket = %socket.display(), engine = manager.engine_name());
-        Ok(Self { server: server::Server::new(manager, workspace, layouts), listener, paths, _lock: lock })
+        let teams = teams::Teams::new(manager.clone());
+        Ok(Self { server: server::Server::new(manager, workspace, layouts, teams), listener, paths, _lock: lock })
     }
 
     pub async fn run(self) {
@@ -74,10 +76,12 @@ impl Daemon {
         server.manager.restore(persist.take_previous());
         // 배치의 옛 세션 번호를 새 번호로 바꾸고, 칸에 없는 세션을 넣는다
         server.layouts.restore(&server.manager);
+        let teams = tokio::spawn(server.teams.clone().watch());
         let saver = tokio::spawn(save_loop(server.manager.clone(), server.layouts.clone(), persist.clone()));
 
         server.clone().serve(listener).await;
         saver.abort();
+        teams.abort();
         // 저장 작업이 다른 스레드에서 쓰는 중일 수 있다. 끝난 뒤에 지우거나 남긴다
         let _ = saver.await;
         let mode = *server.stop_mode.lock().unwrap();

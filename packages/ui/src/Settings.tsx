@@ -1,9 +1,10 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지.
-// 테마를 누르면 바로 적용된다 (따로 저장 단추가 없다).
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션.
+// 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
 import { CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import type { AgentSettings } from "@thuminal/term-core";
 import { type TerminalTheme, themes } from "@thuminal/themes";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
@@ -85,6 +86,53 @@ function ThemeList({ scheme, selected, onPick }: { scheme: "dark" | "light"; sel
   );
 }
 
+const Code = ({ children }: { children: React.ReactNode }) => <code className="rounded bg-muted px-1">{children}</code>;
+
+function Toggle({ checked, onChange, title, children }: { checked: boolean; onChange: (v: boolean) => void; title: string; children: React.ReactNode }) {
+  return (
+    <label className="flex items-start gap-3 rounded-lg border p-3 text-xs">
+      <Switch className="mt-0.5" checked={checked} onCheckedChange={onChange} />
+      <span className="flex flex-col gap-1">
+        <span className="text-sm">{title}</span>
+        <span className="text-muted-foreground">{children}</span>
+      </span>
+    </label>
+  );
+}
+
+/** 에이전트 설정. 데몬이 들고 있어 앱을 꺼도 CLI·셸에서 띄우는 claude 에 그대로 쓰인다 */
+function AgentSection() {
+  const model = useModel();
+  const host = model.services.host;
+  const [settings, setSettings] = useState<AgentSettings | null>(null);
+  useEffect(() => {
+    void host.getAgentSettings().then(setSettings, model.fail);
+  }, [host, model]);
+  if (!settings) return null;
+  const change = (next: AgentSettings) => {
+    setSettings(next);
+    void host.setAgentSettings(next).then(setSettings, model.fail);
+  };
+  return (
+    <div className="flex flex-col gap-3">
+      <Toggle
+        checked={settings.claude.skip_permissions}
+        onChange={(v) => change({ ...settings, claude: { ...settings.claude, skip_permissions: v } })}
+        title="claude 를 권한 확인 없이 띄우기"
+      >
+        thuminal 안에서 띄우는 claude 에 <Code>--dangerously-skip-permissions</Code> 를 붙인다. 파일 수정·명령 실행을 묻지 않고 바로 한다.
+      </Toggle>
+      <Toggle checked={settings.claude.teams} onChange={(v) => change({ ...settings, claude: { ...settings.claude, teams: v } })} title="에이전트 팀 쓰기">
+        claude 에게 팀을 만들라고 시키면 팀원 claude 를 띄운다 (<Code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS</Code>). 리더 칸의 [팀원 N] 단추를 누르면
+        팀원 목록이 팝업으로 뜨고, 이름을 누르면 그 팀원 터미널을 본다. 시키지 않으면 아무 일도 하지 않는다.
+      </Toggle>
+      <p className="text-xs text-muted-foreground">
+        바꾸면 다음에 띄우는 claude 부터 적용된다 (이미 열린 셸에서 치는 <Code>claude</Code> 도). 지금 돌고 있는 claude 는 다시 띄워야 한다.
+      </p>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const model = useModel();
   const open = useApp((s) => s.dialog?.kind === "settings");
@@ -92,6 +140,7 @@ export function SettingsDialog() {
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
+  const [section, setSection] = useState<"theme" | "agent">("theme");
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 
   return (
@@ -99,46 +148,64 @@ export function SettingsDialog() {
       <DialogContent className="flex h-[min(640px,85vh)] flex-col gap-4 sm:max-w-[780px]">
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
-          <DialogDescription>테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다.</DialogDescription>
+          <DialogDescription>
+            {section === "theme" ? "테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다." : "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."}
+          </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">모양</Label>
-            <Segmented
-              value={theme.mode}
-              options={[
-                ["system", "시스템 따라"],
-                ["dark", "다크"],
-                ["light", "라이트"],
-              ]}
-              onChange={(mode) => model.setTheme({ mode })}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <Switch checked={theme.matchTerminal} onCheckedChange={(v) => model.setTheme({ matchTerminal: v })} />
-            화면 색도 터미널 테마에 맞추기
-          </label>
+        <div className="self-start">
+          <Segmented
+            value={section}
+            options={[
+              ["theme", "테마"],
+              ["agent", "에이전트"],
+            ]}
+            onChange={setSection}
+          />
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.1fr] gap-4">
-          <div className="flex min-h-0 flex-col gap-2">
-            <Segmented
-              value={editing}
-              options={[
-                ["dark", "다크 테마"],
-                ["light", "라이트 테마"],
-              ]}
-              onChange={setEditing}
-            />
-            <ThemeList scheme={editing} selected={theme[editing]} onPick={(id) => model.setTheme({ [editing]: id })} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="text-xs text-muted-foreground">
-              미리보기: <span className="text-foreground">{picked.name}</span>
-              {picked.id !== now.id && <span> (지금은 {now.scheme === "dark" ? "다크" : "라이트"} 모양이라 {now.name} 를 쓴다)</span>}
+        {section === "agent" ? (
+          <AgentSection />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground">모양</Label>
+                <Segmented
+                  value={theme.mode}
+                  options={[
+                    ["system", "시스템 따라"],
+                    ["dark", "다크"],
+                    ["light", "라이트"],
+                  ]}
+                  onChange={(mode) => model.setTheme({ mode })}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <Switch checked={theme.matchTerminal} onCheckedChange={(v) => model.setTheme({ matchTerminal: v })} />
+                화면 색도 터미널 테마에 맞추기
+              </label>
             </div>
-            <Preview theme={picked} />
-          </div>
-        </div>
+            <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.1fr] gap-4">
+              <div className="flex min-h-0 flex-col gap-2">
+                <Segmented
+                  value={editing}
+                  options={[
+                    ["dark", "다크 테마"],
+                    ["light", "라이트 테마"],
+                  ]}
+                  onChange={setEditing}
+                />
+                <ThemeList scheme={editing} selected={theme[editing]} onPick={(id) => model.setTheme({ [editing]: id })} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="text-xs text-muted-foreground">
+                  미리보기: <span className="text-foreground">{picked.name}</span>
+                  {picked.id !== now.id && <span> (지금은 {now.scheme === "dark" ? "다크" : "라이트"} 모양이라 {now.name} 를 쓴다)</span>}
+                </div>
+                <Preview theme={picked} />
+              </div>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

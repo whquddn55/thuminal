@@ -240,6 +240,15 @@ pub struct FileContent {
 /// 세션 꼬리표 중 워크트리 경로를 담는 키. 데몬이 세션을 만들 때 시작 폴더로 채운다
 pub const WORKTREE_LABEL: &str = "worktree";
 
+/// 에이전트 팀원 세션 꼬리표. 팀원은 칸에 넣지 않고(`layout=none`) 리더 세션에 딸려 그린다
+pub const TEAM_LEADER_LABEL: &str = "team.leader";
+/// 팀원 이름 (claude 가 `select-pane -T` 로 붙인다)
+pub const TEAM_NAME_LABEL: &str = "team.name";
+/// 팀원 색 이름 (claude 가 tmux 색으로 준다: red, blue, colour208 …)
+pub const TEAM_COLOR_LABEL: &str = "team.color";
+/// claude 가 아는 팀원 칸 번호 (`%12`). 팀원을 다시 띄워 세션이 바뀌어도 그대로다
+pub const TEAM_PANE_LABEL: &str = "team.pane";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CreateSession {
     /// 비우면 사용자 로그인 셸
@@ -398,6 +407,23 @@ pub enum Request {
     GetTerminalColors,
     /// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다 (새 탭 메뉴가 설치된 에이전트를 보이려고 쓴다)
     FindCommands { names: Vec<String> },
+    GetAgentSettings,
+    /// 에이전트를 띄울 때 붙일 옵션을 바꾼다. 다음에 띄우는 에이전트부터 적용된다 (이미 뜬 셸에서 치는 `claude` 도)
+    SetAgentSettings { settings: AgentSettings },
+    /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
+    Tmux {
+        /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
+        session: SessionId,
+        /// `TMUX_PANE`
+        #[serde(default)]
+        pane: Option<String>,
+        argv: Vec<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        /// 팀원에게 물려줄 부른 쪽 환경 (PATH, TMUX 등)
+        #[serde(default)]
+        env: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -422,6 +448,8 @@ pub enum Response {
     LayoutResult { layouts: Vec<WorkspaceLayout>, created: Vec<PaneId> },
     TerminalColors { colors: Option<TerminalColors> },
     Commands { found: Vec<String> },
+    AgentSettings { settings: AgentSettings },
+    Tmux { stdout: String, stderr: String, code: i32 },
     Ok,
 }
 
@@ -485,6 +513,28 @@ pub enum ServerMessage {
 pub enum ResponseResult {
     Ok(Response),
     Err(ErrorBody),
+}
+
+/// 데몬이 에이전트를 띄울 때 쓰는 설정 (`agent-settings.json`)
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSettings {
+    #[serde(default)]
+    pub claude: ClaudeSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClaudeSettings {
+    /// `--dangerously-skip-permissions` 를 붙인다 (기본 켬)
+    pub skip_permissions: bool,
+    /// 에이전트 팀을 켜고, 팀원을 리더 칸에 딸린 thuminal 터미널로 연다 (기본 켬)
+    pub teams: bool,
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self { skip_permissions: true, teams: true }
+    }
 }
 
 #[cfg(test)]

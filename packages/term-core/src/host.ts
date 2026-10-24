@@ -16,6 +16,7 @@ import type {
   SessionInfo,
   SnapshotFormat,
   TerminalColors,
+  AgentSettings,
   WorkspaceLayout,
   WorktreeInfo,
 } from "./protocol";
@@ -137,6 +138,9 @@ export interface HostApi {
   /** 데몬 엔진의 기본 터미널 색 (아직 정한 적 없으면 null) */
   getTerminalColors(): Promise<TerminalColors | null>;
   setTerminalColors(colors: TerminalColors): Promise<void>;
+  /** 에이전트를 띄울 때 붙일 옵션 (데몬이 들고 있다) */
+  getAgentSettings(): Promise<AgentSettings>;
+  setAgentSettings(settings: AgentSettings): Promise<AgentSettings>;
   /** 사용자 로그인 셸 PATH 에 있는 명령만 돌려준다 (설치된 에이전트 찾기) */
   findCommands(names: string[]): Promise<string[]>;
   /**

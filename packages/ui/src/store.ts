@@ -98,11 +98,40 @@ export interface AppState {
   recent: WorkspaceId[];
   /** 만드는 중인 워크트리 */
   creating: { repo: string; branch: string }[];
+  /** 에이전트 팀 패널을 펼쳤는지, 어느 팀원이 키보드를 받는지 (리더 세션마다) */
+  teams: Record<SessionId, TeamView>;
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
   generation: number;
   error: string | null;
   notice: string | null;
 }
+
+/** 에이전트 팀 팝업 (리더 세션마다). 목록 → 팀원 하나(터미널) → 뒤로 목록 */
+export interface TeamView {
+  open: boolean;
+  /** 팝업에 띄운 팀원. null 이면 목록 */
+  mate: SessionId | null;
+  /** 팝업의 팀원이 키보드를 받는다 (리더를 누르면 리더로 돌아간다) */
+  keys: boolean;
+}
+
+/** 팀원 세션 꼬리표 (데몬 teams.rs 와 같다) */
+export const TEAM_LEADER_LABEL = "team.leader";
+export const TEAM_NAME_LABEL = "team.name";
+export const TEAM_COLOR_LABEL = "team.color";
+export const TEAM_PANE_LABEL = "team.pane";
+
+/** 리더 세션의 팀원들 (claude 가 만든 차례대로) */
+export function teammatesOf(sessions: Record<SessionId, SessionInfo>, leader: SessionId): SessionInfo[] {
+  const order = (s: SessionInfo) => Number(s.labels[TEAM_PANE_LABEL]?.slice(1)) || s.id;
+  return Object.values(sessions)
+    .filter((s) => s.labels[TEAM_LEADER_LABEL] === String(leader))
+    .sort((a, b) => order(a) - order(b));
+}
+
+const DEFAULT_TEAM_VIEW: TeamView = { open: false, mate: null, keys: false };
+/** 늘 같은 객체를 돌려준다 (zustand 선택자로 쓴다) */
+export const teamView = (s: AppState, leader: SessionId): TeamView => s.teams[leader] ?? DEFAULT_TEAM_VIEW;
 
 export const worktreeTitle = (w: WorktreeInfo) => w.name || w.branch || w.path.split("/").pop() || w.path;
 
@@ -150,6 +179,7 @@ export class AppModel {
       seen: loadJson<Record<string, number>>(SEEN_KEY, {}),
       recent: JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[],
       creating: [],
+      teams: {},
       generation: 0,
       error: null,
       notice: null,
@@ -407,6 +437,28 @@ export class AppModel {
   setPanel = (p: Panel) => this.set((s) => ({ panel: s.panel === p ? null : p }));
   setDialog = (d: Dialog) => this.set({ dialog: d });
   setFocusArea = (a: AppState["focusArea"]) => this.set({ focusArea: a });
+
+  // ---- 에이전트 팀 (팀원은 칸이 아니라 리더 칸에 딸린 패널에 그린다) ----
+
+  private setTeam = (leader: SessionId, f: (v: TeamView) => TeamView) =>
+    this.set((s) => {
+      const v = teamView(s, leader);
+      const next = f(v);
+      return next.open === v.open && next.mate === v.mate && next.keys === v.keys ? {} : { teams: { ...s.teams, [leader]: next } };
+    });
+
+  /** 팀원 팝업을 열고 닫는다. 열면 목록부터 */
+  toggleTeam = (leader: SessionId, open?: boolean) =>
+    this.setTeam(leader, (v) => {
+      const o = open ?? !v.open;
+      return o ? { open: true, mate: null, keys: false } : DEFAULT_TEAM_VIEW;
+    });
+
+  /** 팝업에 팀원 하나(터미널)를 띄우고 키보드를 준다. null 이면 목록으로 돌아간다 */
+  showTeammate = (leader: SessionId, mate: SessionId | null) => this.setTeam(leader, () => ({ open: true, mate, keys: mate !== null }));
+
+  /** 키보드를 팝업의 팀원(true) 또는 리더(false)에게 준다 */
+  teamKeys = (leader: SessionId, toMate: boolean) => this.setTeam(leader, (v) => ({ ...v, keys: toMate && v.mate !== null }));
 
   toggleSidebar = () => {
     const open = !this.get().sidebarOpen;

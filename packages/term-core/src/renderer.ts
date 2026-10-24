@@ -20,6 +20,8 @@ export interface RenderTarget {
   /** 이 터미널이 그려질 자리 (크기와 위치를 렌더러가 읽는다) */
   readonly host: HTMLElement;
   readonly engine: TerminalEngine;
+  /** 자리가 겹칠 때 위에 그릴 차례. 큰 것이 위다 (기본 0). 팝업 안 터미널처럼 다른 터미널 위에 뜨는 것에 준다 */
+  readonly layer?: number;
 }
 
 export interface Renderer {

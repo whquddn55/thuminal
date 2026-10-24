@@ -19,6 +19,7 @@ import type {
   LayoutOp,
   LayoutResult,
   TerminalColors,
+  AgentSettings,
   WorkspaceLayout,
   DaemonEvent,
   DaemonInfo,
@@ -189,6 +190,14 @@ export class TauriHostApi implements HostApi {
 
   setTerminalColors(colors: TerminalColors): Promise<void> {
     return req({ type: "set_terminal_colors", colors });
+  }
+
+  getAgentSettings(): Promise<AgentSettings> {
+    return req<AgentSettings>({ type: "get_agent_settings" }, (r) => r.settings);
+  }
+
+  setAgentSettings(settings: AgentSettings): Promise<AgentSettings> {
+    return req<AgentSettings>({ type: "set_agent_settings", settings }, (r) => r.settings);
   }
 
   findCommands(names: string[]): Promise<string[]> {

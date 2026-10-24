@@ -17,6 +17,7 @@ use thuminal_workspace::{Workspace, WorkspaceError};
 
 use crate::layout::Layouts;
 use crate::manager::Manager;
+use crate::teams::{Call, Teams};
 use crate::session::now_ms;
 
 /// 데몬이 내려갈 때 세션 기록을 어떻게 할지
@@ -33,14 +34,15 @@ pub struct Server {
     pub stop_mode: std::sync::Mutex<StopMode>,
     pub workspace: Arc<Workspace>,
     pub layouts: Arc<Layouts>,
+    pub teams: Arc<Teams>,
     pub shutdown: Arc<Notify>,
     pub started_at: u64,
     next_conn: AtomicU64,
 }
 
 impl Server {
-    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>, layouts: Arc<Layouts>) -> Arc<Self> {
-        Arc::new(Self { manager, workspace, layouts, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
+    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>, layouts: Arc<Layouts>, teams: Arc<Teams>) -> Arc<Self> {
+        Arc::new(Self { manager, workspace, layouts, teams, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
     }
 
     pub async fn serve(self: Arc<Self>, listener: UnixListener) {
@@ -247,6 +249,15 @@ impl Server {
             }
             Request::SetTerminalColors { colors } => m.set_colors(colors).map(|_| Response::Ok),
             Request::GetTerminalColors => Ok(Response::TerminalColors { colors: m.colors() }),
+            Request::Tmux { session, pane, argv, cwd, env } => {
+                let out = self.teams.call(Call { session, pane, argv, cwd, env }).await;
+                Ok(Response::Tmux { stdout: out.stdout, stderr: out.stderr, code: out.code })
+            }
+            Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings() }),
+            Request::SetAgentSettings { settings } => {
+                m.set_agent_settings(settings.clone());
+                Ok(Response::AgentSettings { settings })
+            }
             Request::FindCommands { names } => tokio::task::spawn_blocking(move || crate::shell::find_commands(&names))
                 .await
                 .map(|found| Response::Commands { found })
@@ -418,6 +429,9 @@ fn request_kind(r: &Request) -> &'static str {
         Request::SetTerminalColors { .. } => "set_terminal_colors",
         Request::GetTerminalColors => "get_terminal_colors",
         Request::FindCommands { .. } => "find_commands",
+        Request::Tmux { .. } => "tmux",
+        Request::GetAgentSettings => "get_agent_settings",
+        Request::SetAgentSettings { .. } => "set_agent_settings",
     }
 }
 

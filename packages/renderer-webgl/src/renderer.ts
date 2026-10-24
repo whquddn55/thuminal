@@ -109,6 +109,10 @@ class Atlas {
   }
 }
 
+function overlaps(a: NonNullable<Slot["rect"]>, b: NonNullable<Slot["rect"]>): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
 export class WebglRenderer implements Renderer {
   readonly metrics: CellMetrics;
   private readonly canvas: HTMLCanvasElement;
@@ -249,8 +253,12 @@ export class WebglRenderer implements Renderer {
       this.atlas.overflowed = false;
       this.doLayout();
     }
-    for (const s of this.slots) {
+    // 낮은 층부터 그린다. 아래층이 다시 그린 자리와 겹치는 위층은 바뀐 것이 없어도 다시 그려 덮는다
+    const drawn: { layer: number; rect: NonNullable<Slot["rect"]> }[] = [];
+    const ordered = [...this.slots].sort((a, b) => (a.target.layer ?? 0) - (b.target.layer ?? 0));
+    for (const s of ordered) {
       if (!s.rect) continue;
+      const layer = s.target.layer ?? 0;
       const e = s.target.engine;
       if (s.cols !== e.cols || s.rows !== e.rows) {
         s.cols = e.cols;
@@ -259,8 +267,11 @@ export class WebglRenderer implements Renderer {
         for (let y = 0; y < e.rows; y++) for (let x = 0; x < e.cols; x++) s.inst[(y * e.cols + x) * 4] = x | (y << 16);
         e.invalidate();
       }
-      if (!e.scan(s.sink)) continue;
+      const changed = e.scan(s.sink);
+      const covered = drawn.some((d) => d.layer < layer && overlaps(d.rect, s.rect!));
+      if (!changed && !covered) continue;
       this.draw(s);
+      drawn.push({ layer, rect: s.rect });
     }
   }
 

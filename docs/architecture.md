@@ -58,7 +58,8 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 
 - **워크트리**: 저장소 목록(`workspace.json`)과 워크트리 만들기/지우기도 데몬이 맡는다. 그래야 CLI 로 만든 워크트리가 앱에도 바로 나타난다 (`workspace_changed` 이벤트). 새 워크트리는 저장소 옆 `<저장소>-thm-wt-<브랜치>` 에 만든다. 세션을 만들 때 시작 폴더가 워크트리 안이면 `worktree` 꼬리표를 단다.
   - 지울 때 `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도 `git branch -D`) 쓴다. `force_branch` 없이는 `git branch -d` 로 지우고, git 이 거절하면 브랜치를 남긴 채 워크트리만 지우고 성공으로 답한다. 답 `text` 에 "브랜치 X 는 합치지 않은 커밋이 있어 남겼다" 같은 까닭을 싣는다 (알릴 것이 없으면 빈 글).
-- **셸 통합**: 데몬이 기본 셸을 띄울 때 zsh 는 `ZDOTDIR`, bash 는 `--rcfile` 로 thuminal 파일(`shell/`)을 먼저 읽힌다. 그 파일은 사용자 설정을 그대로 다 읽은 뒤 `claude` 함수를 더한다. 함수는 `--plugin-dir` 로 thuminal claude 플러그인을 그 실행에만 얹는다.
+- **셸 통합**: 데몬이 기본 셸을 띄울 때 zsh 는 `ZDOTDIR`, bash 는 `--rcfile` 로 thuminal 파일(`shell/`)을 먼저 읽힌다. 그 파일은 사용자 설정을 그대로 다 읽은 뒤 `claude` 함수를 더한다. 함수는 실행기 `shell/claude-launch` 를 부르고, 실행기가 `--plugin-dir` 로 thuminal claude 플러그인을 그 실행에만 얹는다. 실행기는 에이전트 설정(`agent-settings.json`, 설정 창 · 에이전트)이 바뀔 때마다 다시 쓴다: 권한 확인 없이(`--dangerously-skip-permissions`, 기본 켬), 에이전트 팀(기본 켬). `term new -- claude …` 도 실행기로 띄운다.
+- **에이전트 팀**: 실행기가 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 과 함께 `TMUX`·`TMUX_PANE=%<세션>` 을 넣고 가짜 `tmux`(`shell/teams-bin/tmux` → `thuminal tmux`)를 claude 의 PATH 앞에 둔다 (진짜 tmux 안이면 그대로 둔다). claude 는 tmux 안이라고 믿고 팀원마다 `split-window … -- cat` → `set-option window-style fg=<색>` → `select-pane -T <이름>` → `respawn-pane -k -- <팀원 claude>` 를, 끝나면 `kill-pane` 을 부른다. 데몬(`teams.rs`)은 이것을 팀원 세션으로 흉내 낸다. 팀원은 칸 트리에 넣지 않고(`layout=none`) 꼬리표 `team.leader`·`team.pane`(claude 가 아는 칸 번호, 다시 띄워도 그대로)·`team.name`·`team.color` 로 리더에 묶는다. 리더 세션을 지우면 팀원도 지우고, 팀원이 코드 0 으로 끝나면 지운다. 팀원은 되살리지 않는다. 화면은 리더 터미널 폭을 그대로 두고, [팀원 N] 단추로 리더 칸 위에 팝업을 띄운다: 팀원 이름 목록 → 이름을 누르면 그 팀원 터미널 → [← 목록] (`ui/src/TeamPanel.tsx`). 팝업 안 터미널은 렌더러의 위층(`RenderTarget.layer`)이라, 아래층 리더가 다시 그린 프레임에는 겹치는 위층을 이어 다시 그린다.
 - **에이전트**: claude 훅이 `thuminal agent report` 로 상태(일하는 중, 입력 기다림, 사용자 부름)와 claude 세션 id 를 알린다. 세션 정보의 `agent` 에 담긴다. 상태 규칙은 Orca 의 claude 훅 처리를 따른다.
   - 거는 훅: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, Notification, Stop, StopFailure, SessionEnd.
   - 일하는 중: UserPromptSubmit, PreToolUse, PostToolUse(Failure). 부름: PermissionRequest, 묻는 도구(AskUserQuestion)의 PreToolUse, Notification 의 `notification_type` 이 `permission_prompt`/`elicitation_dialog`. 기다림: Stop, StopFailure, SessionStart(compact 말고), Notification `idle_prompt`(일을 마치고 60초쯤 쉬면 온다. 부름이 아니다). 그 밖의 Notification 과 모르는 훅은 상태를 바꾸지 않는다. 권한을 승인하면 PostToolUse 가 와서 다시 일하는 중이 된다. 거절하면 훅이 오지 않아 다음 프롬프트까지 부름으로 남는다.
@@ -91,6 +92,8 @@ sessions-v1.json    되살릴 세션 정보
 sessions/<번호>.vt  되살릴 화면 저장본
 layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 안에 쓴다. daemon stop 이면 지운다)
 terminal-colors.json 터미널 기본색 (앱 테마)
+agent-settings.json  에이전트를 띄울 때 붙일 옵션 (설정 창 · 에이전트)
+shell/              셸 통합 파일, claude 실행기(claude-launch), 에이전트 팀용 가짜 tmux(teams-bin/tmux)
 ```
 
 ## CLI (`thuminal`)

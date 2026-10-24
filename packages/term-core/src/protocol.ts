@@ -210,6 +210,17 @@ export interface LayoutResult {
   created: PaneId[];
 }
 
+// ---- 에이전트 설정 (데몬이 에이전트를 띄울 때 붙이는 옵션, `agent-settings.json`) ----
+
+export interface AgentSettings {
+  claude: {
+    /** `--dangerously-skip-permissions` 를 붙인다 (기본 켬) */
+    skip_permissions: boolean;
+    /** 에이전트 팀을 켜고 팀원을 리더 칸에 딸린 터미널로 연다 (기본 켬) */
+    teams: boolean;
+  };
+}
+
 // ---- 터미널 색 (데몬 엔진의 기본색. 프로그램 질의에 이 색으로 답한다) ----
 
 export type ColorScheme = "dark" | "light";

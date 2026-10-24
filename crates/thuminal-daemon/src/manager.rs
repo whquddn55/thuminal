@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use thuminal_engine::EngineFactory;
 use thuminal_protocol::{
-    AgentInfo, AgentState, CreateSession, ErrorBody, ErrorCode, Event, ScreenFormat, SessionId, SessionInfo, SessionState,
-    SnapshotFormat, TerminalColors,
+    AgentInfo, AgentSettings, AgentState, CreateSession, ErrorBody, ErrorCode, Event, ScreenFormat, SessionId, SessionInfo, SessionState,
+    SnapshotFormat, TEAM_LEADER_LABEL, TEAM_PANE_LABEL, TerminalColors,
 };
 use thuminal_pty::{PtySystem, SpawnSpec};
 use tokio::sync::{broadcast, oneshot};
@@ -18,8 +18,8 @@ use crate::session::{self, Cmd, ConnId, Outbox, Restore, SessionHandle, now_ms};
 use crate::shell::ShellIntegration;
 
 /// 데몬 환경에서 셸로 물려주지 않을 변수 앞머리.
-/// 데몬을 띄운 터미널(예: Orca 안의 셸)의 정보가 새 세션에 새지 않게 한다.
-const SCRUBBED_ENV_PREFIXES: &[&str] = &["ORCA_", "THUMINAL_", "CLAUDE_CODE_", "CLAUDECODE"];
+/// 데몬을 띄운 터미널(예: Orca 안의 셸, tmux)의 정보가 새 세션에 새지 않게 한다.
+const SCRUBBED_ENV_PREFIXES: &[&str] = &["ORCA_", "THUMINAL_", "CLAUDE_CODE_", "CLAUDECODE", "TMUX"];
 
 /// 훅 알림 하나 (`Request::ReportAgent` 의 필드)
 #[derive(Debug, Clone, Default)]
@@ -220,6 +220,12 @@ impl Manager {
         let mut command = req.command.clone();
         self.shell.apply(&mut command, &mut env);
         env.extend(req.env.clone());
+        // 에이전트 팀원: claude 가 아는 칸 번호를 정해 `TMUX_PANE` 으로 준다 (teams.rs)
+        let mut req = req;
+        if req.labels.contains_key(TEAM_LEADER_LABEL) {
+            let pane = req.labels.entry(TEAM_PANE_LABEL.into()).or_insert_with(|| format!("%{}", id.0)).clone();
+            env.insert("TMUX_PANE".into(), pane);
+        }
 
         let cols = req.cols.max(2);
         let rows = req.rows.max(2);
@@ -365,6 +371,10 @@ impl Manager {
     /// 이전 화면을 먼저 그리고, claude 세션이 있었으면 `claude --resume` 을 입력한다.
     pub fn restore(&self, previous: Vec<(SessionInfo, Option<Vec<u8>>)>) {
         for (old, replay) in previous {
+            // 에이전트 팀원은 리더 claude 가 띄운 것이라 되살리지 않는다
+            if old.labels.contains_key(TEAM_LEADER_LABEL) {
+                continue;
+            }
             let input = old
                 .agent
                 .as_ref()
@@ -409,6 +419,14 @@ impl Manager {
         info!(event = "terminal_colors_set", scheme = ?colors.scheme, palette = colors.palette.len());
         let _ = self.events.send(Event::TerminalColorsChanged { colors });
         Ok(())
+    }
+
+    pub fn agent_settings(&self) -> AgentSettings {
+        self.shell.settings()
+    }
+
+    pub fn set_agent_settings(&self, settings: AgentSettings) {
+        self.shell.set_settings(settings);
     }
 
     pub fn kill_all(&self) {
