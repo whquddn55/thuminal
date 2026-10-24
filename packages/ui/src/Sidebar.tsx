@@ -431,7 +431,15 @@ function WorkspaceCard({
         <div className="flex shrink-0 items-start justify-center pt-[2px]">
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="group/unread relative flex size-4 items-center justify-center rounded">
+              <span
+                className="group/unread relative flex size-4 items-center justify-center rounded hover:bg-accent/80"
+                onClick={(e) => {
+                  // 안 읽음이면 눌러서 읽음으로 돌린다 (그 워크트리로 가지 않는다)
+                  if (!unread) return;
+                  e.stopPropagation();
+                  model.markRead(ws);
+                }}
+              >
                 {unread ? (
                   <BellSimpleRingingIcon weight="fill" className="size-[13px] text-amber-500 drop-shadow-sm" />
                 ) : (

@@ -52,6 +52,8 @@ export type Dialog =
   | { kind: "delete-worktree"; worktree: WorktreeInfo }
   | { kind: "jump" }
   | { kind: "settings" }
+  /** 되돌릴 수 없는 일을 하기 전에 묻는 창 */
+  | { kind: "confirm"; title: string; body: string; action: string; run: () => void }
   | null;
 
 export interface FloatingRect {
@@ -85,10 +87,14 @@ export interface AppState {
   /** 시스템 다크 모드 여부 (테마 설정이 시스템 따라가기일 때 쓴다) */
   systemDark: boolean;
   sidebarWidth: number;
+  /** ⌘B 로 사이드바를 접는다 */
+  sidebarOpen: boolean;
   /** 로그인 셸 PATH 에서 찾은 에이전트 명령 (새 탭 메뉴에 보인다) */
   agents: string[];
-  /** 워크스페이스마다 마지막으로 본 때 (ms) */
+  /** 워크스페이스마다 마지막으로 본 때 (ms). 다시 켜도 남는다 */
   seen: Record<WorkspaceId, number>;
+  /** 최근에 고른 워크스페이스 (앞이 가장 최근). ⌘J 빈 검색이 이 순서로 보인다 */
+  recent: WorkspaceId[];
   /** 만드는 중인 워크트리 */
   creating: { repo: string; branch: string }[];
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
@@ -100,6 +106,9 @@ export const worktreeTitle = (w: WorktreeInfo) => w.name || w.branch || w.path.s
 
 const FLOATING_KEY = "thuminal.floating";
 const SIDEBAR_KEY = "thuminal.sidebarWidth";
+const SEEN_KEY = "thuminal.seen";
+const SIDEBAR_OPEN_KEY = "thuminal.sidebarOpen";
+const RECENT_KEY = "thuminal.recent";
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -134,8 +143,10 @@ export class AppModel {
       theme: loadThemeSettings(),
       systemDark: media.matches,
       sidebarWidth: Number(localStorage.getItem(SIDEBAR_KEY)) || 280,
+      sidebarOpen: localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0",
       agents: [],
-      seen: {},
+      seen: loadJson<Record<string, number>>(SEEN_KEY, {}),
+      recent: JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[],
       creating: [],
       generation: 0,
       error: null,
@@ -154,10 +165,12 @@ export class AppModel {
     this.unsubscribe = host.onEvent((e) => this.onEvent(e));
     try {
       await this.reloadAll();
-      // 처음에는 터미널이 있는 첫 워크트리를 고른다
-      const { worktrees, layouts } = this.get();
+      // 처음에는 마지막에 보던 워크트리를 고른다. 없으면 터미널이 있는 첫 워크트리
+      const { worktrees, layouts, recent } = this.get();
+      const last = recent.find((ws) => ws === OTHER_WORKSPACE || worktrees.some((w) => w.path === ws));
       const first = worktrees.find((w) => (layouts[w.path]?.tabs.length ?? 0) > 0) ?? worktrees[0];
-      if (first) this.set({ active: first.path });
+      if (last) this.set({ active: last });
+      else if (first) this.set({ active: first.path });
     } catch (e) {
       this.fail(e);
     }
@@ -311,21 +324,41 @@ export class AppModel {
     return sessionsOf(s.layouts[ws]).some((id) => (s.sessions[id]?.last_output_at ?? 0) > seen + 1500);
   }
 
-  private markSeen() {
-    const { active } = this.get();
-    this.set((s) => ({ seen: { ...s.seen, [active]: Date.now() } }));
+  private markSeen(ws: WorkspaceId = this.get().active) {
+    this.set((s) => ({ seen: { ...s.seen, [ws]: Date.now() } }));
+    localStorage.setItem(SEEN_KEY, JSON.stringify(this.get().seen));
   }
+
+  /** 상태 칸을 눌러 읽음으로 돌린다 */
+  markRead = (ws: WorkspaceId) => this.markSeen(ws);
 
   select = (ws: WorkspaceId) => {
     this.markSeen();
-    this.set({ active: ws, focusArea: "main" });
+    const recent = [ws, ...this.get().recent.filter((x) => x !== ws)].slice(0, 30);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+    this.set({ active: ws, focusArea: "main", recent });
     this.markSeen();
     void this.refreshStatus(ws);
+  };
+
+  /** ⌘⇧↑ ↓: 사이드바 순서로 이전·다음 워크트리 */
+  selectNearWorktree = (delta: number) => {
+    const order = [...document.querySelectorAll<HTMLElement>("[data-drop-workspace]")].map((e) => e.dataset.dropWorkspace!);
+    const list = order.filter((ws, i) => order.indexOf(ws) === i);
+    if (!list.length) return;
+    const i = list.indexOf(this.get().active);
+    this.select(list[(i + delta + list.length) % list.length]);
   };
 
   setPanel = (p: Panel) => this.set((s) => ({ panel: s.panel === p ? null : p }));
   setDialog = (d: Dialog) => this.set({ dialog: d });
   setFocusArea = (a: AppState["focusArea"]) => this.set({ focusArea: a });
+
+  toggleSidebar = () => {
+    const open = !this.get().sidebarOpen;
+    localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0");
+    this.set({ sidebarOpen: open });
+  };
 
   setSidebarWidth = (w: number) => {
     const width = Math.round(Math.min(500, Math.max(200, w)));
@@ -369,10 +402,30 @@ export class AppModel {
     await this.op({ op: "split", target, side });
   };
 
+  /** 에이전트가 든 칸은 닫기 전에 묻는다 (닫으면 그 세션이 끝난다) */
+  private guardClose(panes: number[], what: string, run: () => void) {
+    const s = this.get();
+    const busy = Object.values(s.layouts)
+      .flatMap((l) => l.tabs)
+      .flatMap((t) => panesOf(t.root))
+      .filter((p) => panes.includes(p.id) && p.type === "terminal" && s.sessions[p.session]?.agent)
+      .map((p) => (p.type === "terminal" ? s.sessions[p.session].agent!.kind : ""));
+    if (!busy.length) return run();
+    this.setDialog({
+      kind: "confirm",
+      title: `${what} 닫을까?`,
+      body: `${[...new Set(busy)].join(", ")} 가 돌고 있다. 닫으면 그 세션이 끝난다.`,
+      action: "닫기",
+      run,
+    });
+  }
+
+  closePane = (id: number) => this.guardClose([id], "칸을", () => void this.op({ op: "close_pane", target: byId(id) }));
+
   /** ⌘W: 칸 닫기 (탭의 마지막 칸이면 탭이 닫힌다) */
   closeCurrent = async () => {
     const t = this.currentPane();
-    if (t) await this.op({ op: "close_pane", target: t });
+    if (t?.by === "id") this.closePane(t.value);
   };
 
   focusPane = (id: number) => void this.op({ op: "focus", target: byId(id) });
@@ -397,7 +450,27 @@ export class AppModel {
     void this.op({ op: "equalize", tab: { by: "active", value: ws } });
   };
   selectTab = (id: number) => void this.op({ op: "select_tab", tab: { by: "id", value: id } });
-  closeTab = (id: number) => void this.op({ op: "close_tab", tab: { by: "id", value: id } });
+  closeTab = (id: number) => {
+    const tab = Object.values(this.get().layouts).flatMap((l) => l.tabs).find((t) => t.id === id);
+    this.guardClose(tab ? panesOf(tab.root).map((p) => p.id) : [], "탭을", () => void this.op({ op: "close_tab", tab: { by: "id", value: id } }));
+  };
+  /** 이 탭만 남기고 같은 워크스페이스의 다른 탭을 닫는다 */
+  closeOtherTabs = (id: number) => {
+    const layout = Object.values(this.get().layouts).find((l) => l.tabs.some((t) => t.id === id));
+    const others = layout?.tabs.filter((t) => t.id !== id) ?? [];
+    this.guardClose(
+      others.flatMap((t) => panesOf(t.root).map((p) => p.id)),
+      `다른 탭 ${others.length}개를`,
+      () => void this.services.host.layoutBatch(others.map((t) => ({ op: "close_tab" as const, tab: { by: "id" as const, value: t.id } }))).catch(this.fail),
+    );
+  };
+  /** ⌘⇧[ ]: 이전·다음 탭 */
+  selectNearTab = (delta: number) => {
+    const layout = this.get().layouts[this.currentWorkspace()];
+    if (!layout?.tabs.length) return;
+    const i = layout.tabs.findIndex((t) => t.id === activeTab(layout)?.id);
+    this.selectTab(layout.tabs[(i + delta + layout.tabs.length) % layout.tabs.length].id);
+  };
   renameTab = (id: number, title: string) => void this.op({ op: "rename_tab", tab: { by: "id", value: id }, title: title || null });
 
   /** ⌘1~9: 지금 워크스페이스의 n 번째 탭 */

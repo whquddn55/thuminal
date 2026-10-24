@@ -180,7 +180,10 @@ export class TerminalController {
       if (ev.button !== 0 || !this.engine) return;
       const at = this.cellAt(ev);
       if (!at) return;
-      if (ev.detail === 2) {
+      if (ev.detail >= 3) {
+        this.engine.selectLine(at);
+        this.dragFrom = null;
+      } else if (ev.detail === 2) {
         this.engine.selectWord(at);
         this.dragFrom = null;
       } else {
@@ -217,6 +220,10 @@ export class TerminalController {
     ta.addEventListener("keydown", (ev) => {
       // 조합 중(한글 등)인 키는 IME 에 맡긴다
       if (ev.isComposing || ev.keyCode === 229) return;
+      if (this.macEditKey(ev)) {
+        ev.preventDefault();
+        return;
+      }
       const bytes = this.engine?.input.key({
         key: ev.key,
         code: ev.code,
@@ -299,9 +306,55 @@ export class TerminalController {
     });
   }
 
+  /**
+   * macOS 편집 키를 셸이 아는 키로 바꿔 보낸다 (Orca 와 같다).
+   * ⌘⌫ 줄 앞 지우기, ⌘⌦ 줄 뒤 지우기, ⌘← ⌘→ 줄 처음·끝, ⌘↑ ⌘↓ 스크롤 맨 위·아래,
+   * ⌥← ⌥→ 단어 이동, ⌥⌫ 단어 지우기, ⌃⌫ 단어 지우기. 처리했으면 true
+   */
+  private macEditKey(ev: KeyboardEvent): boolean {
+    const only = (m: "meta" | "alt" | "ctrl") =>
+      ev.metaKey === (m === "meta") && ev.altKey === (m === "alt") && ev.ctrlKey === (m === "ctrl") && !ev.shiftKey;
+    const map: [boolean, string, string | (() => void)][] = [
+      [only("meta"), "Backspace", "\x15"],
+      [only("meta"), "Delete", "\x0b"],
+      [only("meta"), "ArrowLeft", "\x01"],
+      [only("meta"), "ArrowRight", "\x05"],
+      [only("meta"), "ArrowUp", () => this.engine?.scroll(-1_000_000)],
+      [only("meta"), "ArrowDown", () => this.engine?.scrollToBottom()],
+      [only("alt"), "ArrowLeft", "\x1bb"],
+      [only("alt"), "ArrowRight", "\x1bf"],
+      [only("alt"), "Backspace", "\x1b\x7f"],
+      [only("ctrl"), "Backspace", "\x17"],
+    ];
+    const hit = map.find(([mods, key]) => mods && ev.key === key);
+    if (!hit) return false;
+    const act = hit[2];
+    if (typeof act === "string") this.send(enc.encode(act));
+    else act();
+    return true;
+  }
+
   /** 앱 쪽에서 글을 보낸다 (명령 팔레트 등) */
   sendText(text: string) {
     this.send(enc.encode(text));
+  }
+
+  /** 붙여넣기처럼 보낸다 (bracketed paste 모드면 감싼다) */
+  paste(text: string) {
+    if (text && this.engine) this.send(this.engine.input.paste(text));
+  }
+
+  hasSelection(): boolean {
+    return !!this.engine?.selectionText();
+  }
+
+  copySelection(): void {
+    const text = this.engine?.selectionText();
+    if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
+  }
+
+  selectAll(): void {
+    this.engine?.selectAll();
   }
 
   async dispose(): Promise<void> {

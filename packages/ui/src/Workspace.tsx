@@ -151,8 +151,15 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 {drop === i && <span className="absolute top-1 bottom-1 -left-[2px] w-0.5 rounded-full bg-drop" />}
               </div>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-52">
-              <ContextMenuItem onSelect={() => setRenaming(t.id)}>탭 이름 바꾸기</ContextMenuItem>
+            <ContextMenuContent className="w-56">
+              <ContextMenuItem onSelect={() => void model.split("right", { by: "id", value: t.focused })}>
+                오른쪽에 나누기
+                <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => void model.split("down", { by: "id", value: t.focused })}>
+                아래에 나누기
+                <ContextMenuShortcut>⌘⇧D</ContextMenuShortcut>
+              </ContextMenuItem>
               <ContextMenuItem
                 onSelect={() => void model.op({ op: "equalize", tab: { by: "id", value: t.id } })}
                 disabled={panes.length < 2}
@@ -160,9 +167,17 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 칸 크기 똑같이
               </ContextMenuItem>
               <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => setRenaming(t.id)}>탭 이름 바꾸기</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(`t${t.id}`).catch(() => undefined)}>
+                탭 id 복사 <span className="ml-auto font-mono text-xs text-muted-foreground">t{t.id}</span>
+              </ContextMenuItem>
+              <ContextMenuSeparator />
               <ContextMenuItem variant="destructive" onSelect={() => model.closeTab(t.id)}>
                 탭 닫기
                 <ContextMenuShortcut>{panes.length > 1 ? "" : "⌘W"}</ContextMenuShortcut>
+              </ContextMenuItem>
+              <ContextMenuItem variant="destructive" disabled={tabs.length < 2} onSelect={() => model.closeOtherTabs(t.id)}>
+                다른 탭 닫기
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
@@ -325,7 +340,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             <PaneButton title="펼치기 (⌘⇧Enter)" onClick={() => void model.op({ op: "zoom", target: id })}>
               {tab.zoomed === pane.id ? <ArrowsInSimpleIcon /> : <ArrowsOutSimpleIcon />}
             </PaneButton>
-            <PaneButton title="칸 닫기 (⌘W)" onClick={() => void model.op({ op: "close_pane", target: id })}>
+            <PaneButton title="칸 닫기 (⌘W)" onClick={() => model.closePane(pane.id)}>
               <XIcon />
             </PaneButton>
           </span>
@@ -333,7 +348,9 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
       )}
       <div className="relative min-h-0 min-w-0 flex-1 bg-terminal" data-drop-pane={pane.id}>
         {pane.type === "terminal" ? (
-          <TerminalPane ws={ws} paneId={pane.id} session={pane.session} focused={focused} />
+          <TerminalMenu tab={tab} paneId={pane.id} session={pane.session}>
+            <TerminalPane ws={ws} paneId={pane.id} session={pane.session} focused={focused} />
+          </TerminalMenu>
         ) : (
           <DocPane ws={ws} doc={pane.doc as unknown as DocSpec} onFocus={() => !focused && model.focusPane(pane.id)} />
         )}
@@ -360,6 +377,66 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
         )}
       </div>
     </div>
+  );
+}
+
+/** 터미널 오른쪽 클릭 메뉴 (Orca 와 같은 항목) */
+function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; paneId: number; session: number; children: React.ReactNode }) {
+  const model = useModel();
+  const [selected, setSelected] = useState(false);
+  const id = { by: "id" as const, value: paneId };
+  const c = () => model.controller(session);
+  const copyId = (text: string) => void navigator.clipboard.writeText(text).catch(() => undefined);
+  return (
+    <ContextMenu onOpenChange={(o) => o && setSelected(c().hasSelection())}>
+      <ContextMenuTrigger asChild>
+        <div className="absolute inset-0">{children}</div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-56" onCloseAutoFocus={(e) => (e.preventDefault(), c().focus())}>
+        <ContextMenuItem disabled={!selected} onSelect={() => c().copySelection()}>
+          복사
+          <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() =>
+            void navigator.clipboard.readText().then(
+              (t) => c().paste(t),
+              (e) => model.fail(`클립보드를 읽지 못했다: ${e}`),
+            )
+          }
+        >
+          붙여넣기
+          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => c().selectAll()}>모두 고르기</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void model.split("right", id)}>
+          오른쪽에 나누기
+          <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void model.split("down", id)}>
+          아래에 나누기
+          <ContextMenuShortcut>⌘⇧D</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem disabled={panesOf(tab.root).length < 2} onSelect={() => void model.op({ op: "zoom", target: id })}>
+          {tab.zoomed === paneId ? "펼친 칸 접기" : "칸 펼치기"}
+          <ContextMenuShortcut>⌘⇧↩</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => c().sendText("\x0c")}>화면 지우기 (Ctrl+L)</ContextMenuItem>
+        <ContextMenuItem onSelect={() => copyId(`p${paneId}`)}>
+          칸 id 복사 <span className="ml-auto font-mono text-xs text-muted-foreground">p{paneId}</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => copyId(String(session))}>
+          세션 번호 복사 <span className="ml-auto font-mono text-xs text-muted-foreground">{session}</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => model.closePane(paneId)}>
+          칸 닫기
+          <ContextMenuShortcut>⌘W</ContextMenuShortcut>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

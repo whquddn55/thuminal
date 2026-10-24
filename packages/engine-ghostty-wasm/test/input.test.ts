@@ -1,0 +1,61 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { CellFlags, type CellSink, type TerminalEngine } from "@thuminal/term-core";
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { ghosttyWasmEngine } from "../src";
+
+const wasmPath = fileURLToPath(new URL("../src/assets/ghostty-vt.wasm", import.meta.url));
+const factory = ghosttyWasmEngine({ wasm: async () => readFileSync(wasmPath) });
+const enc = (s: string) => new TextEncoder().encode(s);
+const dec = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : null);
+const key = (k: Partial<Parameters<TerminalEngine["input"]["key"]>[0]>) => ({ key: "", code: "", ctrl: false, alt: false, shift: false, meta: false, ...k });
+
+function row(e: TerminalEngine, y: number, cols: number) {
+  const cells: { cp: number; flags: number }[] = [];
+  const sink: CellSink = { cell: (x, yy, cp, _fg, _bg, flags) => yy === y && (cells[x] = { cp, flags }) };
+  e.invalidate();
+  e.scan(sink);
+  return cells.slice(0, cols);
+}
+
+describe("입력과 고르기", () => {
+  beforeAll(() => factory.load());
+
+  it("⌥ 를 Meta 로 보낸다 (⌥b → ESC b)", () => {
+    const e = factory.create({ cols: 20, rows: 3, scrollback: 100 });
+    expect(dec(e.input.key(key({ key: "∫", code: "KeyB", alt: true })))).toBe("\x1bb");
+  });
+
+  it("세 번 누르면 줄 전체를 고른다", () => {
+    const e = factory.create({ cols: 20, rows: 3, scrollback: 100 });
+    e.feed(enc("hello world\r\nnext"));
+    e.selectLine({ x: 2, y: 0 });
+    expect(e.selectionText()).toBe("hello world");
+    e.selectAll();
+    expect(e.selectionText()).toContain("next");
+  });
+
+  it("조합 중인 글자를 커서 자리에 밑줄로 넘기고, 지우면 원래 칸으로 돌아간다", () => {
+    const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
+    e.feed(enc("ab"));
+    e.setPreedit("가");
+    const r = row(e, 0, 5);
+    expect(r[2].cp).toBe("가".codePointAt(0));
+    expect(r[2].flags & CellFlags.Underline).toBeTruthy();
+    expect(r[2].flags & CellFlags.Wide).toBeTruthy();
+    expect(r[3].cp).toBe(0);
+    e.setPreedit(null);
+    expect(row(e, 0, 5)[2].cp).toBe(0);
+  });
+});
+
+describe("⌥ 조합", () => {
+  beforeAll(() => factory.load());
+  it("⌥⇧b 는 ESC B, ⌥. 는 ESC .", () => {
+    const e = factory.create({ cols: 20, rows: 3, scrollback: 100 });
+    expect(dec(e.input.key(key({ key: "ı", code: "KeyB", alt: true, shift: true })))).toBe("\x1bB");
+    expect(dec(e.input.key(key({ key: "≥", code: "Period", alt: true })))).toBe("\x1b.");
+  });
+});

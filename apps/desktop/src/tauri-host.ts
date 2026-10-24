@@ -1,6 +1,7 @@
 // term-core HostApi 의 Tauri 구현. src-tauri/src/lib.rs 의 명령을 부른다.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
@@ -189,6 +190,23 @@ export class TauriHostApi implements HostApi {
       }),
     );
     return faces.length;
+  }
+
+  onFileDrop(cb: (paths: string[], x: number, y: number) => void): () => void {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (e.payload.type !== "drop") return;
+        // 놓은 자리는 기기 픽셀이다
+        const r = window.devicePixelRatio || 1;
+        cb(e.payload.paths, e.payload.position.x / r, e.payload.position.y / r);
+      })
+      .then((un) => (cancelled ? un() : (stop = un)));
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }
 
   onEvent(cb: (e: DaemonEvent) => void): () => void {

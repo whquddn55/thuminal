@@ -94,6 +94,11 @@ export interface HostApi {
   setTerminalColors(colors: TerminalColors): Promise<void>;
   /** 사용자 로그인 셸 PATH 에 있는 명령만 돌려준다 (설치된 에이전트 찾기) */
   findCommands(names: string[]): Promise<string[]>;
+  /**
+   * 운영체제에서 파일을 창으로 끌어 놓았다. 놓은 자리는 창 왼쪽 위 기준 CSS 픽셀.
+   * 지원하지 않는 껍데기는 두지 않는다. 돌려준 함수로 끊는다
+   */
+  onFileDrop?(cb: (paths: string[], x: number, y: number) => void): () => void;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */
   onEvent(cb: (e: DaemonEvent) => void): () => void;
 }

@@ -39,6 +39,32 @@ export function Dialogs() {
       return <DeleteWorktreeDialog worktree={dialog.worktree} onClose={close} />;
     case "jump":
       return <JumpPalette onClose={close} />;
+    case "confirm":
+      return (
+        <Dialog open onOpenChange={(o) => !o && close()}>
+          <DialogContent className="sm:max-w-[420px]" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>{dialog.title}</DialogTitle>
+              <DialogDescription>{dialog.body}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={close}>
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                autoFocus
+                onClick={() => {
+                  close();
+                  dialog.run();
+                }}
+              >
+                {dialog.action}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      );
     default:
       return null;
   }
@@ -257,14 +283,24 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const repoName = (id: string) => repos.find((r) => r.id === id)?.name ?? "";
+  const recent = useApp((s) => s.recent);
+  const active = useApp((s) => s.active);
   const list = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      // 빈 검색: 지금 워크트리를 빼고 최근에 고른 순서. Enter 한 번이면 바로 전 워크트리로 돌아간다
+      const rank = (w: WorktreeInfo) => {
+        const i = recent.indexOf(w.path);
+        return i < 0 ? recent.length : i;
+      };
+      return worktrees.filter((w) => w.path !== active).sort((a, b) => rank(a) - rank(b));
+    }
     return worktrees.filter((w) => {
       const hay = `${worktreeTitle(w)} ${w.branch ?? ""} ${repoName(w.repo)}`.toLowerCase();
       return words.every((x) => hay.includes(x));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, worktrees]);
+  }, [q, worktrees, recent, active]);
   const pick = (w?: WorktreeInfo) => {
     if (!w) return;
     model.select(w.path);

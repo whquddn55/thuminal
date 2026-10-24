@@ -4,6 +4,7 @@ import { useEffect, useMemo } from "react";
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
 import { useDrag } from "./dnd";
+import { panesOf } from "./layout";
 import { FloatingPanel, FloatingTrigger } from "./FloatingPanel";
 import { cn } from "./lib/utils";
 import { Dialogs } from "./overlays";
@@ -66,7 +67,11 @@ function useShortcuts(model: AppModel) {
       if (key === "d") return run(() => void model.split(e.shiftKey ? "down" : "right"));
       if (key === "t" && !e.shiftKey) return run(() => void model.newTab());
       if (key === "w" && !e.shiftKey) return run(() => void model.closeCurrent());
+      // ⌘⇧[ ] 이전·다음 탭, ⌘[ ] 이전·다음 칸 (⇧ 가 눌리면 key 가 { } 로 오기도 한다)
+      if (e.shiftKey && (e.code === "BracketLeft" || e.code === "BracketRight")) return run(() => model.selectNearTab(e.code === "BracketRight" ? 1 : -1));
       if (e.key === "[" || e.key === "]") return run(() => model.focusCycle(e.key === "]" ? 1 : -1));
+      if (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !e.altKey && !e.ctrlKey) return run(() => model.selectNearWorktree(e.key === "ArrowDown" ? 1 : -1));
+      if (key === "b" && !e.shiftKey) return run(() => model.toggleSidebar());
       if (e.altKey && key === "=") return run(() => model.equalize());
       if (/^[1-9]$/.test(e.key) && !e.shiftKey) return run(() => model.selectTabIndex(Number(e.key) - 1));
     };
@@ -75,19 +80,41 @@ function useShortcuts(model: AppModel) {
   }, [model]);
 }
 
+/** 운영체제에서 파일을 터미널 칸에 끌어 놓으면 경로를 셸에 맞게 감싸 붙여 넣는다 */
+function useFileDrop(model: AppModel) {
+  useEffect(() => {
+    const quote = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
+    return model.services.host.onFileDrop?.((paths, x, y) => {
+      const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-pane]");
+      const id = Number(el?.dataset.dropPane);
+      const pane = Object.values(model.get().layouts)
+        .flatMap((l) => l.tabs)
+        .flatMap((t) => panesOf(t.root))
+        .find((p) => p.id === id);
+      if (pane?.type !== "terminal") return;
+      const c = model.controller(pane.session);
+      c.paste(`${paths.map(quote).join(" ")} `);
+      model.focusPane(pane.id);
+      c.focus();
+    });
+  }, [model]);
+}
+
 function Shell() {
   const model = useModel();
   useShortcuts(model);
+  useFileDrop(model);
   const active = useApp((s) => s.active);
   const panel = useApp((s) => s.panel);
   const floating = useApp((s) => s.floating.open);
   const changes = useApp((s) => s.status[s.active]?.files.length ?? 0);
   const error = useApp((s) => s.error);
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
   const inWorktree = active !== OTHER_WORKSPACE;
 
   return (
     <div className="flex h-full">
-      <Sidebar />
+      {sidebarOpen && <Sidebar />}
       <main className="flex min-w-0 flex-1 flex-col bg-background" onPointerDownCapture={() => model.get().focusArea !== "main" && model.setFocusArea("main")}>
         <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
           <TabBar ws={active} windowDrag className="h-full flex-1">

@@ -54,6 +54,9 @@ const CELL_BG = 5;
 const CELL_FG = 6;
 const CELL_HAS_STYLING = 8;
 const KEY_ACTION_PRESS = 1;
+// include/ghostty/vt/key/encoder.h
+const KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT = 6;
+const OPTION_AS_ALT_TRUE = 1;
 const MODS_SHIFT = 0x01;
 const MODS_CTRL = 0x02;
 const MODS_ALT = 0x04;
@@ -414,6 +417,32 @@ export class GhosttyWasmEngine implements TerminalEngine {
     }
   }
 
+  selectLine(at: CellPoint): void {
+    const { w } = this;
+    const opts = w.tmp + T_OPTS;
+    if (!this.gridRef(at, opts + 4)) return;
+    const dv = w.dv();
+    // GhosttyTerminalSelectLineOptions: size, ref(12), whitespace*, whitespace_len, semantic_prompt_boundary
+    dv.setUint32(opts, 28, true);
+    dv.setUint32(opts + 16, 0, true); // 기본 공백 자르기
+    dv.setUint32(opts + 20, 0, true);
+    dv.setUint32(opts + 24, 0, true);
+    const sel = w.tmp + T_SEL;
+    dv.setUint32(sel, 32, true);
+    if (w.ex.ghostty_terminal_select_line(this.term, opts, sel) === SUCCESS) {
+      w.ex.ghostty_terminal_set(this.term, OPT_SELECTION, sel);
+    }
+  }
+
+  selectAll(): void {
+    const { w } = this;
+    const sel = w.tmp + T_SEL;
+    w.dv().setUint32(sel, 32, true);
+    if (w.ex.ghostty_terminal_select_all(this.term, sel) === SUCCESS) {
+      w.ex.ghostty_terminal_set(this.term, OPT_SELECTION, sel);
+    }
+  }
+
   clearSelection(): void {
     this.w.ex.ghostty_terminal_set(this.term, OPT_SELECTION, 0);
   }
@@ -444,6 +473,9 @@ export class GhosttyWasmEngine implements TerminalEngine {
     // Cmd 조합은 앱 단축키로 둔다
     if (k.meta) return null;
     ex.ghostty_key_encoder_setopt_from_terminal(this.encoder, this.term);
+    // ⌥ 를 Meta 로 쓴다 (⌥b → ESC b). setopt_from_terminal 이 이 옵션을 끄므로 그 뒤에 다시 켠다
+    w.dv().setUint32(w.tmp + T_STRUCT, OPTION_AS_ALT_TRUE, true);
+    ex.ghostty_key_encoder_setopt(this.encoder, KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, w.tmp + T_STRUCT);
     const ev = w.create((pp) => ex.ghostty_key_event_new(0, pp), "key_event_new");
     try {
       ex.ghostty_key_event_set_action(ev, KEY_ACTION_PRESS);
@@ -454,12 +486,16 @@ export class GhosttyWasmEngine implements TerminalEngine {
       if (k.alt) mods |= MODS_ALT;
       if (k.meta) mods |= MODS_SUPER;
       ex.ghostty_key_event_set_mods(ev, mods);
-      if ([...k.key].length === 1) {
-        const utf8 = new TextEncoder().encode(k.key);
+      const unshifted = unshiftedCodepoint(k);
+      // ⌥ 를 Meta 로 쓰므로 macOS 가 ⌥ 로 바꾼 글자(⌥b → ∫) 대신 ⌥ 를 뺀 원래 글자를 넘긴다
+      let text = k.key;
+      if (k.alt && !k.ctrl && unshifted && k.code.startsWith("Key")) text = String.fromCodePoint(unshifted)[k.shift ? "toUpperCase" : "toLowerCase"]();
+      else if (k.alt && !k.ctrl && unshifted && !k.shift) text = String.fromCodePoint(unshifted);
+      if ([...text].length === 1) {
+        const utf8 = new TextEncoder().encode(text);
         const p = w.copyIn(utf8);
         ex.ghostty_key_event_set_utf8(ev, p, utf8.length);
       }
-      const unshifted = unshiftedCodepoint(k);
       if (unshifted) ex.ghostty_key_event_set_unshifted_codepoint(ev, unshifted);
       const out = w.tmp + T_GRAPHEME;
       const outLen = w.tmp + T_A;

@@ -93,7 +93,15 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
 
   const stage = (paths: string[]) => void run("스테이지", () => host.git.stage(worktree, paths));
   const unstage = (paths: string[]) => void run("언스테이지", () => host.git.unstage(worktree, paths));
-  const discard = (paths: string[]) => void run("되돌리기", () => host.git.discard(worktree, paths));
+  // 버리기는 되돌릴 수 없다 (새 파일은 지워진다). 에이전트 작업을 날리지 않게 먼저 묻는다
+  const discard = (paths: string[]) =>
+    model.setDialog({
+      kind: "confirm",
+      title: paths.length === 1 ? `${base(paths[0])} 의 변경을 버릴까?` : `변경 ${paths.length}개를 버릴까?`,
+      body: "되돌릴 수 없다. 새로 만든 파일은 지워진다.",
+      action: "버리기",
+      run: () => void run("되돌리기", () => host.git.discard(worktree, paths)),
+    });
   const diff = (f: FileChange, isStaged: boolean) => model.openDoc({ kind: "diff", file: f.path, staged: isStaged ? "1" : "0" });
 
   const row = (f: FileChange, isStaged: boolean) => {

@@ -68,6 +68,9 @@ export interface TerminalEngine {
   select(from: CellPoint, to: CellPoint): void;
   /** 그 칸의 단어를 선택한다 */
   selectWord(at: CellPoint): void;
+  /** 그 칸의 줄을 선택한다 (세 번 누르기) */
+  selectLine(at: CellPoint): void;
+  selectAll(): void;
   clearSelection(): void;
   /** 선택한 글자. 선택이 없으면 null */
   selectionText(): string | null;
