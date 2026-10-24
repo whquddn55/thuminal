@@ -116,3 +116,47 @@ impl ShellIntegration {
         }
     }
 }
+
+/// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다.
+/// PATH 를 .zshrc 에서 정하는 사람이 많아 대화형 로그인 셸(-ilc)로 묻는다. 3초 안에 답이 없으면 빈 목록이다.
+pub fn find_commands(names: &[String]) -> Vec<String> {
+    let names: Vec<&String> = names.iter().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).collect();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let script = r#"for c in "$@"; do command -v -- "$c" >/dev/null 2>&1 && printf 'thuminal-found:%s\n' "$c"; done"#;
+    let child = std::process::Command::new(&shell)
+        .args(["-ilc", script, "sh"])
+        .args(names.iter().map(|s| s.as_str()))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return Vec::new() };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                return Vec::new();
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = std::io::Read::read_to_string(&mut so, &mut out);
+    }
+    out.lines().filter_map(|l| l.strip_prefix("thuminal-found:")).filter(|n| names.iter().any(|x| x.as_str() == *n)).map(str::to_string).collect()
+}
+
+#[cfg(test)]
+mod find_tests {
+    #[test]
+    fn finds_sh_but_not_nonsense() {
+        let found = super::find_commands(&["sh".into(), "thuminal-no-such-cmd".into(), "bad name".into()]);
+        assert_eq!(found, vec!["sh".to_string()]);
+    }
+}

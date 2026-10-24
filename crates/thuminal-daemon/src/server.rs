@@ -223,6 +223,10 @@ impl Server {
             }
             Request::SetTerminalColors { colors } => m.set_colors(colors).map(|_| Response::Ok),
             Request::GetTerminalColors => Ok(Response::TerminalColors { colors: m.colors() }),
+            Request::FindCommands { names } => tokio::task::spawn_blocking(move || crate::shell::find_commands(&names))
+                .await
+                .map(|found| Response::Commands { found })
+                .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
@@ -390,6 +394,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::LayoutBatch { .. } => "layout_batch",
         Request::SetTerminalColors { .. } => "set_terminal_colors",
         Request::GetTerminalColors => "get_terminal_colors",
+        Request::FindCommands { .. } => "find_commands",
     }
 }
 

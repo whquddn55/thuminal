@@ -337,6 +337,8 @@ pub enum Request {
     /// 모든 세션 엔진과 앞으로 만들 엔진의 기본색을 바꾼다
     SetTerminalColors { colors: TerminalColors },
     GetTerminalColors,
+    /// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다 (새 탭 메뉴가 설치된 에이전트를 보이려고 쓴다)
+    FindCommands { names: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -360,6 +362,7 @@ pub enum Response {
     Layouts { layouts: Vec<WorkspaceLayout> },
     LayoutResult { layouts: Vec<WorkspaceLayout>, created: Vec<PaneId> },
     TerminalColors { colors: Option<TerminalColors> },
+    Commands { found: Vec<String> },
     Ok,
 }
 
