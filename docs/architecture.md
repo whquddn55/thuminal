@@ -18,12 +18,14 @@ apps/desktop (Tauri 껍데기) ── packages/ui (React 화면)
       │                              │
       │ HostApi 구현                   ├─ packages/term-core (인터페이스)
       │                              ├─ packages/engine-ghostty-wasm (엔진 어댑터)
-      │                              └─ packages/renderer-webgl (렌더러 어댑터)
+      │                              ├─ packages/renderer-webgl (렌더러 어댑터)
+      │                              └─ packages/themes (터미널 테마 목록, 화면 색 만들기)
       ▼
 crates/thuminal-client ──── crates/thuminal-cli (thuminal 명령)
       │  (프로토콜 + 전송)
       ▼
 crates/thuminal-daemon (thuminald)
+      ├─ crates/thuminal-layout          (탭과 칸 트리 규칙, 배치 한 줄 문법. 입출력 없음)
       ├─ crates/thuminal-engine          (TerminalEngine 인터페이스)
       │    └─ crates/thuminal-engine-ghostty (libghostty-vt 어댑터)
       ├─ crates/thuminal-pty             (Pty 인터페이스)
@@ -57,6 +59,11 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - **워크트리**: 저장소 목록(`workspace.json`)과 워크트리 만들기/지우기도 데몬이 맡는다. 그래야 CLI 로 만든 워크트리가 앱에도 바로 나타난다 (`workspace_changed` 이벤트). 새 워크트리는 저장소 옆 `<저장소>-thm-wt-<브랜치>` 에 만든다. 세션을 만들 때 시작 폴더가 워크트리 안이면 `worktree` 꼬리표를 단다.
 - **셸 통합**: 데몬이 기본 셸을 띄울 때 zsh 는 `ZDOTDIR`, bash 는 `--rcfile` 로 thuminal 파일(`shell/`)을 먼저 읽힌다. 그 파일은 사용자 설정을 그대로 다 읽은 뒤 `claude` 함수를 더한다. 함수는 `--plugin-dir` 로 thuminal claude 플러그인을 그 실행에만 얹는다.
 - **에이전트**: claude 훅이 `thuminal agent report` 로 상태(일하는 중, 입력 기다림, 사용자 부름)와 claude 세션 id 를 알린다. 세션 정보의 `agent` 에 담긴다.
+- **배치**: 탭과 칸 나눔(tmux 식)의 주인은 데몬이다. workspace(워크트리 경로, `floating`, `other`)마다 탭 목록이 있고, 탭마다 n갈래 칸 트리(`row` 좌우, `column` 위아래, 비율 합 1)가 있다. 칸 하나에는 터미널 세션이나 앱이 그리는 문서가 든다. 앱과 CLI 는 `layout` 요청(op)을 보내고, 데몬이 트리를 바꾸고 필요한 세션을 띄운 뒤 `layout_changed` 이벤트로 workspace 배치를 통째로 알린다. op 는 사본에서 돌려 끝까지 되면 바꿔 끼운다. 중간에 세션을 띄우지 못하면 배치는 그대로이고 그 op 가 띄운 세션은 지운다. 트리 규칙(정규화, 화면 위치로 옆 칸 찾기 등)은 `thuminal-layout` 에 있다.
+  - `CreateSession` 으로 만든 세션은 꼬리표로 정한 workspace(`floating` → 플로팅, `worktree` → 그 경로, 없으면 `other`) 새 탭 끝에 들어간다. 꼬리표 `layout=none` 이면 넣지 않는다.
+  - 세션을 지우면 그 칸이 빠지고, 칸을 닫으면 그 세션을 지운다. 칸을 다른 workspace 로 옮기면 세션 꼬리표도 고친다. 워크트리를 지우면 그 배치를 지운다.
+  - 칸·탭 번호는 데몬 전체에서 하나씩 늘고 다시 떠도 이어 센다. 되살린 세션은 `restored_from` 으로 옛 번호를 새 번호로 바꿔 끼우고, 되살리지 못한 세션의 칸은 뺀다. 뜰 때 칸에 없는 돌고 있는 세션은 새 탭으로 넣는다.
+- **터미널 색**: 앱이 테마 색(전경, 배경, 커서, 팔레트)을 `set_terminal_colors` 로 주면 데몬은 모든 세션 엔진과 앞으로 만들 엔진의 기본색으로 넣는다. 그래서 프로그램의 색 질의(OSC 4/10/11/12)에 데몬 엔진이 테마 색으로 답하고, 프로그램이 OSC 로 바꾼 색은 엔진이 지킨다. `CSI ?996n` 에는 배경이 전경보다 어두우면 dark 로 답하고, mode 2031 을 켠 세션에는 밝기가 바뀔 때만 `CSI ?997;1n`/`;2n` 을 써 준다.
 - **되살리기**: 데몬은 돌고 있는 세션의 정보(`sessions-v1.json`)를 바뀔 때마다, 화면 저장본(`sessions/<번호>.vt`)을 30초마다와 종료 신호 때 남긴다. 다시 뜨면 같은 폴더에서 로그인 셸을 띄우고, 이전 화면을 먼저 그리고, claude 세션이 있었으면 `claude --resume <id>` 를 입력한다. `thuminal daemon stop` 으로 내리면 기록을 지운다.
 
 ## 프로토콜
@@ -76,7 +83,29 @@ logs/daemon.log     JSON 한 줄 로그
 workspace.json      등록한 저장소
 sessions-v1.json    되살릴 세션 정보
 sessions/<번호>.vt  되살릴 화면 저장본
+layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 안에 쓴다. daemon stop 이면 지운다)
+terminal-colors.json 터미널 기본색 (앱 테마)
 ```
+
+## CLI (`thuminal`)
+
+명령마다 데몬에 한 번 붙는다. 바꾸는 명령은 대상을 데몬이 풀도록 칸 번호나 세션으로 보내 요청 하나로 끝낸다 (`--in` 의 브랜치 이름이나 `.` 을 풀 때만 읽기 요청을 하나 더 한다). 기본 출력은 짧은 글, `--json` 은 데몬이 돌려준 구조 그대로다.
+
+- `term …`: 세션 만들기, 보내기, 읽기, 기다리기, 붙기
+- `pane …`: `split`, `resize`, `focus`, `move`, `swap`, `zoom`, `equalize`, `break`, `close`, `ls`. 칸은 `p7`, 생략하거나 `.` 이면 이 셸이 든 칸(`THUMINAL_SESSION_ID`)이다
+- `tab …`: `new`, `select`, `close`, `rename`, `move`, `join`, `ls`. 탭은 `t3`
+- `layout show` / `layout apply '<한 줄>'`: 탭 배치를 한 줄로 보고 적용한다. 예: `row(claude, col(zsh, "npm run dev"):40%)`. 칸 자리의 `p7` 은 이미 있는 칸, 그 밖의 글은 새 셸에 입력할 명령(`zsh`, `_` 은 그냥 셸)이다. `show` 의 출력은 그대로 `apply` 에 다시 넣을 수 있다
+- `--in <대상>`: 워크트리 경로나 브랜치 이름, `floating`, `other`, `.`(이 셸의 workspace, 기본)
+- `repo …`, `wt …`: 저장소 등록, 워크트리 만들기·지우기·상태
+
+## 화면 (`packages/ui`)
+
+- **스택**: React + Tailwind v4 + shadcn(new-york, Radix) + phosphor 아이콘. shadcn 컴포넌트는 `components/ui/` 에 두고 아이콘만 phosphor 로 바꿔 쓴다. 상태는 zustand 하나(`store.ts` 의 `AppModel`)에 둔다.
+- **상태의 주인**: 저장소, 워크트리, 세션, 배치는 데몬 것을 받아 들고만 있다. 배치는 데몬에 `layout` 요청을 보내고, 돌아온 배치(와 `layout_changed` 이벤트)로 바꿔 끼운다. 고른 워크트리, 열린 창, 플로팅 패널 자리, 테마 설정처럼 화면에만 있는 것은 앱이 정한다.
+- **그림판**: 터미널 그림판(WebGL 렌더러)은 화면 면마다 하나다. 메인 면과 플로팅 패널이 각자 하나를 가진다. 칸 자리는 DOM 이 잡고 글자는 그 위 canvas 가 그린다.
+- **끌어 놓기**: 탭을 칸 가장자리에 놓으면 `join_tab`, 칸을 탭 줄에 놓으면 `break_pane`, 칸을 칸에 놓으면 `move_pane`(가운데면 `swap`), 사이드바 카드에 놓으면 그 워크트리로 보낸다. 놓을 곳은 `data-drop-*` 속성으로 찾는다 (`dnd.ts`).
+- **플로팅 워크스페이스**: 워크스페이스 `floating` 의 탭과 칸을 메인 창 위 패널에 그린다. 자리와 크기는 localStorage 에 남는다. 닫아도 세션은 데몬에서 계속 돈다.
+- **테마**: `packages/themes` 의 터미널 테마 하나로 화면 토큰(`<html>` CSS 변수), 앱 엔진 기본색, 데몬 기본색(`set_terminal_colors`)을 함께 맞춘다. "화면 색도 터미널 테마에 맞추기"를 끄면 화면은 무채색 다크/라이트 토큰을 쓴다. 테마 색 원본은 iTerm2-Color-Schemes(MIT)이고 출처는 `packages/themes/NOTICE` 에 적었다.
 
 ## 앱 번들
 
