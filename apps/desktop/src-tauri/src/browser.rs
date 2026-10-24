@@ -50,6 +50,23 @@ const BRIDGE: &str = r#"
 })();
 "#;
 
+/// Safari 와 같은 User-Agent. WKWebView 기본값에는 `Version/… Safari/…` 가 빠져 있어
+/// Google 로그인처럼 "앱에 박힌 웹뷰"를 막는 사이트에 걸린다. Safari 판 번호는 설치된 Safari 에서 읽는다
+fn user_agent() -> &'static str {
+    static UA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    UA.get_or_init(|| {
+        let version = std::process::Command::new("plutil")
+            .args(["-extract", "CFBundleShortVersionString", "raw", "/Applications/Safari.app/Contents/Info.plist"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "18.0".into());
+        format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15")
+    })
+}
+
 fn label(id: u64) -> String {
     format!("browser-{id}")
 }
@@ -76,6 +93,7 @@ pub async fn browser_open(app: AppHandle, window: Window, id: u64, url: String, 
     let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 이상하다: {url} ({e})"))?;
     let (a1, a2, a3, a4) = (app.clone(), app.clone(), app.clone(), app.clone());
     let builder = WebviewBuilder::new(label(id), WebviewUrl::External(parsed))
+        .user_agent(user_agent())
         .initialization_script(BRIDGE)
         .on_navigation(move |u| {
             if u.scheme() != "thuminal-key" {

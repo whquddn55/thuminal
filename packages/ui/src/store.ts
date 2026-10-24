@@ -660,6 +660,12 @@ export class AppModel {
     await this.op({ op: "new_tab", workspace: ws, doc: { kind: "browser", url } });
   };
 
+  /** 칸 옆을 나눠 브라우저 칸을 연다 */
+  splitBrowser = async (side: Side, target: PaneRef | null = this.currentPane(), url = "about:blank") => {
+    if (!target) return this.newBrowserTab(undefined, url);
+    await this.op({ op: "split", target, side, doc: { kind: "browser", url } });
+  };
+
   /** 지금 포커스 칸이 브라우저면 그 칸 번호 */
   currentBrowser(): number | null {
     const p = focusedPane(activeTab(this.get().layouts[this.currentWorkspace()]));

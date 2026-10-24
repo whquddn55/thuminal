@@ -181,6 +181,9 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 아래에 나누기
                 <ContextMenuShortcut>⌘⇧D</ContextMenuShortcut>
               </ContextMenuItem>
+              {model.services.host.browser && (
+                <ContextMenuItem onSelect={() => void model.splitBrowser("right", { by: "id", value: t.focused })}>오른쪽에 브라우저 열기</ContextMenuItem>
+              )}
               <ContextMenuItem
                 onSelect={() => void model.op({ op: "equalize", tab: { by: "id", value: t.id } })}
                 disabled={panes.length < 2}
@@ -443,6 +446,12 @@ function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; paneId: nu
           아래에 나누기
           <ContextMenuShortcut>⌘⇧D</ContextMenuShortcut>
         </ContextMenuItem>
+        {model.services.host.browser && (
+          <>
+            <ContextMenuItem onSelect={() => void model.splitBrowser("right", id)}>오른쪽에 브라우저 열기</ContextMenuItem>
+            <ContextMenuItem onSelect={() => void model.splitBrowser("down", id)}>아래에 브라우저 열기</ContextMenuItem>
+          </>
+        )}
         <ContextMenuItem disabled={panesOf(tab.root).length < 2} onSelect={() => void model.op({ op: "zoom", target: id })}>
           {tab.zoomed === paneId ? "펼친 칸 접기" : "칸 펼치기"}
           <ContextMenuShortcut>⌘⇧↩</ContextMenuShortcut>
