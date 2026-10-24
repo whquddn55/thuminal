@@ -100,6 +100,7 @@ export interface AppState {
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
   generation: number;
   error: string | null;
+  notice: string | null;
 }
 
 export const worktreeTitle = (w: WorktreeInfo) => w.name || w.branch || w.path.split("/").pop() || w.path;
@@ -150,6 +151,7 @@ export class AppModel {
       creating: [],
       generation: 0,
       error: null,
+      notice: null,
     }));
     media.addEventListener("change", (e) => {
       this.set({ systemDark: e.matches });
@@ -293,7 +295,13 @@ export class AppModel {
     this.set({ error: String(e) });
   };
 
-  clearError = () => this.set({ error: null });
+  clearError = () => this.set({ error: null, notice: null });
+
+  /** 오류는 아니지만 알릴 것 (아래 띠에 잠깐 보인다) */
+  notice = (text: string) => {
+    this.set({ notice: text });
+    window.setTimeout(() => this.get().notice === text && this.set({ notice: null }), 6000);
+  };
 
   // ---- 터미널 ----
 
@@ -317,11 +325,19 @@ export class AppModel {
     return paneOfSession(Object.values(this.get().layouts), session)?.layout.workspace ?? null;
   }
 
-  /** 마지막으로 본 뒤 출력이 있었는지 (사이드바에서 굵게, 종이 보인다) */
+  /**
+   * 마지막으로 본 뒤 알릴 일이 생겼는지 (사이드바에서 굵게, 종이 보인다).
+   * Orca 와 같이 에이전트가 턴을 끝냈거나, 사용자를 부르거나, 벨이 울렸을 때만 친다. 출력만 나온 것은 치지 않는다
+   */
   unread(ws: WorkspaceId, s: AppState = this.get()): boolean {
     if (ws === s.active) return false;
     const seen = s.seen[ws] ?? 0;
-    return sessionsOf(s.layouts[ws]).some((id) => (s.sessions[id]?.last_output_at ?? 0) > seen + 1500);
+    return sessionsOf(s.layouts[ws]).some((id) => {
+      const x = s.sessions[id];
+      if (!x) return false;
+      const a = x.agent;
+      return (x.bell_at ?? 0) > seen || (a?.turn_ended_at ?? 0) > seen || (a?.state === "needs_attention" && a.updated_at > seen);
+    });
   }
 
   private markSeen(ws: WorkspaceId = this.get().active) {
@@ -574,10 +590,11 @@ export class AppModel {
     }
   };
 
-  removeWorktree = async (w: WorktreeInfo, opts: { force: boolean; deleteBranch: boolean }) => {
+  removeWorktree = async (w: WorktreeInfo, opts: { force: boolean; deleteBranch: boolean; forceBranch: boolean }) => {
     try {
       for (const id of sessionsOf(this.get().layouts[w.path])) await this.services.host.remove(id);
-      await this.services.host.removeWorktree(w.repo, w.path, opts);
+      const note = await this.services.host.removeWorktree(w.repo, w.path, opts);
+      if (note) this.notice(note);
       if (this.get().active === w.path) this.set({ active: OTHER_WORKSPACE });
       await this.refreshWorkspace();
     } catch (e) {

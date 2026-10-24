@@ -503,13 +503,20 @@ function WorkspaceCard({
   );
 }
 
-/** 에이전트 한 줄: 상태, 에이전트 종류, 터미널 제목(에이전트가 정한 작업 이름), 마지막 바뀐 때 */
+/**
+ * 에이전트 한 줄 (Orca 와 같다): 상태, 에이전트, 마지막 프롬프트 - 지금 도구 또는 마지막 답, 모델, 지난 시간.
+ * 프롬프트가 아직 없으면 터미널 제목(claude 가 정한 작업 이름)을 쓴다
+ */
 function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
   const model = useModel();
   const agent = s.agent!;
+  const lead = agent.prompt?.trim() || s.title.replace(/^[✳✻✽✶·*\s]+/, "") || agent.kind;
+  const trail = agent.state === "working" ? agent.tool_name : agent.state === "idle" ? agent.last_assistant_message : null;
+  const when = agent.turn_ended_at ?? agent.updated_at;
   return (
     <div
       className="thm-agent-row flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-sm px-1 text-[11px] leading-none text-muted-foreground"
+      title={[agent.prompt, agent.last_assistant_message].filter(Boolean).join("\n\n") || undefined}
       onClick={(e) => {
         e.stopPropagation();
         const hit = paneOfSession(Object.values(model.get().layouts), s.id);
@@ -521,10 +528,11 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
       <StatusIndicator status={agent.state} className="size-2.5" />
       <RobotIcon className="size-[13px] shrink-0" />
       <span className="min-w-0 flex-1 truncate">
-        <span className="text-muted-foreground/90">{s.title.replace(/^[✳✻✽✶·*\s]+/, "") || agent.kind}</span>
+        <span className="text-muted-foreground/90">{lead}</span>
+        {trail && <span className="text-muted-foreground/60"> - {trail}</span>}
       </span>
-      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">{ago(agent.updated_at, now)}</span>
+      {agent.model && <span className="max-w-20 shrink-0 truncate font-mono text-[10px] text-muted-foreground/70">{agent.model}</span>}
+      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">{ago(when, now)}</span>
     </div>
   );
 }
-

@@ -176,8 +176,8 @@ export class TauriHostApi implements HostApi {
     return revealItemInDir(path);
   }
 
-  removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean }): Promise<void> {
-    return invoke("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch });
+  removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string> {
+    return invoke("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch, forceBranch: opts.forceBranch ?? false });
   }
 
   async registerFont(family: string): Promise<number> {

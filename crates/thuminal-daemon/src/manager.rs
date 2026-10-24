@@ -208,6 +208,11 @@ impl Manager {
         env.insert("TERM_PROGRAM".into(), "thuminal".into());
         env.insert("THUMINAL_SESSION_ID".into(), id.to_string());
         env.insert("THUMINAL_SOCKET".into(), self.socket.to_string_lossy().into_owned());
+        // 세션 안의 CLI(에이전트 훅 포함)가 이 데몬에 붙게 데이터 폴더를 넘긴다.
+        // 위에서 바깥의 THUMINAL_* 를 지우므로 넘기지 않으면 기본 폴더의 다른 데몬을 찾는다
+        if let Some(home) = self.socket.parent() {
+            env.insert("THUMINAL_HOME".into(), home.to_string_lossy().into_owned());
+        }
         // 에이전트 훅이 부를 CLI (데몬 실행 파일 옆에 있다)
         if let Some(cli) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("thuminal"))).filter(|p| p.exists()) {
             env.insert("THUMINAL_CLI".into(), cli.to_string_lossy().into_owned());

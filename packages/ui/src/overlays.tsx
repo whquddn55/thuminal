@@ -236,6 +236,7 @@ function DeleteWorktreeDialog({ worktree, onClose }: { worktree: WorktreeInfo; o
   const terminals = useApp((s) => s.layouts[worktree.path]?.tabs.length ?? 0);
   const [force, setForce] = useState(dirty > 0);
   const [deleteBranch, setDeleteBranch] = useState(true);
+  const [forceBranch, setForceBranch] = useState(false);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[460px]">
@@ -248,13 +249,19 @@ function DeleteWorktreeDialog({ worktree, onClose }: { worktree: WorktreeInfo; o
         </DialogHeader>
         {dirty > 0 && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">커밋하지 않은 변경이 {dirty}개 있다. 지우면 사라진다.</div>}
         <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
+          바뀐 파일이 있어도 지운다
+        </label>
+        <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={deleteBranch} onCheckedChange={(v) => setDeleteBranch(v === true)} />
           브랜치 <code className="font-mono">{worktree.branch}</code> 도 지운다
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-          강제로 지운다 (변경이 있거나 git 이 거절해도)
-        </label>
+        {deleteBranch && (
+          <label className="ml-6 flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={forceBranch} onCheckedChange={(v) => setForceBranch(v === true)} />
+            합치지 않은 커밋이 있어도 지운다 (없으면 브랜치는 남긴다)
+          </label>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             취소
@@ -263,7 +270,7 @@ function DeleteWorktreeDialog({ worktree, onClose }: { worktree: WorktreeInfo; o
             variant="destructive"
             autoFocus
             onClick={() => {
-              void model.removeWorktree(worktree, { force, deleteBranch });
+              void model.removeWorktree(worktree, { force, deleteBranch, forceBranch: deleteBranch && forceBranch });
               onClose();
             }}
           >

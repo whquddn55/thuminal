@@ -78,7 +78,11 @@ export interface HostApi {
   pickFolder(): Promise<string | null>;
   /** Finder 에서 보기 */
   reveal(path: string): Promise<void>;
-  removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean }): Promise<void>;
+  /**
+   * 워크트리를 지운다. force 는 바뀐 파일이 있어도 지우기, forceBranch 는 합치지 않은 브랜치도 지우기.
+   * 알릴 것(예: 합치지 않은 브랜치를 남겼다)이 있으면 그 글, 없으면 빈 글을 돌려준다
+   */
+  removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string>;
   /**
    * 설치된 글꼴 파일을 웹 글꼴로 등록한다. WebKit 처럼 사용자 설치 글꼴을 웹에 숨기는 껍데기에서 필요하다.
    * 찾은 글꼴 면(굵기, 기울임) 수를 돌려준다. 없으면 0.

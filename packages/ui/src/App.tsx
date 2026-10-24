@@ -110,6 +110,7 @@ function Shell() {
   const changes = useApp((s) => s.status[s.active]?.files.length ?? 0);
   const error = useApp((s) => s.error);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const notice = useApp((s) => s.notice);
   const inWorktree = active !== OTHER_WORKSPACE;
 
   return (
@@ -141,6 +142,14 @@ function Shell() {
       <Dialogs />
       <SettingsDialog />
       <DragGhost />
+      {notice && !error && (
+        <div className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
+          <span className="min-w-0 break-words">{notice}</span>
+          <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={model.clearError}>
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
       {error && (
         <div className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/40 bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
           <span className="min-w-0 break-words text-destructive">{error}</span>
