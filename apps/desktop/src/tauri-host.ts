@@ -162,6 +162,10 @@ export class TauriHostApi implements HostApi {
     return req({ type: "set_terminal_colors", colors });
   }
 
+  findCommands(names: string[]): Promise<string[]> {
+    return req<string[]>({ type: "find_commands", names }, (r) => r.found);
+  }
+
   async pickFolder(): Promise<string | null> {
     const r = await openDialog({ directory: true, multiple: false, title: "프로젝트 폴더 고르기" });
     return typeof r === "string" ? r : null;

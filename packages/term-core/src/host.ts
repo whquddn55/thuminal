@@ -92,6 +92,8 @@ export interface HostApi {
   /** 데몬 엔진의 기본 터미널 색 (아직 정한 적 없으면 null) */
   getTerminalColors(): Promise<TerminalColors | null>;
   setTerminalColors(colors: TerminalColors): Promise<void>;
+  /** 사용자 로그인 셸 PATH 에 있는 명령만 돌려준다 (설치된 에이전트 찾기) */
+  findCommands(names: string[]): Promise<string[]>;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */
   onEvent(cb: (e: DaemonEvent) => void): () => void;
 }

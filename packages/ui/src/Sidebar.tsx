@@ -221,33 +221,9 @@ export function Sidebar() {
           </TooltipTrigger>
           <TooltipContent>설정 (⌘,)</TooltipContent>
         </Tooltip>
-        <div className="flex-1" />
-        <FloatingButton />
       </div>
       <SidebarResizer />
     </aside>
-  );
-}
-
-function FloatingButton() {
-  const model = useModel();
-  const open = useApp((s) => s.floating.open);
-  const unread = useApp((s) => model.unread("floating", { ...s, active: s.floating.open ? "floating" : s.active }));
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className={cn("relative size-7 text-muted-foreground", open && "bg-sidebar-accent text-foreground")}
-          onClick={() => void model.toggleFloating()}
-        >
-          <TerminalWindowIcon className="size-4" />
-          {unread && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-amber-500" />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>플로팅 워크스페이스 (Ctrl+`)</TooltipContent>
-    </Tooltip>
   );
 }
 

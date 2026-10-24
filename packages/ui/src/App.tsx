@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
 import { useDrag } from "./dnd";
-import { FloatingPanel } from "./FloatingPanel";
+import { FloatingPanel, FloatingTrigger } from "./FloatingPanel";
 import { cn } from "./lib/utils";
 import { Dialogs } from "./overlays";
 import { RightPanel } from "./RightPanel";
@@ -110,6 +110,7 @@ function Shell() {
       </main>
       {panel && inWorktree && <RightPanel />}
       {floating && <FloatingPanel />}
+      <FloatingTrigger />
       <Dialogs />
       <SettingsDialog />
       <DragGhost />

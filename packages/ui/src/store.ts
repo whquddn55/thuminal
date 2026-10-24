@@ -25,6 +25,7 @@ import {
   type WorktreeInfo,
 } from "@thuminal/term-core";
 
+import { AGENTS } from "./agents";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { TerminalController } from "./terminal-controller";
@@ -84,6 +85,8 @@ export interface AppState {
   /** 시스템 다크 모드 여부 (테마 설정이 시스템 따라가기일 때 쓴다) */
   systemDark: boolean;
   sidebarWidth: number;
+  /** 로그인 셸 PATH 에서 찾은 에이전트 명령 (새 탭 메뉴에 보인다) */
+  agents: string[];
   /** 워크스페이스마다 마지막으로 본 때 (ms) */
   seen: Record<WorkspaceId, number>;
   /** 만드는 중인 워크트리 */
@@ -131,6 +134,7 @@ export class AppModel {
       theme: loadThemeSettings(),
       systemDark: media.matches,
       sidebarWidth: Number(localStorage.getItem(SIDEBAR_KEY)) || 280,
+      agents: [],
       seen: {},
       creating: [],
       generation: 0,
@@ -160,6 +164,10 @@ export class AppModel {
     this.markSeen();
     void this.applyTheme();
     void this.refreshStatus();
+    void this.services.host.findCommands(AGENTS.map((a) => a.cmd)).then(
+      (agents) => this.set({ agents }),
+      () => undefined,
+    );
     // git 상태: 지금 워크트리는 2초, 모두는 4초마다
     this.timers.push(window.setInterval(() => void this.refreshStatus(this.get().active), 2000));
     this.timers.push(window.setInterval(() => void this.refreshStatus(), 4000));

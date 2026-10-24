@@ -9,7 +9,6 @@ import {
   ArrowsOutSimpleIcon,
   FileTextIcon,
   GitDiffIcon,
-  PlusIcon,
   RobotIcon,
   SquareSplitHorizontalIcon,
   SquareSplitVerticalIcon,
@@ -24,6 +23,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { beginDrag, useDrag } from "./dnd";
 import { activeTab, dropRect, panesOf } from "./layout";
 import { cn } from "./lib/utils";
+import { NewTabMenu } from "./NewTabMenu";
 import { FLOATING_WORKSPACE, useApp, useModel } from "./store";
 import { StatusIndicator } from "./Sidebar";
 import { type DocSpec, DocView } from "./viewers";
@@ -169,9 +169,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
         );
       })}
       {drop === tabs.length && <span className="h-5 w-0.5 rounded-full bg-drop" />}
-      <Button variant="ghost" size="icon-xs" className="shrink-0 text-muted-foreground" title="새 터미널 (⌘T)" onClick={() => void model.newTab(ws)}>
-        <PlusIcon />
-      </Button>
+      <NewTabMenu ws={ws} />
       <div className="h-full min-w-4 flex-1" {...drag} />
       {children}
     </div>
