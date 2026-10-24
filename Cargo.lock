@@ -4054,8 +4054,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "serde",
  "serde_json",
  "thuminal-client",
+ "thuminal-layout",
  "thuminal-protocol",
  "tokio",
 ]
@@ -4088,6 +4090,7 @@ dependencies = [
  "thiserror 2.0.21",
  "thuminal-engine",
  "thuminal-engine-ghostty",
+ "thuminal-layout",
  "thuminal-protocol",
  "thuminal-pty",
  "thuminal-pty-portable",
@@ -4128,6 +4131,16 @@ version = "0.1.0"
 dependencies = [
  "libghostty-vt",
  "thuminal-engine",
+]
+
+[[package]]
+name = "thuminal-layout"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "thuminal-protocol",
 ]
 
 [[package]]

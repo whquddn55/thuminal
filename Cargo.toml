@@ -13,6 +13,7 @@ rust-version = "1.90"
 [workspace.dependencies]
 thuminal-protocol = { path = "crates/thuminal-protocol" }
 thuminal-engine = { path = "crates/thuminal-engine" }
+thuminal-layout = { path = "crates/thuminal-layout" }
 thuminal-engine-ghostty = { path = "crates/thuminal-engine-ghostty" }
 thuminal-pty = { path = "crates/thuminal-pty" }
 thuminal-pty-portable = { path = "crates/thuminal-pty-portable" }

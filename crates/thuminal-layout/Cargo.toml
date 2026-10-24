@@ -1,0 +1,15 @@
+[package]
+name = "thuminal-layout"
+description = "thuminal 배치 규칙: 탭과 칸 트리 바꾸기, 정규화, 배치 한 줄 문법. 입출력은 하지 않는다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thuminal-protocol.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

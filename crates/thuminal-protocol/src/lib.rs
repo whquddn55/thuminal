@@ -5,13 +5,15 @@
 //! 타입만 맞추면 데몬에 붙을 수 있다.
 
 pub mod frame;
+pub mod layout;
 pub mod message;
 pub mod paths;
 
 pub use frame::{Frame, FrameError, FrameKind};
+pub use layout::*;
 pub use message::*;
 
 /// 주 버전이 다르면 서로 붙지 않는다. 소켓 이름에도 들어간다.
 pub const PROTOCOL_MAJOR: u32 = 1;
 /// 부 버전은 하위 호환으로 늘린다 (필드 추가 등).
-pub const PROTOCOL_MINOR: u32 = 0;
+pub const PROTOCOL_MINOR: u32 = 1;

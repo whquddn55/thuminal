@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::frame::FrameError;
+use crate::layout::{LayoutOp, PaneId, TerminalColors, WorkspaceLayout};
 
 /// 데몬 안에서 세션을 가리키는 번호. 데몬이 뜰 때마다 1 부터 센다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -221,7 +222,7 @@ pub struct CreateSession {
     pub labels: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Request {
     /// 붙자마자 처음 보낸다. 주 버전이 다르면 데몬이 오류로 답하고 끊는다.
@@ -324,9 +325,21 @@ pub enum Request {
         #[serde(default)]
         delete_branch: bool,
     },
+    /// workspace 를 비우면 모든 workspace 배치
+    GetLayout {
+        #[serde(default)]
+        workspace: Option<String>,
+    },
+    /// 배치를 바꾸는 요청 하나. 결과는 바뀐 workspace 배치(들)와 새로 만든 칸 id
+    Layout { op: LayoutOp },
+    /// 여러 op 를 순서대로. 하나라도 실패하면 그 앞까지는 반영되고 오류를 돌려준다 (오류 메시지에 몇 번째인지)
+    LayoutBatch { ops: Vec<LayoutOp> },
+    /// 모든 세션 엔진과 앞으로 만들 엔진의 기본색을 바꾼다
+    SetTerminalColors { colors: TerminalColors },
+    GetTerminalColors,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Response {
     Hello { daemon_version: String, protocol_major: u32, protocol_minor: u32, pid: u32, engine: String },
@@ -344,10 +357,13 @@ pub enum Response {
     File { file: FileContent },
     Worktrees { worktrees: Vec<WorktreeInfo> },
     Worktree { worktree: WorktreeInfo },
+    Layouts { layouts: Vec<WorkspaceLayout> },
+    LayoutResult { layouts: Vec<WorkspaceLayout>, created: Vec<PaneId> },
+    TerminalColors { colors: Option<TerminalColors> },
     Ok,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Event {
     SessionCreated { session: SessionInfo },
@@ -359,6 +375,11 @@ pub enum Event {
     WorkspaceChanged,
     /// 이 워크트리의 git 상태가 바뀌었다 (스테이지, 커밋, 푸시 등)
     GitChanged { worktree: String },
+    /// 이 workspace 배치가 바뀌었다 (전체를 보낸다. 앱은 통째로 바꿔 끼운다)
+    LayoutChanged { layout: WorkspaceLayout },
+    /// workspace 배치가 없어졌다
+    LayoutRemoved { workspace: String },
+    TerminalColorsChanged { colors: TerminalColors },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,13 +399,13 @@ pub enum ErrorCode {
     Internal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ClientMessage {
     Request { id: u64, request: Request },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ServerMessage {
     Response {
@@ -395,7 +416,7 @@ pub enum ServerMessage {
     Event { event: Event },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseResult {
     Ok(Response),
