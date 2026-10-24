@@ -21,7 +21,10 @@ export class TerminalController {
   private textarea: HTMLTextAreaElement | null = null;
   private resizeObs: ResizeObserver | null = null;
   private resizeTimer = 0;
-  private composing = false;
+  /** 조합 시작 수 - 끝 수. WebKit 은 한글에서 다음 글자 조합 시작이 앞 글자 조합 끝보다 먼저 오기도 해서 수로 센다 */
+  private composing = 0;
+  /** 조합 중인 글자를 커서 자리에 보이는 칸 (xterm.js 의 composition view 와 같다) */
+  private compView: HTMLDivElement | null = null;
   private disposed = false;
   private wheelAcc = 0;
   private dragFrom: CellPoint | null = null;
@@ -43,6 +46,8 @@ export class TerminalController {
     const onOutput = (bytes: Uint8Array) => {
       if (this.engine) this.engine.feed(bytes);
       else this.pending.push(bytes);
+      // 앞 글자가 확정되어 커서가 움직였다. 조합 칸을 새 커서 자리로 옮긴다 (커서 자리는 다음 그리기 때 바뀐다)
+      if (this.composing > 0) setTimeout(() => this.placeInput(), 34);
     };
     const opts = (a: Attachment) => ({ cols: a.session.cols, rows: a.session.rows, scrollback });
 
@@ -101,6 +106,9 @@ export class TerminalController {
     this.resizeObs = null;
     this.textarea?.remove();
     this.textarea = null;
+    this.compView?.remove();
+    this.compView = null;
+    this.composing = 0;
     this.host = null;
   }
 
@@ -224,20 +232,39 @@ export class TerminalController {
         this.send(bytes);
       }
     });
+    // 조합 중인 글자는 textarea 가 아니라 따로 둔 칸에 compositionupdate 로 그린다.
+    // compositionend 때 textarea 를 바로 비우면 WebKit 에서는 막 시작한 다음 글자 조합까지 지워져
+    // "가나다라" 를 치는 동안 앞 글자까지만 보였다. textarea 는 조합이 모두 끝난 뒤에 비운다
+    const view = document.createElement("div");
+    view.className = "thm-composition";
+    host.appendChild(view);
+    this.compView = view;
+    const settle = () =>
+      setTimeout(() => {
+        if (this.composing > 0) return;
+        view.classList.remove("active");
+        view.textContent = "";
+        ta.value = "";
+      });
     ta.addEventListener("compositionstart", () => {
-      this.composing = true;
+      this.composing++;
+      view.textContent = "";
+      view.classList.add("active");
       this.placeInput();
-      ta.classList.add("composing");
+    });
+    ta.addEventListener("compositionupdate", (ev) => {
+      view.textContent = ev.data;
+      this.placeInput();
     });
     ta.addEventListener("compositionend", (ev) => {
-      this.composing = false;
-      ta.classList.remove("composing");
+      this.composing = Math.max(0, this.composing - 1);
       if (ev.data) this.send(enc.encode(ev.data));
-      ta.value = "";
+      if (this.composing === 0) view.textContent = "";
+      settle();
     });
     ta.addEventListener("input", (ev) => {
       const ie = ev as InputEvent;
-      if (this.composing) return;
+      if (this.composing > 0 || ie.isComposing) return;
       // WKWebView 는 조합 이벤트 없이 앞 글자를 바꿔 쓰기도 한다 (xterm.js #5704).
       // 바뀐 글자 수만큼 지우고 새 글자를 보낸다
       if (ie.inputType === "insertReplacementText" && ie.data) {
@@ -246,7 +273,7 @@ export class TerminalController {
       } else if (ie.inputType === "insertText" && ie.data) {
         this.send(enc.encode(ie.data));
       }
-      ta.value = "";
+      settle();
     });
     ta.addEventListener("paste", (ev) => {
       ev.preventDefault();
@@ -265,19 +292,22 @@ export class TerminalController {
     if (this.wantFocus) this.focus();
   }
 
-  /** 조합 중인 글자가 커서 자리에 보이게 textarea 를 옮긴다 */
+  /** 조합 칸을 커서 자리에 놓고, IME 후보 창이 그 옆에 뜨게 textarea 도 같은 자리로 옮긴다 */
   private placeInput() {
-    if (!this.textarea || !this.engine || !this.renderer) return;
+    if (!this.textarea || !this.compView || !this.engine || !this.renderer || !this.host) return;
     const c = this.engine.cursor();
     const { width, height } = this.renderer.metrics;
-    Object.assign(this.textarea.style, {
-      left: `${c.x * width}px`,
+    const left = c.x * width;
+    const style = {
+      left: `${left}px`,
       top: `${c.y * height}px`,
       height: `${height}px`,
       lineHeight: `${height}px`,
       fontSize: `${this.s.rendererOptions.fontSize}px`,
       fontFamily: this.s.rendererOptions.fontFamily,
-    });
+    };
+    Object.assign(this.compView.style, style, { maxWidth: `${Math.max(width, this.host.clientWidth - left)}px` });
+    Object.assign(this.textarea.style, style);
   }
 
   /** 앱 쪽에서 글을 보낸다 (명령 팔레트 등) */

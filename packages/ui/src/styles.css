@@ -167,7 +167,7 @@
   scrollbar-color: color-mix(in srgb, var(--foreground) 18%, transparent) transparent;
 }
 
-/* 터미널 입력을 받는 보이지 않는 textarea (한글 조합 중에만 커서 자리에 보인다) */
+/* 터미널 입력을 받는 보이지 않는 textarea. IME 후보 창 자리를 잡으려고 조합 중에는 커서 자리로 옮긴다 */
 .thm-input {
   position: absolute;
   left: 0;
@@ -183,12 +183,22 @@
   white-space: nowrap;
   background: transparent;
   color: transparent;
+  caret-color: transparent;
   z-index: 6;
 }
-.thm-input.composing {
-  width: auto;
-  min-width: 2em;
-  opacity: 1;
+
+/* 조합 중인 글자 (한글 등). 커서 자리에 터미널 색으로 덮어 그린다 */
+.thm-composition {
+  position: absolute;
+  display: none;
+  z-index: 7;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
   color: var(--terminal-foreground);
   background: var(--terminal-background);
+  border-bottom: 2px solid var(--terminal-foreground);
+}
+.thm-composition.active:not(:empty) {
+  display: block;
 }
