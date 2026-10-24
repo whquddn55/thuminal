@@ -3,6 +3,7 @@
 //! 엔진과 PTY 는 [`DaemonConfig`] 로 받는다. 어떤 어댑터를 끼울지는 실행 파일
 //! (`thuminald`) 이 정한다.
 
+pub mod layout;
 pub mod lock;
 pub mod manager;
 pub mod persist;
@@ -59,10 +60,11 @@ impl Daemon {
         let listener = UnixListener::bind(&socket)?;
         let shell = shell::ShellIntegration::new(&paths.home, config.claude_plugin);
         shell.install();
-        let manager = Arc::new(manager::Manager::new(config.engine, config.pty, socket.clone(), shell));
+        let manager = Arc::new(manager::Manager::new(config.engine, config.pty, socket.clone(), shell, &paths.home));
         let workspace = Arc::new(Workspace::open(config.vcs, &paths.home));
+        let layouts = Arc::new(layout::Layouts::load(&paths.home));
         info!(event = "daemon_started", pid = std::process::id(), socket = %socket.display(), engine = manager.engine_name());
-        Ok(Self { server: server::Server::new(manager, workspace), listener, paths, _lock: lock })
+        Ok(Self { server: server::Server::new(manager, workspace, layouts), listener, paths, _lock: lock })
     }
 
     pub async fn run(self) {
@@ -70,22 +72,32 @@ impl Daemon {
         let persist = Arc::new(persist::Persist::new(&paths.home));
         // 지난번 데몬이 종료 신호나 사고로 내려갔으면 그때 세션을 되살린다
         server.manager.restore(persist.take_previous());
-        let saver = tokio::spawn(save_loop(server.manager.clone(), persist.clone()));
+        // 배치의 옛 세션 번호를 새 번호로 바꾸고, 칸에 없는 세션을 넣는다
+        server.layouts.restore(&server.manager);
+        let saver = tokio::spawn(save_loop(server.manager.clone(), server.layouts.clone(), persist.clone()));
 
         server.clone().serve(listener).await;
         saver.abort();
+        // 저장 작업이 다른 스레드에서 쓰는 중일 수 있다. 끝난 뒤에 지우거나 남긴다
+        let _ = saver.await;
         let mode = *server.stop_mode.lock().unwrap();
         match mode {
-            server::StopMode::Clear => persist.clear(),
-            server::StopMode::Keep => save_all(&server.manager, &persist).await,
+            server::StopMode::Clear => {
+                persist.clear();
+                server.layouts.clear();
+            }
+            server::StopMode::Keep => {
+                save_all(&server.manager, &persist).await;
+                server.layouts.save();
+            }
         }
         let _ = std::fs::remove_file(paths.socket());
         info!(event = "daemon_stopped", pid = std::process::id(), ?mode);
     }
 }
 
-/// 세션 목록이 바뀌면 1초 안에 기록을 쓰고, 30초마다 출력이 있었던 세션의 화면 저장본을 쓴다
-async fn save_loop(manager: Arc<manager::Manager>, persist: Arc<persist::Persist>) {
+/// 세션 목록이나 배치가 바뀌면 1초 안에 기록을 쓰고, 30초마다 출력이 있었던 세션의 화면 저장본을 쓴다
+async fn save_loop(manager: Arc<manager::Manager>, layouts: Arc<layout::Layouts>, persist: Arc<persist::Persist>) {
     let mut events = manager.events.subscribe();
     let mut dirty = true;
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -99,6 +111,7 @@ async fn save_loop(manager: Arc<manager::Manager>, persist: Arc<persist::Persist
             },
             _ = tick.tick() => {
                 n += 1;
+                layouts.save_if_dirty();
                 if dirty {
                     persist.save_records(&manager.list());
                     dirty = false;

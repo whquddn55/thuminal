@@ -5,7 +5,7 @@
 //! 엔진은 스레드 사이로 옮기지 않으므로 `Send` 가 아니어도 된다. 대신 엔진을 만드는
 //! [`EngineFactory`] 는 여러 스레드에서 쓰인다.
 
-pub use thuminal_protocol::{ScreenFormat, SnapshotFormat};
+pub use thuminal_protocol::{ColorScheme, ScreenFormat, SnapshotFormat, TerminalColors};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -52,6 +52,46 @@ pub trait TerminalEngine {
 
     /// OSC 7 로 알린 작업 폴더 (file:// URL 일 수 있다). 없으면 빈 문자열.
     fn pwd(&self) -> String;
+
+    /// 기본색(전경, 배경, 커서, 팔레트)을 바꾼다. 프로그램이 OSC 4/10/11/12 로 바꾼 색은 엔진이 지킨다.
+    /// 엔진은 색 질의에 이 색으로 답한다.
+    fn set_default_colors(&mut self, colors: &TerminalColors) -> Result<()> {
+        let _ = colors;
+        Ok(())
+    }
+
+    /// 지금 색의 밝기. 배경이 전경보다 어두우면 Dark (`CSI ?996n` 답과 같다)
+    fn color_scheme(&self) -> ColorScheme {
+        ColorScheme::Dark
+    }
+
+    /// DEC 사설 모드가 켜져 있는지 (예: 2031 = 색 밝기가 바뀌면 알려 달라)
+    fn dec_mode(&self, mode: u16) -> bool {
+        let _ = mode;
+        false
+    }
+}
+
+/// 배경이 전경보다 어두우면 Dark. 색은 0xRRGGBB
+pub fn scheme_of(foreground: u32, background: u32) -> ColorScheme {
+    if luminance(background) < luminance(foreground) { ColorScheme::Dark } else { ColorScheme::Light }
+}
+
+/// 상대 밝기 (WCAG)
+fn luminance(rgb: u32) -> f32 {
+    let ch = |shift: u32| {
+        let c = ((rgb >> shift) & 0xff) as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0)
+}
+
+/// `CSI ?997;1n`(dark) / `CSI ?997;2n`(light): 색 밝기 알림과 `CSI ?996n` 답
+pub fn color_scheme_report(scheme: ColorScheme) -> &'static [u8] {
+    match scheme {
+        ColorScheme::Dark => b"\x1b[?997;1n",
+        ColorScheme::Light => b"\x1b[?997;2n",
+    }
 }
 
 pub trait EngineFactory: Send + Sync {
@@ -62,4 +102,15 @@ pub trait EngineFactory: Send + Sync {
     fn supports_native_snapshot(&self) -> bool;
 
     fn create(&self, config: EngineConfig) -> Result<Box<dyn TerminalEngine>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scheme_follows_brightness() {
+        assert_eq!(scheme_of(0xf8f8f2, 0x282a36), ColorScheme::Dark);
+        assert_eq!(scheme_of(0x24292f, 0xffffff), ColorScheme::Light);
+    }
 }

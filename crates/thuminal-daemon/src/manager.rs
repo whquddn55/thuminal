@@ -1,18 +1,18 @@
 //! 세션 목록을 들고, 요청을 세션 actor 에 나눠 준다.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use thuminal_engine::EngineFactory;
 use thuminal_protocol::{
     AgentInfo, AgentState, CreateSession, ErrorBody, ErrorCode, Event, ScreenFormat, SessionId, SessionInfo, SessionState,
-    SnapshotFormat,
+    SnapshotFormat, TerminalColors,
 };
 use thuminal_pty::{PtySystem, SpawnSpec};
 use tokio::sync::{broadcast, oneshot};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::session::{self, Cmd, ConnId, Outbox, Restore, SessionHandle, now_ms};
 use crate::shell::ShellIntegration;
@@ -29,6 +29,9 @@ pub struct Manager {
     pub events: broadcast::Sender<Event>,
     socket: PathBuf,
     shell: ShellIntegration,
+    /// 모든 세션 엔진의 기본색 (`terminal-colors.json`)
+    colors: Mutex<Option<TerminalColors>>,
+    colors_file: PathBuf,
 }
 
 fn not_found(id: SessionId) -> ErrorBody {
@@ -40,7 +43,9 @@ fn internal(msg: impl ToString) -> ErrorBody {
 }
 
 impl Manager {
-    pub fn new(engine: Arc<dyn EngineFactory>, pty: Arc<dyn PtySystem>, socket: PathBuf, shell: ShellIntegration) -> Self {
+    pub fn new(engine: Arc<dyn EngineFactory>, pty: Arc<dyn PtySystem>, socket: PathBuf, shell: ShellIntegration, home: &Path) -> Self {
+        let colors_file = home.join("terminal-colors.json");
+        let colors = std::fs::read(&colors_file).ok().and_then(|b| serde_json::from_slice(&b).ok());
         Self {
             sessions: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(1),
@@ -49,6 +54,8 @@ impl Manager {
             events: broadcast::channel(1024).0,
             socket,
             shell,
+            colors: Mutex::new(colors),
+            colors_file,
         }
     }
 
@@ -70,6 +77,12 @@ impl Manager {
 
     pub fn create(&self, req: CreateSession) -> Result<SessionInfo, ErrorBody> {
         self.create_with(req, Restore::default(), None)
+    }
+
+    /// 세션을 띄우고, `input` 이 있으면 셸이 첫 출력을 낸 뒤 입력하고 Enter 를 친다 (되살리기 입력과 같은 방식)
+    pub fn create_with_input(&self, req: CreateSession, input: Option<String>) -> Result<SessionInfo, ErrorBody> {
+        let input = input.filter(|i| !i.is_empty()).map(|i| format!("{i}\r").into_bytes());
+        self.create_with(req, Restore { replay: None, input }, None)
     }
 
     fn create_with(&self, req: CreateSession, restore: Restore, restored_from: Option<SessionId>) -> Result<SessionInfo, ErrorBody> {
@@ -123,7 +136,8 @@ impl Manager {
             agent: None,
             restored_from,
         };
-        let handle = session::start(id, info.clone(), spawned, self.engine.clone(), self.events.clone(), restore);
+        let colors = self.colors.lock().unwrap().clone();
+        let handle = session::start(id, info.clone(), spawned, self.engine.clone(), self.events.clone(), restore, colors);
         self.sessions.lock().unwrap().insert(id, handle);
         info!(event = "session_created", session = id.0, pid, cols, rows, command = ?info.command);
         let _ = self.events.send(Event::SessionCreated { session: info.clone() });
@@ -273,6 +287,29 @@ impl Manager {
                 Err(e) => tracing::warn!(event = "session_restore_failed", from = old.id.0, error = %e.message),
             }
         }
+    }
+
+    pub fn colors(&self) -> Option<TerminalColors> {
+        self.colors.lock().unwrap().clone()
+    }
+
+    /// 기본색을 바꾼다: 저장하고, 모든 세션 엔진에 넣고, 알린다
+    pub fn set_colors(&self, colors: TerminalColors) -> Result<(), ErrorBody> {
+        if colors.palette.len() > 256 {
+            return Err(ErrorBody { code: ErrorCode::InvalidRequest, message: "palette 는 256개까지다".into() });
+        }
+        *self.colors.lock().unwrap() = Some(colors.clone());
+        let tmp = self.colors_file.with_extension("json.tmp");
+        let r = std::fs::write(&tmp, serde_json::to_vec_pretty(&colors).unwrap()).and_then(|_| std::fs::rename(&tmp, &self.colors_file));
+        if let Err(e) = r {
+            warn!(event = "terminal_colors_save_failed", error = %e);
+        }
+        for h in self.sessions.lock().unwrap().values() {
+            let _ = h.cmd.send(Cmd::SetColors(colors.clone()));
+        }
+        info!(event = "terminal_colors_set", scheme = ?colors.scheme, palette = colors.palette.len());
+        let _ = self.events.send(Event::TerminalColorsChanged { colors });
+        Ok(())
     }
 
     pub fn kill_all(&self) {

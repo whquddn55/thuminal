@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 thuminal-protocol.workspace = true
 thuminal-engine.workspace = true
+thuminal-layout.workspace = true
 thuminal-pty.workspace = true
 thuminal-workspace.workspace = true
 tokio.workspace = true

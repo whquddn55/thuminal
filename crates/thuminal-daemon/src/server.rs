@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 use thuminal_protocol::{Event, WORKTREE_LABEL};
 use thuminal_workspace::{Workspace, WorkspaceError};
 
+use crate::layout::Layouts;
 use crate::manager::Manager;
 use crate::session::now_ms;
 
@@ -31,14 +32,15 @@ pub struct Server {
     pub manager: Arc<Manager>,
     pub stop_mode: std::sync::Mutex<StopMode>,
     pub workspace: Arc<Workspace>,
+    pub layouts: Arc<Layouts>,
     pub shutdown: Arc<Notify>,
     pub started_at: u64,
     next_conn: AtomicU64,
 }
 
 impl Server {
-    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>) -> Arc<Self> {
-        Arc::new(Self { manager, workspace, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
+    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>, layouts: Arc<Layouts>) -> Arc<Self> {
+        Arc::new(Self { manager, workspace, layouts, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
     }
 
     pub async fn serve(self: Arc<Self>, listener: UnixListener) {
@@ -178,7 +180,8 @@ impl Server {
                         }
                     }
                 }
-                m.create(req).map(|session| Response::Session { session })
+                // 꼬리표의 workspace 새 탭 끝에 넣는다
+                m.create(req).inspect(|session| self.layouts.place(m, session)).map(|session| Response::Session { session })
             }
             Request::ListSessions => Ok(Response::Sessions { sessions: m.list() }),
             Request::Attach { session, snapshot } => match m.attach(session, conn, tx.clone(), snapshot, id) {
@@ -196,7 +199,30 @@ impl Server {
                 m.report_agent(session, kind, &event, agent_session_id, transcript).map(|session| Response::Session { session })
             }
             Request::Kill { session } => m.kill(session).map(|_| Response::Ok),
-            Request::Remove { session } => m.remove(session).map(|_| Response::Ok),
+            Request::Remove { session } => m.remove(session).map(|_| {
+                self.layouts.session_removed(m, session);
+                Response::Ok
+            }),
+            Request::GetLayout { workspace } => Ok(Response::Layouts { layouts: self.layouts.get(workspace.as_deref()) }),
+            Request::Layout { op } => {
+                // 세션을 만들 수 있어(PTY 띄우기) 블로킹 스레드에서 돌린다
+                let (layouts, manager) = (self.layouts.clone(), m.clone());
+                tokio::task::spawn_blocking(move || layouts.op(&manager, op))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|out| Response::LayoutResult { layouts: out.layouts, created: out.created })
+            }
+            Request::LayoutBatch { ops } => {
+                let (layouts, manager) = (self.layouts.clone(), m.clone());
+                tokio::task::spawn_blocking(move || layouts.batch(&manager, ops))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|(layouts, created)| Response::LayoutResult { layouts, created })
+            }
+            Request::SetTerminalColors { colors } => m.set_colors(colors).map(|_| Response::Ok),
+            Request::GetTerminalColors => Ok(Response::TerminalColors { colors: m.colors() }),
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
@@ -247,6 +273,10 @@ impl Server {
                 | Request::RemoveWorktree { .. }
                 | Request::UpdateWorktree { .. }
         );
+        let removed_worktree = match &req {
+            Request::RemoveWorktree { path, .. } => Some(path.clone()),
+            _ => None,
+        };
         let git_changed = match &req {
             Request::GitStage { worktree, .. }
             | Request::GitUnstage { worktree, .. }
@@ -310,6 +340,10 @@ impl Server {
         if changes {
             let _ = self.manager.events.send(Event::WorkspaceChanged);
         }
+        // 지운 워크트리의 배치도 지운다
+        if let Some(path) = removed_worktree {
+            self.layouts.remove_workspace(&self.manager, &path);
+        }
         if let Some(worktree) = git_changed {
             let _ = self.manager.events.send(Event::GitChanged { worktree });
         }
@@ -351,6 +385,11 @@ fn request_kind(r: &Request) -> &'static str {
         Request::ListWorktrees { .. } => "list_worktrees",
         Request::CreateWorktree { .. } => "create_worktree",
         Request::RemoveWorktree { .. } => "remove_worktree",
+        Request::GetLayout { .. } => "get_layout",
+        Request::Layout { .. } => "layout",
+        Request::LayoutBatch { .. } => "layout_batch",
+        Request::SetTerminalColors { .. } => "set_terminal_colors",
+        Request::GetTerminalColors => "get_terminal_colors",
     }
 }
 

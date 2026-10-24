@@ -9,10 +9,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use thuminal_engine::{EngineConfig, EngineFactory, TerminalEngine};
+use thuminal_engine::{EngineConfig, EngineFactory, TerminalEngine, color_scheme_report};
 use thuminal_protocol::{
     Event, Frame, Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SessionState,
-    SnapshotFormat,
+    SnapshotFormat, TerminalColors,
 };
 use thuminal_pty::{PtyControl, PtyKiller, Spawned};
 use tokio::sync::{broadcast, oneshot};
@@ -31,6 +31,8 @@ pub enum Cmd {
     Resize { cols: u16, rows: u16, reply: oneshot::Sender<Result<(), String>> },
     ReadScreen { format: ScreenFormat, scrollback: bool, reply: oneshot::Sender<Result<String, String>> },
     Snapshot { format: SnapshotFormat, reply: oneshot::Sender<Result<Vec<u8>, String>> },
+    /// 엔진 기본색을 바꾼다
+    SetColors(TerminalColors),
     Kill,
     Stop,
 }
@@ -58,6 +60,9 @@ pub struct Restore {
 /// 셸이 첫 출력을 내고 이만큼 지난 뒤 되살리기 입력을 넣는다 (셸이 설정을 다 읽기 전에 넣으면 사라질 수 있다)
 const RESTORE_INPUT_DELAY: std::time::Duration = std::time::Duration::from_millis(600);
 
+/// 켜 두면 색 밝기가 바뀔 때 `CSI ?997;1n`/`;2n` 을 받겠다는 DEC 모드
+const COLOR_SCHEME_REPORT_MODE: u16 = 2031;
+
 /// 세션 스레드들을 띄운다: actor, PTY 읽기, PTY 쓰기, 끝 기다리기.
 pub fn start(
     id: SessionId,
@@ -66,6 +71,7 @@ pub fn start(
     engine: Arc<dyn EngineFactory>,
     events: broadcast::Sender<Event>,
     restore: Restore,
+    colors: Option<TerminalColors>,
 ) -> SessionHandle {
     let info = Arc::new(Mutex::new(info));
     let (tx, rx) = mpsc::channel::<Cmd>();
@@ -129,6 +135,11 @@ pub fn start(
                     return;
                 }
             };
+            if let Some(c) = &colors
+                && let Err(e) = engine.set_default_colors(c)
+            {
+                warn!(event = "terminal_colors_failed", session = id.0, error = %e);
+            }
             if let Some(replay) = restore.replay {
                 engine.feed(&replay);
                 engine.feed("\r\n\x1b[2m── thuminal: 이전 화면을 되살렸다 ──\x1b[0m\r\n".as_bytes());
@@ -202,6 +213,7 @@ impl Actor {
                 Cmd::Snapshot { format, reply } => {
                     let _ = reply.send(self.engine.snapshot(format).map_err(|e| e.to_string()));
                 }
+                Cmd::SetColors(colors) => self.set_colors(&colors),
                 Cmd::Kill => {
                     if let Err(e) = self.killer.kill() {
                         warn!(event = "session_kill_failed", session = self.id.0, error = %e);
@@ -268,6 +280,20 @@ impl Actor {
                     message: e.to_string(),
                 })));
             }
+        }
+    }
+
+    /// 기본색을 바꾸고, 밝기(dark/light)가 바뀌었으면 mode 2031 을 켠 프로그램에만 알린다
+    fn set_colors(&mut self, colors: &TerminalColors) {
+        let before = self.engine.color_scheme();
+        if let Err(e) = self.engine.set_default_colors(colors) {
+            warn!(event = "terminal_colors_failed", session = self.id.0, error = %e);
+            return;
+        }
+        let after = self.engine.color_scheme();
+        if before != after && self.engine.dec_mode(COLOR_SCHEME_REPORT_MODE) {
+            info!(event = "color_scheme_reported", session = self.id.0, scheme = ?after);
+            let _ = self.input.send(color_scheme_report(after).to_vec());
         }
     }
 

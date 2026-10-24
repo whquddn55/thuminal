@@ -5,12 +5,31 @@ use std::rc::Rc;
 
 use libghostty_vt::Terminal;
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
+use libghostty_vt::style::{Palette, RgbColor};
+use libghostty_vt::terminal::{Mode, ModeKind};
 use thuminal_engine::{
-    EngineConfig, EngineError, EngineFactory, Result, ScreenFormat, SnapshotFormat, TerminalEngine,
+    ColorScheme, EngineConfig, EngineError, EngineFactory, Result, ScreenFormat, SnapshotFormat, TerminalColors, TerminalEngine,
+    scheme_of,
 };
 
 fn err(e: impl std::fmt::Debug) -> EngineError {
     EngineError::Engine(format!("{e:?}"))
+}
+
+fn rgb(v: u32) -> RgbColor {
+    RgbColor { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8 }
+}
+
+fn packed(c: RgbColor) -> u32 {
+    (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
+}
+
+/// 지금 적용 중인 색(OSC 덮어쓰기 포함)으로 본 밝기. 색을 받은 적이 없으면 Dark
+fn effective_scheme(term: &Terminal<'_, '_>) -> ColorScheme {
+    match (term.fg_color().ok().flatten(), term.bg_color().ok().flatten()) {
+        (Some(fg), Some(bg)) => scheme_of(packed(fg), packed(bg)),
+        _ => ColorScheme::Dark,
+    }
 }
 
 pub struct GhosttyEngine {
@@ -29,6 +48,14 @@ impl GhosttyEngine {
         let sink = replies.clone();
         term.on_pty_write(move |_term, data: &[u8]| sink.borrow_mut().extend_from_slice(data))
             .map_err(err)?;
+        // `CSI ?996n` (색 밝기 질의): 배경이 전경보다 어두우면 dark 로 답한다
+        term.on_color_scheme(|t: &Terminal<'_, '_>| {
+            Some(match effective_scheme(t) {
+                ColorScheme::Dark => libghostty_vt::terminal::ColorScheme::Dark,
+                ColorScheme::Light => libghostty_vt::terminal::ColorScheme::Light,
+            })
+        })
+        .map_err(err)?;
         Ok(Self { term, replies })
     }
 
@@ -88,6 +115,27 @@ impl TerminalEngine for GhosttyEngine {
 
     fn pwd(&self) -> String {
         self.term.pwd().unwrap_or_default().to_owned()
+    }
+
+    fn set_default_colors(&mut self, colors: &TerminalColors) -> Result<()> {
+        // 팔레트는 Ghostty 기본 256색 위에 받은 만큼 덮는다 (16개면 16~255 는 기본 그대로)
+        let mut palette = Palette::default();
+        for (slot, v) in palette.0.iter_mut().zip(&colors.palette) {
+            *slot = rgb(*v);
+        }
+        self.term.set_default_fg_color(Some(rgb(colors.foreground))).map_err(err)?;
+        self.term.set_default_bg_color(Some(rgb(colors.background))).map_err(err)?;
+        self.term.set_default_cursor_color(colors.cursor.map(rgb)).map_err(err)?;
+        self.term.set_default_color_palette(Some(palette)).map_err(err)?;
+        Ok(())
+    }
+
+    fn color_scheme(&self) -> ColorScheme {
+        effective_scheme(&self.term)
+    }
+
+    fn dec_mode(&self, mode: u16) -> bool {
+        self.term.mode(Mode::new(mode, ModeKind::Dec)).unwrap_or(false)
     }
 }
 
@@ -160,6 +208,47 @@ mod tests {
         let mut e = engine(30, 5);
         e.feed(b"hello");
         assert!(!e.snapshot(SnapshotFormat::Native).unwrap().is_empty());
+    }
+
+    fn colors(fg: u32, bg: u32) -> TerminalColors {
+        TerminalColors {
+            foreground: fg,
+            background: bg,
+            cursor: Some(0xff0000),
+            palette: vec![0x111111, 0x222222],
+            scheme: thuminal_engine::ColorScheme::Dark,
+        }
+    }
+
+    #[test]
+    fn answers_color_queries_with_default_colors() {
+        let mut e = engine(20, 5);
+        e.set_default_colors(&colors(0xf8f8f2, 0x282a36)).unwrap();
+        e.feed(b"\x1b]11;?\x07\x1b]10;?\x07\x1b]4;1;?\x07");
+        let reply = String::from_utf8(e.take_replies()).unwrap();
+        assert!(reply.contains("11;rgb:2828/2a2a/3636"), "{reply:?}");
+        assert!(reply.contains("10;rgb:f8f8/f8f8/f2f2"), "{reply:?}");
+        assert!(reply.contains("4;1;rgb:2222/2222/2222"), "{reply:?}");
+        // 프로그램이 OSC 11 로 바꾼 배경은 기본색을 다시 넣어도 지킨다
+        e.feed(b"\x1b]11;#ffffff\x07");
+        e.set_default_colors(&colors(0xf8f8f2, 0x101010)).unwrap();
+        e.feed(b"\x1b]11;?\x07");
+        assert!(String::from_utf8(e.take_replies()).unwrap().contains("rgb:ffff/ffff/ffff"));
+    }
+
+    #[test]
+    fn answers_color_scheme_query_and_reports_mode_2031() {
+        let mut e = engine(20, 5);
+        e.feed(b"\x1b[?996n");
+        assert_eq!(e.take_replies(), b"\x1b[?997;1n", "색을 받기 전에는 dark");
+        e.set_default_colors(&colors(0x24292f, 0xffffff)).unwrap();
+        assert_eq!(e.color_scheme(), ColorScheme::Light);
+        e.feed(b"\x1b[?996n");
+        assert_eq!(e.take_replies(), b"\x1b[?997;2n");
+        assert!(!e.dec_mode(2031));
+        e.feed(b"\x1b[?2031h");
+        assert!(e.dec_mode(2031));
+        assert!(e.take_replies().is_empty(), "켜는 순간에는 알리지 않는다");
     }
 
     #[test]

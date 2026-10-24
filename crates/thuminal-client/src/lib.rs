@@ -13,8 +13,9 @@ use std::time::Duration;
 
 use thuminal_protocol::paths::Paths;
 use thuminal_protocol::{
-    ClientMessage, CreateSession, ErrorBody, Event, Frame, PROTOCOL_MAJOR, PROTOCOL_MINOR, RepoInfo, Request, Response,
-    ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SnapshotFormat, WorktreeInfo,
+    ClientMessage, CreateSession, ErrorBody, Event, Frame, LayoutOp, PROTOCOL_MAJOR, PROTOCOL_MINOR, PaneId, RepoInfo, Request,
+    Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SnapshotFormat, TerminalColors,
+    WorkspaceLayout, WorktreeInfo,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -268,6 +269,40 @@ impl Client {
 
     pub async fn remove_worktree(&self, repo: String, path: String, force: bool, delete_branch: bool) -> Result<()> {
         self.request(Request::RemoveWorktree { repo, path, force, delete_branch }).await.map(|_| ())
+    }
+
+    /// `workspace` 를 비우면 모든 workspace
+    pub async fn layouts(&self, workspace: Option<String>) -> Result<Vec<WorkspaceLayout>> {
+        match self.request(Request::GetLayout { workspace }).await? {
+            Response::Layouts { layouts } => Ok(layouts),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    /// 배치 op 하나. 바뀐 배치와 새로 만든 칸
+    pub async fn layout(&self, op: LayoutOp) -> Result<(Vec<WorkspaceLayout>, Vec<PaneId>)> {
+        match self.request(Request::Layout { op }).await? {
+            Response::LayoutResult { layouts, created } => Ok((layouts, created)),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn layout_batch(&self, ops: Vec<LayoutOp>) -> Result<(Vec<WorkspaceLayout>, Vec<PaneId>)> {
+        match self.request(Request::LayoutBatch { ops }).await? {
+            Response::LayoutResult { layouts, created } => Ok((layouts, created)),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn terminal_colors(&self) -> Result<Option<TerminalColors>> {
+        match self.request(Request::GetTerminalColors).await? {
+            Response::TerminalColors { colors } => Ok(colors),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    pub async fn set_terminal_colors(&self, colors: TerminalColors) -> Result<()> {
+        self.request(Request::SetTerminalColors { colors }).await.map(|_| ())
     }
 
     pub async fn shutdown(&self) -> Result<()> {
