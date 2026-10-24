@@ -42,18 +42,24 @@ function useShortcuts(model: AppModel) {
         e.stopPropagation();
         f();
       };
-      // Ctrl+` : 플로팅 워크스페이스
+      // 단축키는 Orca 와 같다. thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 칸 크기는 ⌃⌘⇧방향키
+      // ⌃` 와 ⌘⌥A : 플로팅 워크스페이스 (⌘⌥⇧A 는 최대화한 채로)
       if (e.ctrlKey && !e.metaKey && (e.code === "Backquote" || e.key === "`")) return run(() => void model.toggleFloating());
+      if (e.metaKey && e.altKey && e.code === "KeyA") return run(() => void model.toggleFloating(e.shiftKey));
+      // ⌃1~9 : 지금 워크스페이스의 탭
+      if (e.ctrlKey && !e.metaKey && !e.altKey && /^Digit[1-9]$/.test(e.code)) return run(() => model.selectTabIndex(Number(e.code.slice(5)) - 1));
       if (!e.metaKey) return;
       const s = model.get();
       if (s.dialog) return;
       const key = e.key.toLowerCase();
       const arrow = ARROWS[e.key];
-      if (arrow && e.altKey) return run(() => model.focusDir(arrow));
-      if (arrow && e.ctrlKey) {
+      if (arrow && e.ctrlKey && e.shiftKey) {
         const axis = arrow === "left" || arrow === "right" ? "row" : "column";
         return run(() => model.resizeBy(arrow === "right" || arrow === "down" ? 0.05 : -0.05, axis));
       }
+      if (arrow && e.ctrlKey) return run(() => model.focusDir(arrow));
+      // ⌘⌥← → : 워크트리 방문 기록 뒤로·앞으로
+      if (arrow && e.altKey && (arrow === "left" || arrow === "right")) return run(() => model.goHistory(arrow === "left" ? -1 : 1));
       if (key === "j") return run(() => model.setDialog({ kind: "jump" }));
       if (key === ",") return run(() => model.setDialog({ kind: "settings" }));
       if (e.shiftKey && key === "n") {
@@ -73,7 +79,10 @@ function useShortcuts(model: AppModel) {
       if (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !e.altKey && !e.ctrlKey) return run(() => model.selectNearWorktree(e.key === "ArrowDown" ? 1 : -1));
       if (key === "b" && !e.shiftKey) return run(() => model.toggleSidebar());
       if (e.altKey && key === "=") return run(() => model.equalize());
-      if (/^[1-9]$/.test(e.key) && !e.shiftKey) return run(() => model.selectTabIndex(Number(e.key) - 1));
+      // ⌘⌥T : 새 에이전트 탭 (찾은 에이전트 중 첫째, 보통 claude)
+      if (e.altKey && e.code === "KeyT") return run(() => void model.newTab(undefined, s.agents[0] ?? "claude"));
+      // ⌘1~9 : 사이드바 순서로 n 번째 워크트리
+      if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey) return run(() => model.selectWorktreeIndex(Number(e.code.slice(5)) - 1));
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -192,7 +201,7 @@ function Empty({ worktree }: { worktree: boolean }) {
         )}
       </div>
       <p className="text-2xs">
-        ⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · Ctrl+` 플로팅
+        ⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · ⌘⌥A 플로팅
       </p>
     </div>
   );

@@ -348,7 +348,15 @@ export class AppModel {
   /** 상태 칸을 눌러 읽음으로 돌린다 */
   markRead = (ws: WorkspaceId) => this.markSeen(ws);
 
-  select = (ws: WorkspaceId) => {
+  /** 워크트리 방문 기록 (⌘⌥← → 로 오간다). 기록 안에서 옮겨 다닐 때는 쌓지 않는다 */
+  private history: WorkspaceId[] = [];
+  private historyAt = -1;
+
+  select = (ws: WorkspaceId, fromHistory = false) => {
+    if (!fromHistory && ws !== this.get().active) {
+      this.history = [...this.history.slice(0, this.historyAt + 1), ws].slice(-50);
+      this.historyAt = this.history.length - 1;
+    }
     this.markSeen();
     const recent = [ws, ...this.get().recent.filter((x) => x !== ws)].slice(0, 30);
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
@@ -357,10 +365,29 @@ export class AppModel {
     void this.refreshStatus(ws);
   };
 
+  goHistory = (delta: number) => {
+    if (this.historyAt < 0) this.history = [this.get().active];
+    const at = Math.max(0, Math.min(this.history.length - 1, (this.historyAt < 0 ? 0 : this.historyAt) + delta));
+    this.historyAt = at;
+    const ws = this.history[at];
+    if (ws && ws !== this.get().active) this.select(ws, true);
+  };
+
+  /** 사이드바에 보이는 순서의 워크트리 (DOM 에서 읽는다. 접힌 그룹은 빠진다) */
+  private sidebarOrder(): WorkspaceId[] {
+    const order = [...document.querySelectorAll<HTMLElement>("[data-drop-workspace]")].map((e) => e.dataset.dropWorkspace!);
+    return order.filter((ws, i) => order.indexOf(ws) === i);
+  }
+
+  /** ⌘1~9 */
+  selectWorktreeIndex = (i: number) => {
+    const ws = this.sidebarOrder()[i];
+    if (ws) this.select(ws);
+  };
+
   /** ⌘⇧↑ ↓: 사이드바 순서로 이전·다음 워크트리 */
   selectNearWorktree = (delta: number) => {
-    const order = [...document.querySelectorAll<HTMLElement>("[data-drop-workspace]")].map((e) => e.dataset.dropWorkspace!);
-    const list = order.filter((ws, i) => order.indexOf(ws) === i);
+    const list = this.sidebarOrder();
     if (!list.length) return;
     const i = list.indexOf(this.get().active);
     this.select(list[(i + delta + list.length) % list.length]);
@@ -514,14 +541,14 @@ export class AppModel {
     localStorage.setItem(FLOATING_KEY, JSON.stringify({ rect, maximized }));
   }
 
-  /** Ctrl+`: 플로팅 패널을 열고 닫는다. 처음 열 때 탭이 없으면 홈 폴더에서 셸을 띄운다 */
-  toggleFloating = async () => {
+  /** ⌘⌥A, Ctrl+`: 플로팅 패널을 열고 닫는다. 처음 열 때 탭이 없으면 홈 폴더에서 셸을 띄운다 */
+  toggleFloating = async (maximized?: boolean) => {
     const s = this.get();
     if (s.floating.open) {
       this.set({ floating: { ...s.floating, open: false }, focusArea: "main" });
       return;
     }
-    this.set({ floating: { ...s.floating, open: true }, focusArea: "floating" });
+    this.set({ floating: { ...s.floating, open: true, maximized: maximized || s.floating.maximized }, focusArea: "floating" });
     if (!s.layouts[FLOATING_WORKSPACE]?.tabs.length) await this.newTab(FLOATING_WORKSPACE);
   };
 
