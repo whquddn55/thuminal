@@ -407,6 +407,8 @@ pub enum Request {
     GetTerminalColors,
     /// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다 (새 탭 메뉴가 설치된 에이전트를 보이려고 쓴다)
     FindCommands { names: Vec<String> },
+    /// Orca 에 등록한 저장소·워크트리 이름·claude 세션을 읽는다 (바꾸지 않는다)
+    ScanOrca,
     GetAgentSettings,
     /// 에이전트를 띄울 때 붙일 옵션을 바꾼다. 다음에 띄우는 에이전트부터 적용된다 (이미 뜬 셸에서 치는 `claude` 도)
     SetAgentSettings { settings: AgentSettings },
@@ -450,6 +452,7 @@ pub enum Response {
     Commands { found: Vec<String> },
     AgentSettings { settings: AgentSettings },
     Tmux { stdout: String, stderr: String, code: i32 },
+    OrcaScan { scan: OrcaScan },
     Ok,
 }
 
@@ -513,6 +516,51 @@ pub enum ServerMessage {
 pub enum ResponseResult {
     Ok(Response),
     Err(ErrorBody),
+}
+
+/// Orca 에서 가져올 수 있는 것 (`ScanOrca`)
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrcaScan {
+    pub repos: Vec<OrcaRepo>,
+    /// 표시 이름이나 메모가 있는 워크트리
+    pub worktrees: Vec<OrcaWorktree>,
+    /// Orca 탭에 붙은 claude 세션 (최근에 쓴 것부터)
+    pub sessions: Vec<OrcaSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrcaRepo {
+    pub path: String,
+    pub name: String,
+    /// 폴더가 아직 있는지
+    pub exists: bool,
+    /// thuminal 에 이미 등록했는지
+    pub registered: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrcaWorktree {
+    pub path: String,
+    pub name: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrcaSession {
+    pub session_id: String,
+    pub title: String,
+    /// Orca 워크트리 경로. 떠 있는 터미널이면 None
+    pub worktree: Option<String>,
+    /// claude 를 띄운 폴더 (세션 기록에서 읽는다. `--resume` 은 이 폴더에서 해야 한다)
+    pub cwd: String,
+    /// 세션 기록을 마지막으로 쓴 때 (ms)
+    pub updated_at: u64,
+    /// Orca 떠 있는 터미널에서 쓰던 세션
+    pub floating: bool,
+    /// Orca 에서 에이전트 팀으로 띄웠다
+    pub teams: bool,
+    /// 지금 이 세션으로 떠 있는 claude 가 있다 (Orca 든 어디든). 또 띄우면 두 claude 가 한 세션을 같이 쓴다
+    pub running: bool,
 }
 
 /// 데몬이 에이전트를 띄울 때 쓰는 설정 (`agent-settings.json`)

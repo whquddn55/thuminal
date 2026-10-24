@@ -18,6 +18,7 @@ import {
   type RepoInfo,
   type SessionId,
   type SessionInfo,
+  type OrcaSession,
   type Side,
   type Spawn,
   type WorkspaceId,
@@ -53,6 +54,7 @@ export type Dialog =
   | { kind: "delete-worktree"; worktree: WorktreeInfo }
   | { kind: "jump" }
   | { kind: "settings" }
+  | { kind: "import-orca" }
   /** 되돌릴 수 없는 일을 하기 전에 묻는 창 */
   | { kind: "confirm"; title: string; body: string; action: string; run: () => void }
   | null;
@@ -749,6 +751,46 @@ export class AppModel {
     } catch (e) {
       this.fail(`프로젝트를 등록하지 못했다: ${e}`);
     }
+  };
+
+  /**
+   * Orca 에서 고른 것을 가져온다: 저장소 등록, (이름 없는) 워크트리에 Orca 표시 이름, claude 세션은 새 탭에서 `claude --resume`.
+   * 하나가 실패해도 나머지는 한다. 끝나면 무엇을 했는지 알린다
+   */
+  importOrca = async (pick: { repos: string[]; names: { path: string; name: string }[]; sessions: OrcaSession[] }) => {
+    const host = this.services.host;
+    const failed: string[] = [];
+    let repos = 0;
+    // 등록마다 앱이 워크트리 목록을 다시 읽으므로 하나씩 기다리지 않고 한꺼번에 보낸다
+    await Promise.all(
+      pick.repos.map((path) =>
+        host.addRepo(path).then(
+          () => repos++,
+          (e) => failed.push(`${path.split("/").pop()}: ${e}`),
+        ),
+      ),
+    );
+    await this.refreshWorkspace();
+    let names = 0;
+    const unnamed = pick.names.filter(({ path }) => this.get().worktrees.some((w) => w.path === path && !w.name));
+    await Promise.all(unnamed.map(({ path, name }) => host.updateWorktree(path, { name }).then(() => names++, () => undefined)));
+    let sessions = 0;
+    for (const s of pick.sessions) {
+      const wts = this.get().worktrees;
+      const inside = (p: string) => s.cwd === p || s.cwd.startsWith(`${p}/`);
+      const ws = s.floating
+        ? FLOATING_WORKSPACE
+        : (wts.find((w) => w.path === s.worktree)?.path ?? wts.filter((w) => inside(w.path)).sort((a, b) => b.path.length - a.path.length)[0]?.path ?? OTHER_WORKSPACE);
+      // 셸에서 치게 해서 thuminal claude 실행기(훅·권한·팀)로 뜨게 한다
+      await host.layout({ op: "new_tab", workspace: ws, spawn: { command: [], input: `claude --resume ${s.session_id}`, cwd: s.cwd, env: {} }, focus: false }).then(
+        () => sessions++,
+        (e) => failed.push(`${s.title || s.session_id}: ${e}`),
+      );
+    }
+    if (names) await this.refreshWorkspace();
+    const done = `Orca 에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, claude 세션 ${sessions}개`;
+    if (failed.length) this.fail(`${done}. 못 가져온 것: ${failed.join(" · ")}`);
+    else this.notice(done);
   };
 
   removeProject = async (repo: string) => {

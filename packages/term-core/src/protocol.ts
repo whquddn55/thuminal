@@ -210,6 +210,31 @@ export interface LayoutResult {
   created: PaneId[];
 }
 
+// ---- Orca 에서 가져오기 (데몬이 Orca 상태 파일을 읽기만 한다) ----
+
+export interface OrcaScan {
+  repos: { path: string; name: string; exists: boolean; registered: boolean }[];
+  /** 표시 이름이나 메모가 있는 워크트리 */
+  worktrees: { path: string; name: string | null; comment: string | null }[];
+  /** Orca 탭에 붙은 claude 세션 (최근에 쓴 것부터) */
+  sessions: OrcaSession[];
+}
+
+export interface OrcaSession {
+  session_id: string;
+  title: string;
+  /** Orca 워크트리 경로. 떠 있는 터미널이면 null */
+  worktree: string | null;
+  /** claude 를 띄운 폴더 (`--resume` 은 여기서) */
+  cwd: string;
+  /** 세션 기록을 마지막으로 쓴 때 (ms) */
+  updated_at: number;
+  floating: boolean;
+  teams: boolean;
+  /** 지금 이 세션으로 떠 있는 claude 가 있다. 또 띄우면 두 claude 가 한 세션을 같이 쓴다 */
+  running: boolean;
+}
+
 // ---- 에이전트 설정 (데몬이 에이전트를 띄울 때 붙이는 옵션, `agent-settings.json`) ----
 
 export interface AgentSettings {

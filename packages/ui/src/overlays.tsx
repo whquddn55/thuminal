@@ -1,9 +1,9 @@
-// 창: 워크트리 만들기·지우기, ⌘J 워크트리로 가기.
+// 창: 워크트리 만들기·지우기, ⌘J 워크트리로 가기, Orca 에서 가져오기.
 
 import { CaretDownIcon, CaretRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { BranchList, WorktreeInfo } from "@thuminal/term-core";
+import type { BranchList, OrcaScan, OrcaSession, WorktreeInfo } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -39,6 +39,8 @@ export function Dialogs() {
       return <DeleteWorktreeDialog worktree={dialog.worktree} onClose={close} />;
     case "jump":
       return <JumpPalette onClose={close} />;
+    case "import-orca":
+      return <ImportOrcaDialog onClose={close} />;
     case "confirm":
       return (
         <Dialog open onOpenChange={(o) => !o && close()}>
@@ -353,6 +355,151 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
           ))}
           {list.length === 0 && <div className="px-3 py-6 text-center text-muted-foreground">맞는 워크트리가 없다</div>}
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "3분 전" 같은 지난 시간 */
+function ago(ms: number): string {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  return `${Math.round(h / 24)}일 전`;
+}
+
+/** Orca 에 등록한 저장소·워크트리 이름·claude 세션을 골라 가져온다 */
+function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
+  const model = useModel();
+  const worktrees = useApp((s) => s.worktrees);
+  const [scan, setScan] = useState<OrcaScan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [repos, setRepos] = useState<Set<string>>(new Set());
+  const [names, setNames] = useState(true);
+  const [sessions, setSessions] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    model.services.host.scanOrca().then(
+      (s) => {
+        setScan(s);
+        setRepos(new Set(s.repos.filter((r) => r.exists && !r.registered).map((r) => r.path)));
+      },
+      (e) => setError(String(e)),
+    );
+  }, [model]);
+
+  const named = (scan?.worktrees ?? []).filter((w) => w.name);
+  const place = (s: OrcaSession) => {
+    if (s.floating) return "떠 있는 터미널";
+    const w = worktrees.find((x) => x.path === s.worktree);
+    const o = scan?.worktrees.find((x) => x.path === s.worktree);
+    return w ? worktreeTitle(w) : o?.name || s.worktree?.split("/").pop() || s.cwd;
+  };
+  const toggle = (set: Set<string>, v: string, on: boolean) => {
+    const next = new Set(set);
+    if (on) next.add(v);
+    else next.delete(v);
+    return next;
+  };
+  const free = (scan?.sessions ?? []).filter((s) => !s.running);
+  const run = async () => {
+    if (!scan) return;
+    setBusy(true);
+    await model.importOrca({
+      repos: [...repos],
+      names: names ? named.map((w) => ({ path: w.path, name: w.name! })) : [],
+      sessions: scan.sessions.filter((s) => sessions.has(s.session_id)),
+    });
+    setBusy(false);
+    onClose();
+  };
+  const section = "text-xs font-medium text-muted-foreground";
+  const row = "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-3 sm:max-w-[620px]">
+        <DialogHeader>
+          <DialogTitle>Orca 에서 가져오기</DialogTitle>
+          <DialogDescription>Orca 에 등록한 프로젝트, 워크트리 이름, 탭의 claude 세션을 골라 가져온다. Orca 쪽은 바꾸지 않는다.</DialogDescription>
+        </DialogHeader>
+        {error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : !scan ? (
+          <p className="text-sm text-muted-foreground">Orca 데이터를 읽는 중…</p>
+        ) : (
+          <div className="-mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1 thm-scroll">
+            <div className="flex flex-col gap-0.5">
+              <div className={section}>프로젝트 {scan.repos.length}</div>
+              {scan.repos.map((r) => (
+                <label key={r.path} className={cn(row, (!r.exists || r.registered) && "opacity-60")}>
+                  <Checkbox
+                    checked={r.registered || repos.has(r.path)}
+                    disabled={!r.exists || r.registered}
+                    onCheckedChange={(v) => setRepos((s) => toggle(s, r.path, v === true))}
+                  />
+                  <span className="font-medium">{r.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{r.path}</span>
+                  {r.registered && <span className="text-muted-foreground">이미 있다</span>}
+                  {!r.exists && <span className="text-muted-foreground">폴더 없음</span>}
+                </label>
+              ))}
+            </div>
+            {named.length > 0 && (
+              <label className={row}>
+                <Checkbox checked={names} onCheckedChange={(v) => setNames(v === true)} />
+                <span>
+                  워크트리 이름 {named.length}개 가져오기 <span className="text-muted-foreground">(thuminal 에서 이름을 붙이지 않은 워크트리만. Orca 메모는 아직 자리가 없어 가져오지 않는다)</span>
+                </span>
+              </label>
+            )}
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center">
+                <span className={cn(section, "flex-1")}>claude 세션 {scan.sessions.length} · 고른 세션은 새 탭에서 claude --resume 으로 이어진다</span>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  disabled={free.length === 0}
+                  onClick={() => setSessions((s) => (s.size === free.length ? new Set() : new Set(free.map((x) => x.session_id))))}
+                >
+                  {free.length > 0 && sessions.size === free.length ? "모두 풀기" : "모두 고르기"}
+                </Button>
+              </div>
+              {scan.sessions.map((x) => {
+                return (
+                  <label key={x.session_id} className={cn(row, x.running && "opacity-60")} title={x.running ? "이 세션으로 claude 가 지금 떠 있다 (Orca 등). 거기서 끈 뒤 가져온다" : undefined}>
+                    <Checkbox
+                      checked={sessions.has(x.session_id)}
+                      disabled={x.running}
+                      onCheckedChange={(v) => setSessions((s) => toggle(s, x.session_id, v === true))}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{x.title || x.session_id}</span>
+                    {x.running && <span className="shrink-0 rounded bg-amber-500/15 px-1 text-amber-600 dark:text-amber-400">지금 떠 있음</span>}
+                    <span className="max-w-44 shrink-0 truncate text-muted-foreground">{place(x)}</span>
+                    <span className="w-14 shrink-0 text-right text-muted-foreground tabular-nums">{ago(x.updated_at)}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {scan.sessions.length > free.length && (
+              <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                "지금 떠 있음" 세션은 claude 가 그 세션으로 아직 돌고 있다 (Orca 등). 또 띄우면 두 claude 가 한 세션을 같이 쓰게 되므로 고를 수 없다. 거기서
+                claude 를 끈 뒤 이 창을 다시 연다.
+              </p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            취소
+          </Button>
+          <Button disabled={!scan || busy || (repos.size === 0 && sessions.size === 0 && !(names && named.length))} onClick={() => void run()}>
+            {busy ? "가져오는 중…" : `가져오기 (프로젝트 ${repos.size} · 세션 ${sessions.size})`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

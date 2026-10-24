@@ -20,6 +20,7 @@ import type {
   LayoutResult,
   TerminalColors,
   AgentSettings,
+  OrcaScan,
   WorkspaceLayout,
   DaemonEvent,
   DaemonInfo,
@@ -190,6 +191,10 @@ export class TauriHostApi implements HostApi {
 
   setTerminalColors(colors: TerminalColors): Promise<void> {
     return req({ type: "set_terminal_colors", colors });
+  }
+
+  scanOrca(): Promise<OrcaScan> {
+    return req<OrcaScan>({ type: "scan_orca" }, (r) => r.scan);
   }
 
   getAgentSettings(): Promise<AgentSettings> {

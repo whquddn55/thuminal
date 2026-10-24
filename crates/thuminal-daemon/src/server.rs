@@ -253,6 +253,14 @@ impl Server {
                 let out = self.teams.call(Call { session, pane, argv, cwd, env }).await;
                 Ok(Response::Tmux { stdout: out.stdout, stderr: out.stderr, code: out.code })
             }
+            Request::ScanOrca => {
+                let registered: Vec<String> = self.workspace.repos().into_iter().map(|r| r.path).collect();
+                match tokio::task::spawn_blocking(move || crate::orca::scan(&registered)).await {
+                    Ok(Ok(scan)) => Ok(Response::OrcaScan { scan }),
+                    Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
+                    Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+                }
+            }
             Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings() }),
             Request::SetAgentSettings { settings } => {
                 m.set_agent_settings(settings.clone());
@@ -430,6 +438,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::GetTerminalColors => "get_terminal_colors",
         Request::FindCommands { .. } => "find_commands",
         Request::Tmux { .. } => "tmux",
+        Request::ScanOrca => "scan_orca",
         Request::GetAgentSettings => "get_agent_settings",
         Request::SetAgentSettings { .. } => "set_agent_settings",
     }

@@ -10,6 +10,7 @@ import {
   ChatCircleDotsIcon,
   DotsThreeIcon,
   FolderIcon,
+  DownloadSimpleIcon,
   FolderPlusIcon,
   GearSixIcon,
   MagnifyingGlassIcon,
@@ -146,6 +147,14 @@ export function Sidebar() {
           </TooltipTrigger>
           <TooltipContent>프로젝트 추가</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-xs" className="text-muted-foreground" onClick={() => model.setDialog({ kind: "import-orca" })}>
+              <DownloadSimpleIcon className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Orca 에서 가져오기</TooltipContent>
+        </Tooltip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1 pb-2 pl-1 thm-scroll">
@@ -208,6 +217,11 @@ export function Sidebar() {
             <FolderPlusIcon className="size-5" />
             <span className="text-foreground">프로젝트 폴더 추가</span>
             <small className="text-2xs">git 저장소, 또는 저장소들이 든 폴더</small>
+          </button>
+        )}
+        {repos.length === 0 && (
+          <button className="mx-2 mt-2 w-[calc(100%-1rem)] rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" onClick={() => model.setDialog({ kind: "import-orca" })}>
+            Orca 에서 프로젝트·claude 세션 가져오기
           </button>
         )}
       </div>

@@ -6,6 +6,7 @@
 pub mod layout;
 pub mod lock;
 pub mod manager;
+pub mod orca;
 pub mod persist;
 pub mod server;
 pub mod session;
