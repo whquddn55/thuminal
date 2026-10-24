@@ -195,8 +195,32 @@ impl Server {
                 m.read_screen(session, format, scrollback).await.map(|text| Response::Screen { text })
             }
             Request::SetLabels { session, labels } => m.set_labels(session, labels).map(|session| Response::Session { session }),
-            Request::ReportAgent { session, kind, event, agent_session_id, transcript } => {
-                m.report_agent(session, kind, &event, agent_session_id, transcript).map(|session| Response::Session { session })
+            Request::ReportAgent {
+                session,
+                kind,
+                event,
+                agent_session_id,
+                transcript,
+                prompt,
+                last_assistant_message,
+                tool_name,
+                notification_type,
+                source,
+                model,
+            } => {
+                let report = crate::manager::AgentReport {
+                    kind,
+                    event,
+                    agent_session_id,
+                    transcript,
+                    prompt,
+                    last_assistant_message,
+                    tool_name,
+                    notification_type,
+                    source,
+                    model,
+                };
+                m.report_agent(session, report).map(|session| Response::Session { session })
             }
             Request::Kill { session } => m.kill(session).map(|_| Response::Ok),
             Request::Remove { session } => m.remove(session).map(|_| {
@@ -324,10 +348,9 @@ impl Server {
                 Request::CreateWorktree { repo, branch, base, name } => {
                     Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref(), name.as_deref())? }
                 }
-                Request::RemoveWorktree { repo, path, force, delete_branch } => {
-                    ws.remove_worktree(&repo, std::path::Path::new(&path), force, delete_branch)?;
-                    Response::Ok
-                }
+                Request::RemoveWorktree { repo, path, force, delete_branch, force_branch } => Response::Text {
+                    text: ws.remove_worktree(&repo, std::path::Path::new(&path), force, delete_branch, force_branch)?,
+                },
                 _ => unreachable!("저장소 요청만 온다"),
             })
         })

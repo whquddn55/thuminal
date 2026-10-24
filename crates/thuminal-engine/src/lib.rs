@@ -31,6 +31,15 @@ impl Default for EngineConfig {
     }
 }
 
+/// 프로그램이 터미널에 알린 것 가운데 데몬이 바깥으로 전할 것
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineEvent {
+    /// BEL (0x07)
+    Bell,
+    /// OSC 9 / OSC 777 데스크톱 알림. 제목이 없으면 빈 글
+    Notification { title: String, body: String },
+}
+
 pub trait TerminalEngine {
     /// PTY 에서 읽은 바이트를 넣는다. 잘린 제어 코드가 와도 다음 호출에서 이어 처리한다.
     fn feed(&mut self, bytes: &[u8]);
@@ -69,6 +78,11 @@ pub trait TerminalEngine {
     fn dec_mode(&self, mode: u16) -> bool {
         let _ = mode;
         false
+    }
+
+    /// 지난번 뒤로 들어온 벨, 데스크톱 알림. 꺼내면 비워진다
+    fn take_events(&mut self) -> Vec<EngineEvent> {
+        Vec::new()
     }
 }
 

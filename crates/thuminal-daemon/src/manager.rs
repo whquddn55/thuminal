@@ -21,6 +21,117 @@ use crate::shell::ShellIntegration;
 /// 데몬을 띄운 터미널(예: Orca 안의 셸)의 정보가 새 세션에 새지 않게 한다.
 const SCRUBBED_ENV_PREFIXES: &[&str] = &["ORCA_", "THUMINAL_", "CLAUDE_CODE_", "CLAUDECODE"];
 
+/// 훅 알림 하나 (`Request::ReportAgent` 의 필드)
+#[derive(Debug, Clone, Default)]
+pub struct AgentReport {
+    pub kind: String,
+    pub event: String,
+    pub agent_session_id: Option<String>,
+    pub transcript: Option<String>,
+    pub prompt: Option<String>,
+    pub last_assistant_message: Option<String>,
+    pub tool_name: Option<String>,
+    pub notification_type: Option<String>,
+    pub source: Option<String>,
+    pub model: Option<String>,
+}
+
+/// 묻는 도구: 이 도구의 PreToolUse 는 사용자 답을 기다리는 것이다 (Orca `isAskUserQuestionTool` 과 같다)
+fn is_question_tool(name: &str) -> bool {
+    let n: String = name.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_lowercase();
+    n == "askuserquestion" || n == "requestuserinput"
+}
+
+/// 훅 알림 하나로 에이전트 정보를 바꾼다. 상태 규칙은 Orca 의 claude 훅 처리를 따른다
+/// (`src/shared/agent-hook-listener/providers/claude-events.ts`, `compatible-lifecycle-events.ts`):
+/// - UserPromptSubmit, PostToolUse, PostToolUseFailure, PreToolUse → 일하는 중 (묻는 도구의 PreToolUse 는 부름)
+/// - PermissionRequest → 부름
+/// - Notification: `permission_prompt`/`elicitation_dialog` 면 부름, `idle_prompt` 면 기다림, 그 밖은 그대로
+/// - Stop, StopFailure → 기다림 + 턴 끝난 때. SessionStart(compact 말고) → 기다림, 지난 턴 글을 비운다
+/// - SessionEnd → 에이전트 없음. 모르는 훅 → 상태는 그대로 두고 세션 id 만 받는다
+pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<AgentInfo> {
+    use thuminal_protocol::{AGENT_TEXT_MAX, clip_text};
+    if r.event == "SessionEnd" {
+        return None;
+    }
+    let mut a = prev.unwrap_or(AgentInfo {
+        kind: r.kind.clone(),
+        session_id: None,
+        transcript: None,
+        state: AgentState::Idle,
+        updated_at: now,
+        prompt: None,
+        last_assistant_message: None,
+        tool_name: None,
+        model: None,
+        turn_ended_at: None,
+    });
+    a.kind = r.kind;
+    if r.agent_session_id.is_some() {
+        a.session_id = r.agent_session_id;
+    }
+    if r.transcript.is_some() {
+        a.transcript = r.transcript;
+    }
+    let tool = r.tool_name.filter(|t| !t.is_empty());
+    let state = match r.event.as_str() {
+        "SessionStart" if r.source.as_deref() == Some("compact") => None,
+        "SessionStart" => {
+            a.prompt = None;
+            a.last_assistant_message = None;
+            a.tool_name = None;
+            a.turn_ended_at = None;
+            if r.model.is_some() {
+                a.model = r.model;
+            }
+            Some(AgentState::Idle)
+        }
+        "UserPromptSubmit" => {
+            if let Some(p) = r.prompt.as_deref().and_then(|p| clip_text(p, AGENT_TEXT_MAX)) {
+                a.prompt = Some(p);
+            }
+            a.last_assistant_message = None;
+            a.tool_name = None;
+            a.turn_ended_at = None;
+            Some(AgentState::Working)
+        }
+        "PreToolUse" => {
+            let asks = tool.as_deref().is_some_and(is_question_tool);
+            a.tool_name = tool.or(a.tool_name.take());
+            Some(if asks { AgentState::NeedsAttention } else { AgentState::Working })
+        }
+        "PostToolUse" | "PostToolUseFailure" => {
+            a.tool_name = tool.or(a.tool_name.take());
+            Some(AgentState::Working)
+        }
+        "PermissionRequest" => {
+            a.tool_name = tool.or(a.tool_name.take());
+            Some(AgentState::NeedsAttention)
+        }
+        "Notification" => match r.notification_type.as_deref() {
+            Some("permission_prompt" | "elicitation_dialog") => Some(AgentState::NeedsAttention),
+            Some("idle_prompt") => Some(AgentState::Idle),
+            _ => None,
+        },
+        "Stop" | "StopFailure" => {
+            if let Some(m) = r.last_assistant_message.as_deref().and_then(|m| clip_text(m, AGENT_TEXT_MAX)) {
+                a.last_assistant_message = Some(m);
+            }
+            a.tool_name = None;
+            a.turn_ended_at = Some(now);
+            Some(AgentState::Idle)
+        }
+        _ => None,
+    };
+    if let Some(s) = state
+        && s != a.state
+    {
+        a.state = s;
+        a.updated_at = now;
+    }
+    Some(a)
+}
+
 pub struct Manager {
     sessions: Mutex<BTreeMap<SessionId, SessionHandle>>,
     next_id: AtomicU64,
@@ -135,6 +246,7 @@ impl Manager {
             labels: req.labels,
             agent: None,
             restored_from,
+            bell_at: 0,
         };
         let colors = self.colors.lock().unwrap().clone();
         let handle = session::start(id, info.clone(), spawned, self.engine.clone(), self.events.clone(), restore, colors);
@@ -206,39 +318,21 @@ impl Manager {
         Ok(info)
     }
 
-    /// 에이전트 훅 알림으로 세션의 에이전트 상태를 바꾼다
-    pub fn report_agent(
-        &self,
-        id: SessionId,
-        kind: String,
-        event: &str,
-        agent_session_id: Option<String>,
-        transcript: Option<String>,
-    ) -> Result<SessionInfo, ErrorBody> {
-        let info = {
+    /// 에이전트 훅 알림으로 세션의 에이전트 상태를 바꾼다. 바뀐 것이 있을 때만 알린다
+    pub fn report_agent(&self, id: SessionId, report: AgentReport) -> Result<SessionInfo, ErrorBody> {
+        let hook = report.event.clone();
+        let (info, changed) = {
             let h = self.handle(id)?;
             let mut i = h.info.lock().unwrap();
-            if event == "SessionEnd" {
-                i.agent = None;
-            } else {
-                let prev = i.agent.take();
-                let state = match event {
-                    "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => AgentState::Working,
-                    "Notification" | "PermissionRequest" => AgentState::NeedsAttention,
-                    _ => AgentState::Idle, // SessionStart, Stop, SubagentStop
-                };
-                i.agent = Some(AgentInfo {
-                    kind,
-                    session_id: agent_session_id.or_else(|| prev.as_ref().and_then(|p| p.session_id.clone())),
-                    transcript: transcript.or_else(|| prev.as_ref().and_then(|p| p.transcript.clone())),
-                    state,
-                    updated_at: now_ms(),
-                });
-            }
-            i.clone()
+            let next = next_agent(i.agent.clone(), report, now_ms());
+            let changed = next != i.agent;
+            i.agent = next;
+            (i.clone(), changed)
         };
-        info!(event = "agent_report", session = id.0, hook = event, agent = ?info.agent.as_ref().map(|a| a.state));
-        let _ = self.events.send(Event::SessionUpdated { session: info.clone() });
+        info!(event = "agent_report", session = id.0, hook, agent = ?info.agent.as_ref().map(|a| a.state), changed);
+        if changed {
+            let _ = self.events.send(Event::SessionUpdated { session: info.clone() });
+        }
         Ok(info)
     }
 
@@ -316,5 +410,71 @@ impl Manager {
         for h in self.sessions.lock().unwrap().values() {
             let _ = h.cmd.send(Cmd::Kill);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(event: &str) -> AgentReport {
+        AgentReport { kind: "claude".into(), event: event.into(), ..Default::default() }
+    }
+
+    fn step(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> AgentInfo {
+        next_agent(prev, r, now).expect("에이전트가 있어야 한다")
+    }
+
+    #[test]
+    fn permission_granted_goes_back_to_working() {
+        let a = step(None, AgentReport { agent_session_id: Some("s1".into()), model: Some("opus".into()), source: Some("startup".into()), ..report("SessionStart") }, 1);
+        assert_eq!((a.state, a.turn_ended_at, a.model.as_deref()), (AgentState::Idle, None, Some("opus")));
+        let a = step(Some(a), AgentReport { prompt: Some("  고쳐 줘 ".into()), ..report("UserPromptSubmit") }, 2);
+        assert_eq!((a.state, a.prompt.as_deref(), a.updated_at), (AgentState::Working, Some("고쳐 줘"), 2));
+        let a = step(Some(a), AgentReport { tool_name: Some("Bash".into()), ..report("PreToolUse") }, 3);
+        assert_eq!((a.state, a.tool_name.as_deref(), a.updated_at), (AgentState::Working, Some("Bash"), 2), "상태가 그대로면 updated_at 도 그대로");
+        let a = step(Some(a), AgentReport { tool_name: Some("Bash".into()), ..report("PermissionRequest") }, 4);
+        assert_eq!(a.state, AgentState::NeedsAttention);
+        let a = step(Some(a), AgentReport { notification_type: Some("permission_prompt".into()), ..report("Notification") }, 5);
+        assert_eq!((a.state, a.updated_at), (AgentState::NeedsAttention, 4));
+        // 승인하면 PostToolUse 가 온다 → 다시 일하는 중
+        let a = step(Some(a), AgentReport { tool_name: Some("Bash".into()), ..report("PostToolUse") }, 6);
+        assert_eq!(a.state, AgentState::Working);
+        let a = step(Some(a), AgentReport { last_assistant_message: Some("다 했다".into()), ..report("Stop") }, 7);
+        assert_eq!((a.state, a.turn_ended_at, a.tool_name.as_deref()), (AgentState::Idle, Some(7), None));
+        assert_eq!((a.last_assistant_message.as_deref(), a.prompt.as_deref(), a.session_id.as_deref()), (Some("다 했다"), Some("고쳐 줘"), Some("s1")));
+        // 쉬고 있다는 알림은 부름이 아니다
+        let b = step(Some(a.clone()), AgentReport { notification_type: Some("idle_prompt".into()), ..report("Notification") }, 8);
+        assert_eq!((b.state, b.turn_ended_at, b.updated_at), (AgentState::Idle, Some(7), 7));
+        // 새 프롬프트면 지난 답과 끝난 때를 비운다
+        let c = step(Some(a.clone()), report("UserPromptSubmit"), 9);
+        assert_eq!((c.last_assistant_message, c.turn_ended_at, c.prompt.as_deref()), (None, None, Some("고쳐 줘")));
+        assert!(next_agent(Some(a), report("SessionEnd"), 10).is_none());
+    }
+
+    #[test]
+    fn notification_kinds_and_unknown_hooks() {
+        let working = step(None, report("UserPromptSubmit"), 1);
+        for (kind, want) in [
+            (Some("permission_prompt"), AgentState::NeedsAttention),
+            (Some("elicitation_dialog"), AgentState::NeedsAttention),
+            (Some("idle_prompt"), AgentState::Idle),
+            (Some("auth_success"), AgentState::Working),
+            (None, AgentState::Working),
+        ] {
+            let a = step(Some(working.clone()), AgentReport { notification_type: kind.map(Into::into), ..report("Notification") }, 2);
+            assert_eq!(a.state, want, "{kind:?}");
+        }
+        // 묻는 도구의 PreToolUse 는 부름
+        let a = step(Some(working.clone()), AgentReport { tool_name: Some("AskUserQuestion".into()), ..report("PreToolUse") }, 2);
+        assert_eq!(a.state, AgentState::NeedsAttention);
+        // 모르는 훅, 턴 중간의 compact SessionStart 는 상태를 바꾸지 않는다
+        assert_eq!(step(Some(working.clone()), report("SubagentStop"), 3).state, AgentState::Working);
+        let a = step(Some(working.clone()), AgentReport { source: Some("compact".into()), ..report("SessionStart") }, 3);
+        assert_eq!((a.state, a.prompt), (AgentState::Working, working.prompt));
+        // 긴 글은 자른다
+        let long = "가".repeat(500);
+        let a = step(None, AgentReport { prompt: Some(long), ..report("UserPromptSubmit") }, 1);
+        assert_eq!(a.prompt.unwrap().chars().count(), thuminal_protocol::AGENT_TEXT_MAX + 1);
     }
 }

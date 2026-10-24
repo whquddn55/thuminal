@@ -86,6 +86,31 @@ async fn reattach_after_client_disconnect_keeps_screen_and_io() {
 }
 
 #[tokio::test]
+async fn bell_and_desktop_notification_become_events() {
+    let (_dir, paths) = start().await;
+    let c = Client::connect(&paths, "test").await.unwrap();
+    let mut events = c.events();
+    // 벨 두 번(1초 안이라 한 번만 알린다), OSC 9 알림, OSC 777 알림(1초 안이라 버린다)
+    let s = c
+        .create(cmd(&["/bin/sh", "-c", r"printf 'a\007b\007'; printf '\033]9;done here\007'; printf '\033]777;notify;T;B\007'; sleep 30"]))
+        .await
+        .unwrap();
+    let (mut bells, mut notes) = (0, Vec::new());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while let Ok(Ok(e)) = tokio::time::timeout_at(deadline, events.recv()).await {
+        match e {
+            Event::SessionUpdated { session } if session.id == s.id && session.bell_at > 0 => bells += 1,
+            Event::SessionNotification { session, title, body } if session == s.id => notes.push((title, body)),
+            _ => {}
+        }
+    }
+    let bell_at = c.list().await.unwrap().into_iter().find(|x| x.id == s.id).unwrap().bell_at;
+    assert!(bell_at > 0);
+    assert!(bells >= 1, "벨 이벤트가 없다");
+    assert_eq!(notes, vec![(String::new(), "done here".to_string())]);
+}
+
+#[tokio::test]
 async fn reports_exit_code_as_event() {
     let (_dir, paths) = start().await;
     let c = Client::connect(&paths, "test").await.unwrap();

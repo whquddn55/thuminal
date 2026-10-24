@@ -187,8 +187,16 @@ async fn create_worktree(state: State<'_, AppState>, repo: String, branch: Strin
 }
 
 #[tauri::command]
-async fn remove_worktree(state: State<'_, AppState>, repo: String, path: String, force: bool, delete_branch: bool) -> CmdResult<()> {
-    state.client().await?.remove_worktree(repo, path, force, delete_branch).await.map_err(err)
+/// 알릴 것(예: 합치지 않은 브랜치를 남겼다)이 있으면 그 글, 없으면 빈 글. `forceBranch` 를 빼면 합친 브랜치만 지운다
+async fn remove_worktree(
+    state: State<'_, AppState>,
+    repo: String,
+    path: String,
+    force: bool,
+    delete_branch: bool,
+    force_branch: Option<bool>,
+) -> CmdResult<String> {
+    state.client().await?.remove_worktree(repo, path, force, delete_branch, force_branch.unwrap_or(false)).await.map_err(err)
 }
 
 /// 데몬 요청을 그대로 넘긴다 (git, 파일, 워크트리 정보 등). 화면 쪽이 프로토콜 모양대로 요청을 만든다.

@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use thuminal_engine::{EngineConfig, EngineFactory, TerminalEngine, color_scheme_report};
+use thuminal_engine::{EngineConfig, EngineEvent, EngineFactory, TerminalEngine, color_scheme_report};
 use thuminal_protocol::{
     Event, Frame, Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SessionState,
     SnapshotFormat, TerminalColors,
@@ -143,8 +143,9 @@ pub fn start(
             if let Some(replay) = restore.replay {
                 engine.feed(&replay);
                 engine.feed("\r\n\x1b[2m── thuminal: 이전 화면을 되살렸다 ──\x1b[0m\r\n".as_bytes());
-                // 저장본 안의 질의(커서 위치 등)에 대한 답은 새 셸에 보내지 않는다
+                // 저장본 안의 질의(커서 위치 등)에 대한 답은 새 셸에 보내지 않는다. 벨·알림도 옛것이다
                 engine.take_replies();
+                engine.take_events();
             }
             Actor {
                 id,
@@ -156,6 +157,8 @@ pub fn start(
                 subscribers: Vec::new(),
                 events,
                 pending_input: restore.input,
+                last_bell: 0,
+                last_notification: 0,
             }
             .run(rx);
         })
@@ -174,7 +177,16 @@ struct Actor {
     subscribers: Vec<(ConnId, Outbox)>,
     events: broadcast::Sender<Event>,
     pending_input: Option<Vec<u8>>,
+    /// 마지막으로 알린 벨, 데스크톱 알림 (ms). 이벤트를 1초에 하나까지만 낸다
+    last_bell: u64,
+    last_notification: u64,
 }
+
+/// 같은 세션의 벨·알림 이벤트 사이 최소 간격
+const ENGINE_EVENT_INTERVAL_MS: u64 = 1000;
+/// 데스크톱 알림 제목, 본문 글자 수 한도
+const NOTIFICATION_TITLE_MAX: usize = 200;
+const NOTIFICATION_BODY_MAX: usize = 1000;
 
 impl Actor {
     fn run(mut self, rx: mpsc::Receiver<Cmd>) {
@@ -242,11 +254,37 @@ impl Actor {
         }
         self.subscribers.retain(|(_, tx)| tx.send(Frame::Output { session: self.id, data: data.clone() }).is_ok());
 
+        let now = now_ms();
+        let mut bell = false;
+        for e in self.engine.take_events() {
+            match e {
+                EngineEvent::Bell => {
+                    if now.saturating_sub(self.last_bell) >= ENGINE_EVENT_INTERVAL_MS {
+                        self.last_bell = now;
+                        bell = true;
+                    }
+                }
+                EngineEvent::Notification { title, body } => {
+                    if now.saturating_sub(self.last_notification) >= ENGINE_EVENT_INTERVAL_MS {
+                        self.last_notification = now;
+                        let clip = |s: &str, max| thuminal_protocol::clip_text(s, max).unwrap_or_default();
+                        let (title, body) = (clip(&title, NOTIFICATION_TITLE_MAX), clip(&body, NOTIFICATION_BODY_MAX));
+                        info!(event = "session_notification", session = self.id.0);
+                        let _ = self.events.send(Event::SessionNotification { session: self.id, title, body });
+                    }
+                }
+            }
+        }
+
         let (title, pwd) = (self.engine.title(), self.engine.pwd());
         let changed = {
             let mut i = self.info.lock().unwrap();
-            i.last_output_at = now_ms();
+            i.last_output_at = now;
             let mut changed = false;
+            if bell {
+                i.bell_at = now;
+                changed = true;
+            }
             if !title.is_empty() && i.title != title {
                 i.title = title;
                 changed = true;

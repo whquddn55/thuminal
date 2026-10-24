@@ -4056,6 +4056,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thuminal-client",
  "thuminal-layout",
  "thuminal-protocol",

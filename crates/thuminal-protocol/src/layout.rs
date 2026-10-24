@@ -170,7 +170,7 @@ fn yes() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum LayoutOp {
-    /// 새 탭(터미널 하나). index 를 비우면 끝. focus 면 활성 탭으로
+    /// 새 탭(터미널 하나). index 를 비우면 끝. focus 면 활성 탭으로. title 을 주면 탭 이름
     NewTab {
         workspace: String,
         #[serde(default)]
@@ -179,6 +179,8 @@ pub enum LayoutOp {
         index: Option<usize>,
         #[serde(default = "yes")]
         focus: bool,
+        #[serde(default)]
+        title: Option<String>,
     },
     /// 문서 칸을 새 탭으로 연다 (같은 doc 이 이미 있으면 그 칸으로 포커스만)
     OpenDoc { workspace: String, doc: BTreeMap<String, String> },

@@ -331,10 +331,11 @@ impl Store {
 
     fn run(&mut self, op: LayoutOp, spawner: &mut dyn Spawner, touched: &mut Vec<String>, created: &mut Vec<PaneId>) -> Result<()> {
         match op {
-            LayoutOp::NewTab { workspace, spawn, index, focus } => {
+            LayoutOp::NewTab { workspace, spawn, index, focus, title } => {
                 check_workspace(&workspace)?;
                 let pane = self.spawn_pane(spawner, &workspace, None, spawn, created)?;
-                let tab = self.alloc_tab(tree::leaf(pane));
+                let mut tab = self.alloc_tab(tree::leaf(pane));
+                tab.title = title.filter(|t| !t.trim().is_empty());
                 self.insert_tab(&workspace, tab, index, focus);
             }
             LayoutOp::OpenDoc { workspace, doc } => {

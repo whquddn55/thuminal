@@ -65,7 +65,7 @@ impl Dir {
 
 #[derive(Subcommand)]
 enum PaneCmd {
-    /// 칸을 나눠 새 터미널을 띄우고 새 칸 번호를 찍는다. `--` 뒤 명령은 새 셸에 입력한다 (기본 --right)
+    /// 칸을 나눠 새 터미널을 띄우고 새 칸과 세션 번호를 찍는다 (`p8 s13`). `--` 뒤 명령은 새 셸에 입력한다 (기본 --right)
     Split {
         /// 나눌 칸 (p7, 생략하면 이 셸이 든 칸)
         target: Option<String>,
@@ -156,8 +156,11 @@ enum PaneCmd {
 
 #[derive(Subcommand)]
 enum TabCmd {
-    /// 새 탭을 띄우고 탭과 칸 번호를 찍는다. `--` 뒤 명령은 새 셸에 입력한다
+    /// 새 탭을 띄우고 탭, 칸, 세션 번호를 찍는다 (`t3 p7 s12`). `--` 뒤 명령은 새 셸에 입력한다
     New {
+        /// 탭 이름
+        #[arg(long)]
+        title: Option<String>,
         /// 이 워크스페이스에 (워크트리 경로나 브랜치, floating, other, `.`. 기본: 이 셸의 워크스페이스)
         #[arg(long = "in")]
         workspace: Option<String>,
@@ -212,7 +215,8 @@ enum LayoutCmd {
         #[arg(long)]
         tab: Option<String>,
     },
-    /// 한 줄 배치를 적용하고 칸 번호를 찍는다. 예: 'row(claude, col(zsh, "npm run dev"):40%)'.
+    /// 한 줄 배치를 적용하고 탭의 칸마다 칸과 세션 번호를 한 줄씩 찍는다 (`p7 s12`, 문서 칸은 `p7 -`).
+    /// 예: 'row(claude, col(zsh, "npm run dev"):40%)'.
     /// --tab 을 주면 그 탭을 바꾸고(빠진 옛 칸은 새 탭으로 뗀다), 아니면 새 탭을 만든다
     Apply {
         spec: String,
@@ -351,10 +355,33 @@ fn print_json(v: &impl serde::Serialize) -> Res<()> {
     Ok(())
 }
 
+/// 결과 배치에서 이 칸의 세션
+fn session_in(layouts: &[WorkspaceLayout], id: PaneId) -> Option<SessionId> {
+    layouts.iter().flat_map(|l| &l.tabs).flat_map(|t| panes(&t.root)).find(|p| p.id == id).and_then(Pane::session)
+}
+
+/// `p7 s12` (문서 칸은 `p7 -`)
+fn pane_and_session(layouts: &[WorkspaceLayout], id: PaneId) -> String {
+    format!("{id} {}", session_in(layouts, id).map_or("-".to_string(), |s| format!("s{s}")))
+}
+
+/// 칸이 든 세션 (term 명령의 `p7`). 배치를 한 번 읽는다
+pub async fn session_of_pane(c: &Client, id: PaneId) -> Res<SessionId> {
+    session_in(&c.layouts(None).await?, id).ok_or_else(|| format!("{id} 은 없거나 터미널 칸이 아니다").into())
+}
+
+/// `--json` 이면 결과를 찍는다: 바뀐 배치, 새로 만든 칸, 새 칸마다 {pane, tab, session}
 async fn send(c: &Client, json: bool, op: LayoutOp) -> Res<(Vec<WorkspaceLayout>, Vec<PaneId>)> {
     let (layouts, created) = c.layout(op).await?;
     if json {
-        print_json(&serde_json::json!({ "layouts": layouts, "created": created }))?;
+        let made: Vec<_> = created
+            .iter()
+            .map(|p| {
+                let tab = tab_with(&layouts, &PaneRef::Id(*p)).map(|(_, t)| t.id);
+                serde_json::json!({ "pane": p, "tab": tab, "session": session_in(&layouts, *p) })
+            })
+            .collect();
+        print_json(&serde_json::json!({ "layouts": layouts, "created": created, "panes": made }))?;
     }
     Ok((layouts, created))
 }
@@ -372,9 +399,9 @@ pub async fn pane(c: &Client, args: PaneArgs) -> Res<()> {
                 spawn: spawn(cwd, &command)?,
                 focus: !no_focus,
             };
-            let (_, created) = send(c, json, op).await?;
+            let (layouts, created) = send(c, json, op).await?;
             if !json {
-                created.iter().for_each(|p| println!("{p}"));
+                created.iter().for_each(|p| println!("{}", pane_and_session(&layouts, *p)));
             }
         }
         PaneCmd::Resize { target, size: sz, grow, shrink, axis } => {
@@ -467,12 +494,13 @@ pub async fn pane(c: &Client, args: PaneArgs) -> Res<()> {
 pub async fn tab(c: &Client, args: TabArgs) -> Res<()> {
     let json = args.json;
     match args.cmd {
-        TabCmd::New { workspace: w, cwd, index, no_focus, command } => {
+        TabCmd::New { title, workspace: w, cwd, index, no_focus, command } => {
             let ws = workspace(c, w.as_deref()).await?;
-            let (layouts, created) = send(c, json, LayoutOp::NewTab { workspace: ws, spawn: spawn(cwd, &command)?, index, focus: !no_focus }).await?;
+            let op = LayoutOp::NewTab { workspace: ws, spawn: spawn(cwd, &command)?, index, focus: !no_focus, title };
+            let (layouts, created) = send(c, json, op).await?;
             if !json && let Some(p) = created.first() {
                 let tab = tab_with(&layouts, &PaneRef::Id(*p)).map(|(_, t)| t.id.to_string()).unwrap_or_default();
-                println!("{tab} {p}");
+                println!("{tab} {}", pane_and_session(&layouts, *p));
             }
         }
         TabCmd::Select { tab } => {
@@ -546,7 +574,7 @@ pub async fn layout(c: &Client, args: LayoutArgs) -> Res<()> {
             if !json {
                 let key = created.first().map(|p| PaneRef::Id(*p)).or(first_ref);
                 if let Some((_, t)) = key.and_then(|k| tab_with(&layouts, &k)) {
-                    println!("{}", panes(&t.root).iter().map(|p| p.id.to_string()).collect::<Vec<_>>().join(" "));
+                    panes(&t.root).iter().for_each(|p| println!("{}", pane_and_session(&layouts, p.id)));
                 }
             }
         }
@@ -572,6 +600,21 @@ mod tests {
         assert!(pane_ref(Some("t7")).is_err());
         assert_eq!(tab_ref(Some("t3")).unwrap(), TabRef::Id(TabId(3)));
         assert_eq!(tab_ref(Some("p2")).unwrap(), TabRef::Pane(PaneRef::Id(PaneId(2))));
+    }
+
+    #[test]
+    fn prints_pane_with_session() {
+        let pane = |id, content| PaneNode::Pane { pane: Pane { id: PaneId(id), content } };
+        let root = PaneNode::Split {
+            axis: Axis::Row,
+            children: vec![pane(7, PaneContent::Terminal { session: SessionId(12) }), pane(8, PaneContent::Doc { doc: Default::default() })],
+            sizes: vec![0.5, 0.5],
+        };
+        let tab = Tab { id: TabId(3), title: None, root, focused: PaneId(7), zoomed: None };
+        let layouts = [WorkspaceLayout { workspace: "other".into(), tabs: vec![tab], active_tab: Some(TabId(3)) }];
+        assert_eq!(pane_and_session(&layouts, PaneId(7)), "p7 s12");
+        assert_eq!(pane_and_session(&layouts, PaneId(8)), "p8 -");
+        assert_eq!(session_in(&layouts, PaneId(9)), None);
     }
 
     #[test]

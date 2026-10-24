@@ -45,11 +45,15 @@ pub enum WtCmd {
     Rm {
         /// 워크트리 경로나 브랜치 이름
         target: String,
+        /// 바뀐 파일이 있어도 워크트리를 지운다 (브랜치에는 쓰지 않는다)
         #[arg(long)]
         force: bool,
-        /// 브랜치도 지운다
+        /// 브랜치도 지운다. 합치지 않은 커밋이 있으면 남기고 알린다
         #[arg(long)]
         delete_branch: bool,
+        /// 합치지 않은 커밋이 있어도 브랜치를 지운다 (--delete-branch 를 함께 켠다)
+        #[arg(long)]
+        force_branch: bool,
     },
     /// 지금 폴더(또는 준 경로)가 든 워크트리의 git 상태
     Status {
@@ -152,7 +156,7 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 println!("{}", w.path);
             }
         }
-        WtCmd::Rm { target, force, delete_branch } => {
+        WtCmd::Rm { target, force, delete_branch, force_branch } => {
             let w = &find_worktree(c, &target, false).await?;
             // 그 워크트리에서 돌던 세션을 먼저 끝낸다
             for s in c.list().await? {
@@ -160,8 +164,13 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                     c.remove(s.id).await?;
                 }
             }
-            c.remove_worktree(w.repo.clone(), w.path.clone(), force, delete_branch).await?;
+            let note = c.remove_worktree(w.repo.clone(), w.path.clone(), force, delete_branch || force_branch, force_branch).await?;
             println!("지웠다: {}", w.path);
+            if note.contains("합치지 않은") {
+                eprintln!("{note} (지우려면 --force-branch)");
+            } else if !note.is_empty() {
+                eprintln!("{note}");
+            }
         }
         WtCmd::Status { path, json } => {
             let here = std::fs::canonicalize(path.unwrap_or_else(|| ".".into()))?;

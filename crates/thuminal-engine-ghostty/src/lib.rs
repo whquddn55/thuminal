@@ -8,8 +8,8 @@ use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::style::{Palette, RgbColor};
 use libghostty_vt::terminal::{Mode, ModeKind};
 use thuminal_engine::{
-    ColorScheme, EngineConfig, EngineError, EngineFactory, Result, ScreenFormat, SnapshotFormat, TerminalColors, TerminalEngine,
-    scheme_of,
+    ColorScheme, EngineConfig, EngineError, EngineEvent, EngineFactory, Result, ScreenFormat, SnapshotFormat, TerminalColors,
+    TerminalEngine, scheme_of,
 };
 
 fn err(e: impl std::fmt::Debug) -> EngineError {
@@ -35,7 +35,11 @@ fn effective_scheme(term: &Terminal<'_, '_>) -> ColorScheme {
 pub struct GhosttyEngine {
     term: Terminal<'static, 'static>,
     replies: Rc<RefCell<Vec<u8>>>,
+    events: Rc<RefCell<Vec<EngineEvent>>>,
 }
+
+/// 한 번 꺼내기 전에 쌓아 둘 벨·알림 수 (넘치면 버린다. 데몬이 어차피 1초에 하나만 쓴다)
+const MAX_PENDING_EVENTS: usize = 64;
 
 impl GhosttyEngine {
     pub fn new(config: EngineConfig) -> Result<Self> {
@@ -56,7 +60,24 @@ impl GhosttyEngine {
             })
         })
         .map_err(err)?;
-        Ok(Self { term, replies })
+        let events: Rc<RefCell<Vec<EngineEvent>>> = Rc::new(RefCell::new(Vec::new()));
+        let push = |events: &Rc<RefCell<Vec<EngineEvent>>>, e: EngineEvent| {
+            let mut v = events.borrow_mut();
+            if v.len() < MAX_PENDING_EVENTS {
+                v.push(e);
+            }
+        };
+        let bells = events.clone();
+        term.on_bell(move |_t: &Terminal<'_, '_>| push(&bells, EngineEvent::Bell)).map_err(err)?;
+        let notes = events.clone();
+        // 글은 프로그램이 준 바이트 그대로라 UTF-8 이 아닐 수 있다
+        term.on_desktop_notification(move |_t: &Terminal<'_, '_>, n: libghostty_vt::terminal::DesktopNotification<'_>| {
+            let title = String::from_utf8_lossy(n.title()).into_owned();
+            let body = String::from_utf8_lossy(n.body()).into_owned();
+            push(&notes, EngineEvent::Notification { title, body });
+        })
+        .map_err(err)?;
+        Ok(Self { term, replies, events })
     }
 
     fn format(&self, format: Format, scrollback: bool) -> Result<Vec<u8>> {
@@ -136,6 +157,10 @@ impl TerminalEngine for GhosttyEngine {
 
     fn dec_mode(&self, mode: u16) -> bool {
         self.term.mode(Mode::new(mode, ModeKind::Dec)).unwrap_or(false)
+    }
+
+    fn take_events(&mut self) -> Vec<EngineEvent> {
+        std::mem::take(&mut *self.events.borrow_mut())
     }
 }
 
@@ -249,6 +274,27 @@ mod tests {
         e.feed(b"\x1b[?2031h");
         assert!(e.dec_mode(2031));
         assert!(e.take_replies().is_empty(), "켜는 순간에는 알리지 않는다");
+    }
+
+    #[test]
+    fn reports_bell_and_desktop_notifications() {
+        let mut e = engine(30, 5);
+        assert!(e.take_events().is_empty());
+        e.feed(b"ding\x07");
+        // OSC 9 (본문만), OSC 777 (제목 + 본문). OSC 9;4 는 진행률이라 알림이 아니다
+        e.feed(b"\x1b]9;build done\x07\x1b]777;notify;Claude;needs you\x1b\\\x1b]9;4;1;50\x07");
+        assert_eq!(
+            e.take_events(),
+            vec![
+                EngineEvent::Bell,
+                EngineEvent::Notification { title: String::new(), body: "build done".into() },
+                EngineEvent::Notification { title: "Claude".into(), body: "needs you".into() },
+            ]
+        );
+        assert!(e.take_events().is_empty());
+        // OSC 끝의 BEL 은 벨이 아니다
+        e.feed(b"\x1b]2;title\x07");
+        assert!(e.take_events().is_empty());
     }
 
     #[test]

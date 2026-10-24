@@ -39,7 +39,7 @@ fn op(s: &mut Store, f: &mut Fake, o: LayoutOp) -> Outcome {
 }
 
 fn new_tab(ws: &str) -> LayoutOp {
-    LayoutOp::NewTab { workspace: ws.into(), spawn: Spawn::default(), index: None, focus: true }
+    LayoutOp::NewTab { workspace: ws.into(), spawn: Spawn::default(), index: None, focus: true, title: None }
 }
 
 fn split(target: u64, side: Side) -> LayoutOp {
@@ -70,6 +70,17 @@ fn new_tab_and_split_make_tree_and_report_changes() {
     // 같은 축으로 또 나누면 펼쳐 합친다
     op(&mut s, &mut f, split(1, Side::Left));
     assert_eq!(line(&tab_of(&s, W, 0)), "row(p4:25%, p1:25%, col(p2:50%, p3:50%):50%)");
+}
+
+#[test]
+fn new_tab_takes_title() {
+    let mut s = Store::default();
+    let mut f = Fake::default();
+    let titled = |t: &str| LayoutOp::NewTab { workspace: W.into(), spawn: Spawn::default(), index: None, focus: true, title: Some(t.into()) };
+    op(&mut s, &mut f, titled("feature/x"));
+    op(&mut s, &mut f, titled("  "));
+    assert_eq!(tab_of(&s, W, 0).title.as_deref(), Some("feature/x"));
+    assert_eq!(tab_of(&s, W, 1).title, None, "빈 이름은 붙이지 않는다");
 }
 
 #[test]

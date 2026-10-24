@@ -61,6 +61,12 @@ async fn restores_sessions_after_signal_stop_but_not_after_user_stop() {
             event: "SessionStart".into(),
             agent_session_id: Some("abc-123".into()),
             transcript: None,
+            prompt: None,
+            last_assistant_message: None,
+            tool_name: None,
+            notification_type: None,
+            source: Some("startup".into()),
+            model: None,
         })
         .await
         .unwrap();

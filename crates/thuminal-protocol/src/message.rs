@@ -90,6 +90,9 @@ pub struct SessionInfo {
     /// 재부팅 등으로 데몬이 다시 뜰 때 되살린 세션이면, 이전 데몬에서의 번호
     #[serde(default)]
     pub restored_from: Option<SessionId>,
+    /// 마지막으로 BEL(0x07)이 온 때 (유닉스 시간 ms, 없으면 0). 세션마다 1초에 한 번까지만 바뀐다
+    #[serde(default)]
+    pub bell_at: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,8 +114,39 @@ pub struct AgentInfo {
     pub session_id: Option<String>,
     pub transcript: Option<String>,
     pub state: AgentState,
-    /// 유닉스 시간 ms
+    /// 상태가 마지막으로 바뀐 때 (유닉스 시간 ms)
     pub updated_at: u64,
+    /// 마지막 사용자 프롬프트 (UserPromptSubmit 의 `prompt`, [`AGENT_TEXT_MAX`] 글자까지)
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// 마지막 답 (Stop 의 `last_assistant_message`, 없으면 transcript 끝에서 읽은 것. [`AGENT_TEXT_MAX`] 글자까지)
+    #[serde(default)]
+    pub last_assistant_message: Option<String>,
+    /// 지금 쓰는(또는 막 쓴) 도구 이름 (PreToolUse 등의 `tool_name`). 턴이 끝나면 비운다
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    /// 모델 (SessionStart 의 `model`)
+    #[serde(default)]
+    pub model: Option<String>,
+    /// 일하던 턴이 Stop 으로 끝난 때 (유닉스 시간 ms). 새 프롬프트나 새 세션이면 비운다.
+    /// 이것이 있고 state 가 idle 이면 "끝남", 없이 idle 이면 막 시작해 기다리는 중이다
+    #[serde(default)]
+    pub turn_ended_at: Option<u64>,
+}
+
+/// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다
+pub const AGENT_TEXT_MAX: usize = 200;
+
+/// 앞뒤 공백을 지우고 `max` 글자까지 자른다 (자르면 끝에 `…`). 비면 None
+pub fn clip_text(s: &str, max: usize) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    match s.char_indices().nth(max) {
+        Some((i, _)) => Some(format!("{}…", s[..i].trim_end())),
+        None => Some(s.to_string()),
+    }
 }
 
 /// 등록한 git 저장소
@@ -245,7 +279,9 @@ pub enum Request {
         scrollback: bool,
     },
     SetLabels { session: SessionId, labels: BTreeMap<String, String> },
-    /// 에이전트 훅이 보내는 알림. `event` 는 훅 이름 (SessionStart, UserPromptSubmit, Stop, Notification, SessionEnd)
+    /// 에이전트 훅이 보내는 알림. `event` 는 훅 이름 (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse,
+    /// PostToolUseFailure, PermissionRequest, Notification, Stop, StopFailure, SessionEnd).
+    /// 나머지 필드는 훅 JSON 에서 그대로 옮긴 것이고 없으면 비운다
     ReportAgent {
         session: SessionId,
         kind: String,
@@ -254,6 +290,24 @@ pub enum Request {
         agent_session_id: Option<String>,
         #[serde(default)]
         transcript: Option<String>,
+        /// UserPromptSubmit 의 `prompt`
+        #[serde(default)]
+        prompt: Option<String>,
+        /// Stop 의 `last_assistant_message` (없으면 CLI 가 transcript 끝에서 읽는다)
+        #[serde(default)]
+        last_assistant_message: Option<String>,
+        /// PreToolUse, PostToolUse, PermissionRequest 의 `tool_name`
+        #[serde(default)]
+        tool_name: Option<String>,
+        /// Notification 의 `notification_type` (permission_prompt, elicitation_dialog, idle_prompt, auth_success …)
+        #[serde(default)]
+        notification_type: Option<String>,
+        /// SessionStart 의 `source` (startup, resume, clear, compact)
+        #[serde(default)]
+        source: Option<String>,
+        /// SessionStart 의 `model`
+        #[serde(default)]
+        model: Option<String>,
     },
     Kill { session: SessionId },
     /// 끝난 세션을 목록에서 지운다
@@ -317,13 +371,18 @@ pub enum Request {
         dir: String,
     },
     ReadFile { worktree: String, file: String },
+    /// 워크트리를 지운다. 답은 `Text`: 알릴 것(예: 브랜치를 남긴 까닭)이 있으면 그 글, 없으면 빈 글
     RemoveWorktree {
         repo: String,
         path: String,
+        /// 바뀐 파일이 있어도 워크트리를 지운다 (`git worktree remove --force`). 브랜치에는 쓰지 않는다
         #[serde(default)]
         force: bool,
         #[serde(default)]
         delete_branch: bool,
+        /// 합치지 않은 커밋이 있어도 브랜치를 지운다 (`git branch -D`). 아니면 `-d` 로 지우고, git 이 거절하면 남긴다
+        #[serde(default)]
+        force_branch: bool,
     },
     /// workspace 를 비우면 모든 workspace 배치
     GetLayout {
@@ -383,6 +442,8 @@ pub enum Event {
     /// workspace 배치가 없어졌다
     LayoutRemoved { workspace: String },
     TerminalColorsChanged { colors: TerminalColors },
+    /// 세션 프로그램이 OSC 9 / OSC 777 로 데스크톱 알림을 청했다 (세션마다 1초에 한 번까지)
+    SessionNotification { session: SessionId, title: String, body: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,5 +502,26 @@ mod tests {
         let s = serde_json::to_string(&r).unwrap();
         assert_eq!(s, r#"{"kind":"response","id":3,"err":{"code":"not_found","message":"x"}}"#);
         assert_eq!(serde_json::from_str::<ServerMessage>(&s).unwrap(), r);
+    }
+
+    #[test]
+    fn new_fields_default_when_missing() {
+        // 예전 클라이언트가 보내는 모양도 그대로 받는다
+        let r: Request = serde_json::from_str(r#"{"type":"report_agent","session":1,"kind":"claude","event":"Stop"}"#).unwrap();
+        assert!(matches!(r, Request::ReportAgent { prompt: None, notification_type: None, .. }));
+        let r: Request = serde_json::from_str(r#"{"type":"remove_worktree","repo":"a","path":"/p","force":true,"delete_branch":true}"#).unwrap();
+        assert!(matches!(r, Request::RemoveWorktree { force: true, force_branch: false, .. }));
+        let a: AgentInfo = serde_json::from_str(r#"{"kind":"claude","session_id":null,"transcript":null,"state":"idle","updated_at":1}"#).unwrap();
+        assert_eq!((a.prompt, a.turn_ended_at), (None, None));
+        let e = Event::SessionNotification { session: SessionId(3), title: "t".into(), body: "b".into() };
+        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"type":"session_notification","session":3,"title":"t","body":"b"}"#);
+    }
+
+    #[test]
+    fn clips_text_by_chars() {
+        assert_eq!(clip_text("  hi  ", 5).as_deref(), Some("hi"));
+        assert_eq!(clip_text("   ", 5), None);
+        assert_eq!(clip_text("가나다라마바", 3).as_deref(), Some("가나다…"));
+        assert_eq!(clip_text("abc", 3).as_deref(), Some("abc"));
     }
 }

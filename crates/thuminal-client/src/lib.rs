@@ -267,8 +267,14 @@ impl Client {
         }
     }
 
-    pub async fn remove_worktree(&self, repo: String, path: String, force: bool, delete_branch: bool) -> Result<()> {
-        self.request(Request::RemoveWorktree { repo, path, force, delete_branch }).await.map(|_| ())
+    /// 워크트리를 지운다. `force` 는 워크트리에만, `force_branch` 는 브랜치에만 쓴다.
+    /// 알릴 것(예: 합치지 않은 브랜치를 남겼다)이 있으면 그 글, 없으면 빈 글을 돌려준다
+    pub async fn remove_worktree(&self, repo: String, path: String, force: bool, delete_branch: bool, force_branch: bool) -> Result<String> {
+        match self.request(Request::RemoveWorktree { repo, path, force, delete_branch, force_branch }).await? {
+            Response::Text { text } => Ok(text),
+            Response::Ok => Ok(String::new()),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
     }
 
     /// `workspace` 를 비우면 모든 workspace

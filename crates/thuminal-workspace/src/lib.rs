@@ -18,6 +18,9 @@ pub enum VcsError {
     NotARepo(String),
     #[error("{0}")]
     Command(String),
+    /// 합치지 않은 커밋이 있어 `force` 없이는 브랜치를 지우지 않았다
+    #[error("브랜치 {0} 에 합치지 않은 커밋이 있다")]
+    NotMerged(String),
 }
 
 /// 버전 관리 도구 인터페이스. 경로는 모두 절대 경로다.
@@ -29,7 +32,9 @@ pub trait Vcs: Send + Sync {
     fn list_worktrees(&self, repo: &Path) -> Result<Vec<VcsWorktree>, VcsError>;
     /// 새 브랜치 `branch` 를 `base`(없으면 HEAD) 에서 만들어 `path` 에 워크트리로 꺼낸다
     fn create_worktree(&self, repo: &Path, path: &Path, branch: &str, base: Option<&str>) -> Result<(), VcsError>;
+    /// `force` 면 바뀐 파일이 있어도 지운다
     fn remove_worktree(&self, repo: &Path, path: &Path, force: bool) -> Result<(), VcsError>;
+    /// `force` 가 아니면 합친 브랜치만 지우고, 합치지 않은 커밋이 있으면 [`VcsError::NotMerged`]
     fn delete_branch(&self, repo: &Path, branch: &str, force: bool) -> Result<(), VcsError>;
     fn status(&self, worktree: &Path) -> Result<GitStatus, VcsError>;
     /// 파일 하나의 unified diff. `staged` 면 스테이지된 변경, 아니면 작업 폴더 변경 (새 파일 포함)
@@ -231,7 +236,9 @@ impl Workspace {
             .ok_or_else(|| WorkspaceError::Invalid("만든 워크트리를 목록에서 찾지 못했다".into()))
     }
 
-    pub fn remove_worktree(&self, repo: &str, path: &Path, force: bool, delete_branch: bool) -> Result<(), WorkspaceError> {
+    /// 워크트리를 지운다. `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도) 쓴다.
+    /// 브랜치를 지우지 못해도 워크트리는 지운 채로 두고, 남긴 까닭을 글로 돌려준다 (알릴 것이 없으면 빈 글)
+    pub fn remove_worktree(&self, repo: &str, path: &Path, force: bool, delete_branch: bool, force_branch: bool) -> Result<String, WorkspaceError> {
         let root = self.repo_path(repo)?;
         if path == root {
             return Err(WorkspaceError::Invalid("메인 워크트리는 지우지 않는다".into()));
@@ -240,11 +247,16 @@ impl Workspace {
         let branch = self.worktrees(Some(repo))?.into_iter().find(|w| w.path == path_s).and_then(|w| w.branch);
         self.vcs.remove_worktree(&root, path, force)?;
         self.meta.lock().unwrap().remove(path);
+        let mut note = String::new();
         if let (true, Some(b)) = (delete_branch, branch) {
-            self.vcs.delete_branch(&root, &b, force)?;
+            match self.vcs.delete_branch(&root, &b, force_branch) {
+                Ok(()) => {}
+                Err(VcsError::NotMerged(_)) => note = format!("브랜치 {b} 는 합치지 않은 커밋이 있어 남겼다"),
+                Err(e) => note = format!("브랜치 {b} 는 지우지 못해 남겼다: {e}"),
+            }
         }
-        info!(event = "worktree_removed", repo, path = %path.display(), delete_branch);
-        Ok(())
+        info!(event = "worktree_removed", repo, path = %path.display(), delete_branch, force_branch, branch_kept = !note.is_empty());
+        Ok(note)
     }
 
     /// 폴더가 저장소면 등록하고, 아니면 바로 아래 폴더들에서 저장소를 찾아 모두 등록한다

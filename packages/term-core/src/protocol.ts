@@ -25,6 +25,8 @@ export interface SessionInfo {
   agent: AgentInfo | null;
   /** 데몬이 다시 뜨며 되살린 세션이면 이전 번호 */
   restored_from: SessionId | null;
+  /** 마지막 BEL 때 (ms, 없으면 0). 세션마다 1초에 한 번까지만 바뀐다 */
+  bell_at: number;
 }
 
 export type AgentState = "idle" | "working" | "needs_attention";
@@ -34,7 +36,17 @@ export interface AgentInfo {
   session_id: string | null;
   transcript: string | null;
   state: AgentState;
+  /** 상태가 마지막으로 바뀐 때 (ms) */
   updated_at: number;
+  /** 마지막 사용자 프롬프트 (200자까지) */
+  prompt: string | null;
+  /** 마지막 답 (Stop 의 last_assistant_message, 200자까지) */
+  last_assistant_message: string | null;
+  /** 지금 쓰는(또는 막 쓴) 도구. 턴이 끝나면 비운다 */
+  tool_name: string | null;
+  model: string | null;
+  /** 턴이 Stop 으로 끝난 때 (ms). 있고 state 가 idle 이면 "끝남", 없이 idle 이면 막 시작해 기다리는 중 */
+  turn_ended_at: number | null;
 }
 
 export interface CreateSession {
@@ -114,6 +126,8 @@ export type DaemonEvent =
   | { type: "layout_changed"; layout: WorkspaceLayout }
   | { type: "layout_removed"; workspace: string }
   | { type: "terminal_colors_changed"; colors: TerminalColors }
+  /** 세션 프로그램이 OSC 9 / 777 로 데스크톱 알림을 청했다 (세션마다 1초에 한 번까지) */
+  | { type: "session_notification"; session: SessionId; title: string; body: string }
   /** 앱 껍데기가 데몬에 다시 붙었다 (데몬이 다시 떴다). 세션 목록을 다시 읽고 다시 붙는다 */
   | { type: "daemon_reconnected" };
 
@@ -167,7 +181,7 @@ export type LayoutSpec =
   | { type: "spawn"; spawn?: Spawn };
 
 export type LayoutOp =
-  | { op: "new_tab"; workspace: WorkspaceId; spawn?: Spawn; index?: number | null; focus?: boolean }
+  | { op: "new_tab"; workspace: WorkspaceId; spawn?: Spawn; index?: number | null; focus?: boolean; title?: string | null }
   | { op: "open_doc"; workspace: WorkspaceId; doc: Record<string, string> }
   | { op: "split"; target: PaneRef; side: Side; size?: number | null; spawn?: Spawn; focus?: boolean }
   | { op: "resize"; target: PaneRef; size: number; axis?: Axis | null }

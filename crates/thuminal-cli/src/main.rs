@@ -1,7 +1,7 @@
 //! `thuminal` 명령.
 //!
-//! 데몬이 없으면 같은 폴더의 `thuminald` 를 떼어 띄운다. 세션 번호 자리에 `.` 을 쓰면
-//! 지금 셸이 들어 있는 세션(`THUMINAL_SESSION_ID`)을 가리킨다. 칸·탭 명령에서는 이 셸이 든 칸과 탭이다.
+//! 데몬이 없으면 같은 폴더의 `thuminald` 를 떼어 띄운다. 세션 자리에는 `12`, `s12`, 칸 `p7`(그 칸의 세션),
+//! `.`(지금 셸이 들어 있는 세션, `THUMINAL_SESSION_ID`)을 쓸 수 있다. 칸·탭 명령에서 `.` 은 이 셸이 든 칸과 탭이다.
 
 mod attach;
 mod layout;
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use clap::{Args, Parser, Subcommand};
 use thuminal_client::{Client, default_daemon_bin};
 use thuminal_protocol::paths::Paths;
-use thuminal_protocol::{CreateSession, Event, ScreenFormat, SessionId, SessionInfo, SessionState};
+use thuminal_protocol::{AgentState, CreateSession, Event, ScreenFormat, SessionId, SessionInfo, SessionState};
 
 #[derive(Parser)]
 #[command(name = "thuminal", version, about = "thuminal 터미널 관리 명령")]
@@ -98,7 +98,7 @@ enum TermCmd {
         #[arg(long)]
         json: bool,
     },
-    /// 글을 입력한다
+    /// 글을 입력한다 (세션: 12, s12, 칸 p7, `.`)
     Send {
         id: String,
         text: String,
@@ -115,6 +115,12 @@ enum TermCmd {
         /// 색과 모양을 담은 제어 코드로
         #[arg(long)]
         vt: bool,
+        /// 빈 줄을 뺀 마지막 N 줄만
+        #[arg(long, value_name = "N")]
+        tail: Option<usize>,
+        /// {"session":12,"lines":[…]} 로
+        #[arg(long)]
+        json: bool,
     },
     /// 조건이 될 때까지 기다린다. 시간이 넘으면 종료 코드 124
     Wait(WaitArgs),
@@ -138,6 +144,10 @@ struct WaitArgs {
     /// 화면에 이 글이 나올 때까지
     #[arg(long = "match", value_name = "TEXT")]
     pattern: Option<String>,
+    /// 에이전트(claude)가 이 상태가 될 때까지. idle 은 이미 idle 이면 막 보낸 입력이 훅에 닿을 틈(1.5초)을
+    /// 지켜본 뒤 끝낸다 (그 사이 일을 시작하면 턴이 끝날 때까지 기다린다)
+    #[arg(long, value_name = "STATE", value_parser = ["idle", "working", "attention"])]
+    agent: Option<String>,
     /// 최대 기다림(초)
     #[arg(long, default_value_t = 600)]
     timeout: u64,
@@ -161,9 +171,20 @@ async fn connect() -> Res<Client> {
     Ok(Client::connect_or_spawn(&Paths::default_home(), "cli", &default_daemon_bin()).await?)
 }
 
-fn session_id(s: &str) -> Res<SessionId> {
+/// 세션 자리의 글: `12`, `s12`, `.`(이 셸), `p7`(그 칸의 세션. 배치를 한 번 읽는다)
+async fn session_id(c: &Client, s: &str) -> Res<SessionId> {
+    if let Some(n) = s.strip_prefix('p').and_then(|n| n.parse().ok()) {
+        return layout::session_of_pane(c, thuminal_protocol::PaneId(n)).await;
+    }
     let raw = if s == "." { std::env::var("THUMINAL_SESSION_ID").map_err(|_| "`.` 은 thuminal 세션 안에서만 쓸 수 있다")? } else { s.to_string() };
-    Ok(SessionId(raw.parse().map_err(|_| format!("세션 번호가 아니다: {s}"))?))
+    let num = raw.strip_prefix('s').unwrap_or(&raw);
+    Ok(SessionId(num.parse().map_err(|_| format!("세션은 12, s12, 칸 p7, . 으로 쓴다: {s}"))?))
+}
+
+/// 빈 줄을 뺀 마지막 `n` 줄
+fn tail_lines(text: &str, n: usize) -> Vec<&str> {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(n)..].to_vec()
 }
 
 fn print_sessions(sessions: &[SessionInfo]) {
@@ -177,6 +198,81 @@ fn print_sessions(sessions: &[SessionInfo]) {
     }
 }
 
+/// transcript 끝에서 읽을 최대 바이트 (Stop 훅에 `last_assistant_message` 가 없는 옛 claude 용)
+const TRANSCRIPT_TAIL_BYTES: u64 = 256 * 1024;
+
+/// claude transcript(JSON 줄) 끝에서 마지막 assistant 글을 찾는다. 끝 [`TRANSCRIPT_TAIL_BYTES`] 만 읽는다
+fn last_assistant_from_transcript(path: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(TRANSCRIPT_TAIL_BYTES))).ok()?;
+    let mut buf = Vec::new();
+    f.take(TRANSCRIPT_TAIL_BYTES).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    text.lines().rev().find_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+        if v.get("type")?.as_str()? != "assistant" {
+            return None;
+        }
+        let content = v.get("message")?.get("content")?;
+        let joined = match content {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Array(blocks) => blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => return None,
+        };
+        (!joined.trim().is_empty()).then_some(joined)
+    })
+}
+
+/// Notification 종류. `notification_type` 이 없는 옛 claude 는 글로 가린다
+fn notification_type(payload: &serde_json::Value) -> Option<String> {
+    let field = |k: &str| payload.get(k).and_then(|v| v.as_str());
+    if let Some(t) = field("notification_type") {
+        return Some(t.to_string());
+    }
+    let msg = field("message")?.to_ascii_lowercase();
+    if msg.contains("permission") {
+        Some("permission_prompt".into())
+    } else if msg.contains("waiting for your input") {
+        Some("idle_prompt".into())
+    } else {
+        None
+    }
+}
+
+/// 훅 JSON 을 데몬 요청으로. 긴 글은 여기서 먼저 자른다
+fn agent_request(session: SessionId, kind: String, event: Option<String>, payload: &serde_json::Value) -> Option<thuminal_protocol::Request> {
+    use thuminal_protocol::{AGENT_TEXT_MAX, clip_text};
+    let field = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    let clipped = |k: &str| payload.get(k).and_then(|v| v.as_str()).and_then(|v| clip_text(v, AGENT_TEXT_MAX));
+    let event = field("hook_event_name").or(event)?;
+    let transcript = field("transcript_path");
+    let last_assistant_message = match event.as_str() {
+        "Stop" | "StopFailure" => clipped("last_assistant_message")
+            .or_else(|| transcript.as_deref().and_then(last_assistant_from_transcript).and_then(|m| clip_text(&m, AGENT_TEXT_MAX))),
+        _ => None,
+    };
+    Some(thuminal_protocol::Request::ReportAgent {
+        session,
+        kind,
+        agent_session_id: field("session_id"),
+        transcript,
+        prompt: (event == "UserPromptSubmit").then(|| clipped("prompt")).flatten(),
+        last_assistant_message,
+        tool_name: field("tool_name"),
+        notification_type: (event == "Notification").then(|| notification_type(payload)).flatten(),
+        source: field("source"),
+        model: field("model"),
+        event,
+    })
+}
+
 /// 훅 알림. 어떤 경우에도 에이전트를 막지 않게 1초 안에 끝내고 오류를 내지 않는다
 async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
     let Ok(sid) = std::env::var("THUMINAL_SESSION_ID") else { return ExitCode::SUCCESS };
@@ -186,15 +282,7 @@ async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
         let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
     }
     let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
-    let field = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(str::to_string);
-    let Some(event) = field("hook_event_name").or(event) else { return ExitCode::SUCCESS };
-    let request = thuminal_protocol::Request::ReportAgent {
-        session: SessionId(session),
-        kind,
-        event,
-        agent_session_id: field("session_id"),
-        transcript: field("transcript_path"),
-    };
+    let Some(request) = agent_request(SessionId(session), kind, event, &payload) else { return ExitCode::SUCCESS };
     let _ = tokio::time::timeout(Duration::from_secs(1), async {
         if let Ok(c) = Client::connect(&Paths::default_home(), "agent-hook").await {
             let _ = c.request(request).await;
@@ -274,59 +362,157 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
             if enter {
                 text.push('\r');
             }
-            c.send_text(session_id(&id)?, text).await?;
+            c.send_text(session_id(&c, &id).await?, text).await?;
         }
-        TermCmd::Read { id, scrollback, vt } => {
+        TermCmd::Read { id, scrollback, vt, tail, json } => {
+            let id = session_id(&c, &id).await?;
             let format = if vt { ScreenFormat::Vt } else { ScreenFormat::Plain };
-            print!("{}", c.read_screen(session_id(&id)?, format, scrollback).await?);
-            println!();
+            let text = c.read_screen(id, format, scrollback).await?;
+            let lines: Vec<&str> = match tail {
+                Some(n) => tail_lines(&text, n),
+                None => text.lines().collect(),
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "session": id, "lines": lines }))?);
+            } else if tail.is_some() {
+                lines.iter().for_each(|l| println!("{l}"));
+            } else {
+                print!("{text}");
+                println!();
+            }
         }
         TermCmd::Wait(w) => return wait(&c, w).await,
-        TermCmd::Attach { id } => attach::run(&c, session_id(&id)?).await?,
-        TermCmd::Kill { id } => c.kill(session_id(&id)?).await?,
-        TermCmd::Rm { id } => c.remove(session_id(&id)?).await?,
+        TermCmd::Attach { id } => attach::run(&c, session_id(&c, &id).await?).await?,
+        TermCmd::Kill { id } => c.kill(session_id(&c, &id).await?).await?,
+        TermCmd::Rm { id } => c.remove(session_id(&c, &id).await?).await?,
     }
     Ok(ExitCode::SUCCESS)
 }
 
-async fn wait(c: &Client, w: WaitArgs) -> Res<ExitCode> {
-    let id = session_id(&w.id)?;
-    if !w.exit && w.idle.is_none() && w.pattern.is_none() {
-        return Err("--exit, --idle, --match 가운데 하나를 준다".into());
+/// `--agent idle` 이 이미 idle 인 에이전트를 받아들이기 전에 지켜보는 틈 (막 보낸 프롬프트의 훅이 닿을 시간)
+const AGENT_IDLE_GRACE: Duration = Duration::from_millis(1500);
+
+fn agent_state(name: &str) -> AgentState {
+    match name {
+        "working" => AgentState::Working,
+        "attention" => AgentState::NeedsAttention,
+        _ => AgentState::Idle,
     }
-    let deadline = Instant::now() + Duration::from_secs(w.timeout);
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+async fn wait(c: &Client, w: WaitArgs) -> Res<ExitCode> {
+    let id = session_id(c, &w.id).await?;
+    if !w.exit && w.idle.is_none() && w.pattern.is_none() && w.agent.is_none() {
+        return Err("--exit, --idle, --match, --agent 가운데 하나를 준다".into());
+    }
+    let started = Instant::now();
+    let started_ms = now_ms();
+    let deadline = started + Duration::from_secs(w.timeout);
+    let want_agent = w.agent.as_deref().map(agent_state);
     let mut events = c.events();
     loop {
         let info = c.list().await?.into_iter().find(|s| s.id == id).ok_or(format!("세션 {id} 이 없다"))?;
-        if w.exit {
-            if let SessionState::Exited { code } = info.state {
-                println!("exit {}", code.map_or("?".into(), |c| c.to_string()));
-                return Ok(ExitCode::SUCCESS);
-            }
+        if w.exit
+            && let SessionState::Exited { code } = info.state
+        {
+            println!("exit {}", code.map_or("?".into(), |c| c.to_string()));
+            return Ok(ExitCode::SUCCESS);
         }
-        if let Some(ms) = w.idle {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
-            if now.saturating_sub(info.last_output_at) >= ms {
-                return Ok(ExitCode::SUCCESS);
-            }
+        if let Some(ms) = w.idle
+            && now_ms().saturating_sub(info.last_output_at) >= ms
+        {
+            return Ok(ExitCode::SUCCESS);
         }
-        if let Some(p) = &w.pattern {
-            if c.read_screen(id, ScreenFormat::Plain, false).await?.contains(p.as_str()) {
-                return Ok(ExitCode::SUCCESS);
+        if let Some(p) = &w.pattern
+            && c.read_screen(id, ScreenFormat::Plain, false).await?.contains(p.as_str())
+        {
+            return Ok(ExitCode::SUCCESS);
+        }
+        if let Some(want) = want_agent {
+            if let Some(a) = info.agent.as_ref().filter(|a| a.state == want) {
+                // idle 은 기다리기 시작한 뒤에 idle 이 되었거나, 틈 동안 그대로였을 때만
+                let fresh = want != AgentState::Idle || a.updated_at >= started_ms || started.elapsed() >= AGENT_IDLE_GRACE;
+                if fresh {
+                    println!("{}", w.agent.as_deref().unwrap_or_default());
+                    return Ok(ExitCode::SUCCESS);
+                }
+            }
+            if !w.exit && matches!(info.state, SessionState::Exited { .. }) {
+                eprintln!("thuminal: 세션 {id} 이 끝났다");
+                return Ok(ExitCode::from(1));
             }
         }
         if Instant::now() >= deadline {
             eprintln!("thuminal: 기다리다 시간이 넘었다");
             return Ok(ExitCode::from(124));
         }
-        // 끝남은 이벤트로 바로 깨고, 나머지는 짧게 다시 본다
+        // 끝남, 에이전트 상태 바뀜은 이벤트로 바로 깨고, 나머지는 짧게 다시 본다
         let _ = tokio::time::timeout(Duration::from_millis(150), async {
             while let Ok(e) = events.recv().await {
-                if matches!(e, Event::SessionExited { session, .. } if session == id) {
-                    break;
+                match e {
+                    Event::SessionExited { session, .. } if session == id => break,
+                    Event::SessionUpdated { session } if session.id == id && want_agent.is_some() => break,
+                    _ => {}
                 }
             }
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tail_skips_blank_lines() {
+        assert_eq!(tail_lines("a\n\n b \n\nc\n  \n", 2), vec![" b ", "c"]);
+        assert_eq!(tail_lines("a\nb", 5), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn builds_report_from_hook_json() {
+        let req = |v: serde_json::Value| agent_request(SessionId(4), "claude".into(), None, &v).unwrap();
+        let r = req(serde_json::json!({"hook_event_name":"UserPromptSubmit","session_id":"x","prompt":"a".repeat(300)}));
+        let thuminal_protocol::Request::ReportAgent { event, prompt, agent_session_id, .. } = r else { panic!() };
+        assert_eq!((event.as_str(), agent_session_id.as_deref()), ("UserPromptSubmit", Some("x")));
+        assert_eq!(prompt.unwrap().chars().count(), thuminal_protocol::AGENT_TEXT_MAX + 1);
+
+        let r = req(serde_json::json!({"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}));
+        assert!(matches!(r, thuminal_protocol::Request::ReportAgent { notification_type: Some(t), .. } if t == "permission_prompt"));
+        let r = req(serde_json::json!({"hook_event_name":"Notification","notification_type":"idle_prompt","message":"Claude needs your permission"}));
+        assert!(matches!(r, thuminal_protocol::Request::ReportAgent { notification_type: Some(t), .. } if t == "idle_prompt"));
+        // 프롬프트는 UserPromptSubmit 에서만 받는다
+        let r = req(serde_json::json!({"hook_event_name":"PreToolUse","tool_name":"Bash","prompt":"x"}));
+        assert!(matches!(r, thuminal_protocol::Request::ReportAgent { prompt: None, tool_name: Some(t), .. } if t == "Bash"));
+        assert!(agent_request(SessionId(1), "claude".into(), None, &serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn reads_last_assistant_text_from_transcript_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let lines = [
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"old"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"hi"}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first"},{"type":"tool_use","name":"Bash"},{"type":"text","text":"second"}]}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}"#,
+            "not json",
+        ];
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(last_assistant_from_transcript(path.to_str().unwrap()).as_deref(), Some("first\nsecond"));
+        let r = agent_request(
+            SessionId(1),
+            "claude".into(),
+            None,
+            &serde_json::json!({"hook_event_name":"Stop","transcript_path": path.to_str().unwrap()}),
+        )
+        .unwrap();
+        assert!(matches!(r, thuminal_protocol::Request::ReportAgent { last_assistant_message: Some(m), .. } if m == "first\nsecond"));
+        assert!(last_assistant_from_transcript("/없는/파일").is_none());
     }
 }

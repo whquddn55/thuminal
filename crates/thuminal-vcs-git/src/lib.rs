@@ -154,7 +154,27 @@ impl Vcs for GitCli {
     }
 
     fn delete_branch(&self, repo: &Path, branch: &str, force: bool) -> Result<(), VcsError> {
-        git(repo, &["branch", if force { "-D" } else { "-d" }, branch]).map(|_| ())
+        if force {
+            return git(repo, &["branch", "-D", branch]).map(|_| ());
+        }
+        // 거절 글로 까닭을 가린다. 사용자 언어 설정과 상관없이 같은 글이 나오게 C 로 돌린다
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["branch", "-d", branch])
+            .env("LC_ALL", "C")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|e| VcsError::Command(format!("git 을 실행하지 못했다: {e}")))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if msg.contains("not fully merged") {
+            Err(VcsError::NotMerged(branch.to_string()))
+        } else {
+            Err(VcsError::Command(msg))
+        }
     }
 
     fn status(&self, worktree: &Path) -> Result<GitStatus, VcsError> {
@@ -322,7 +342,7 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|w| w.is_main));
 
-        ws.remove_worktree(&r.id, Path::new(&w.path), false, true).unwrap();
+        assert_eq!(ws.remove_worktree(&r.id, Path::new(&w.path), false, true, false).unwrap(), "");
         assert_eq!(ws.worktrees(Some(&r.id)).unwrap().len(), 1);
         assert!(git(&root, &["rev-parse", "--verify", "feature/x"]).is_err(), "브랜치가 남았다");
 
@@ -379,6 +399,37 @@ mod tests {
         let br = ws.branches(&root).unwrap();
         assert_eq!(br.current.as_deref(), Some("main"));
         assert!(br.local.contains(&"main".to_string()));
+        drop(dir);
+    }
+
+    #[test]
+    fn keeps_unmerged_branch_unless_force_branch() {
+        let (dir, root) = repo();
+        let home = tempfile::tempdir().unwrap();
+        let ws = Workspace::open(Arc::new(GitCli), home.path());
+        let r = ws.add_repo(&root).unwrap();
+        let commit = |w: &str| {
+            let w = Path::new(w);
+            std::fs::write(w.join("x.txt"), "x\n").unwrap();
+            git_ok(w, &["add", "x.txt"]);
+            git_ok(w, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"]);
+        };
+
+        // 합치지 않은 커밋 + 바뀐 파일: force 는 워크트리만 지우고 브랜치는 남긴다
+        let w = ws.create_worktree(&r.id, "wip", None, None).unwrap();
+        commit(&w.path);
+        std::fs::write(Path::new(&w.path).join("dirty.txt"), "d\n").unwrap();
+        let note = ws.remove_worktree(&r.id, Path::new(&w.path), true, true, false).unwrap();
+        assert!(note.contains("wip") && note.contains("합치지 않은"), "{note}");
+        assert!(!Path::new(&w.path).exists(), "브랜치를 남겨도 워크트리는 지운다");
+        assert_eq!(ws.worktrees(Some(&r.id)).unwrap().len(), 1);
+        assert!(git(&root, &["rev-parse", "--verify", "refs/heads/wip"]).is_ok(), "합치지 않은 브랜치를 지웠다");
+
+        // force_branch 면 지운다
+        let w = ws.create_worktree(&r.id, "wip2", None, None).unwrap();
+        commit(&w.path);
+        assert_eq!(ws.remove_worktree(&r.id, Path::new(&w.path), false, true, true).unwrap(), "");
+        assert!(git(&root, &["rev-parse", "--verify", "refs/heads/wip2"]).is_err());
         drop(dir);
     }
 

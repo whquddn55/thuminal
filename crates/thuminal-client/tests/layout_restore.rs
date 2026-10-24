@@ -71,7 +71,7 @@ async fn layout_survives_signal_restart_and_is_cleared_by_user_stop() {
     }
     assert_ne!(old.iter().map(|p| p.1).collect::<Vec<_>>(), new.iter().map(|p| p.1).collect::<Vec<_>>());
     // 칸 번호는 이어서 센다
-    let (_, created) = c.layout(LayoutOp::NewTab { workspace: "/tmp".into(), spawn: Spawn::default(), index: None, focus: true }).await.unwrap();
+    let (_, created) = c.layout(LayoutOp::NewTab { workspace: "/tmp".into(), spawn: Spawn::default(), index: None, focus: true, title: None }).await.unwrap();
     assert_eq!(created[0].0, old.iter().map(|p| p.0).max().unwrap() + 1);
 
     // 3. daemon stop 이면 배치를 지운다
