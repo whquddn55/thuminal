@@ -75,6 +75,11 @@ export interface TerminalEngine {
   defaultColors(): { fg: number; bg: number };
   /** 기본색을 바꾸고 다음 scan 에서 모든 칸을 다시 넘긴다 */
   setColors(colors: EngineColors): void;
+  /**
+   * 조합 중인 글자 (한글 등). 커서 자리부터 밑줄을 그어 다른 글자와 같은 칸으로 넘긴다.
+   * 화면에는 아직 쓰지 않은 글자라 엔진 상태는 바뀌지 않는다. null 이나 빈 글이면 지운다
+   */
+  setPreedit(text: string | null): void;
   /** 키보드 입력을 터미널 모드(커서 키 모드 등)에 맞는 바이트로 바꾼다 */
   readonly input: InputEncoder;
   dispose(): void;

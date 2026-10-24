@@ -186,19 +186,3 @@
   caret-color: transparent;
   z-index: 6;
 }
-
-/* 조합 중인 글자 (한글 등). 커서 자리에 터미널 색으로 덮어 그린다 */
-.thm-composition {
-  position: absolute;
-  display: none;
-  z-index: 7;
-  white-space: pre;
-  overflow: hidden;
-  pointer-events: none;
-  color: var(--terminal-foreground);
-  background: var(--terminal-background);
-  border-bottom: 2px solid var(--terminal-foreground);
-}
-.thm-composition.active:not(:empty) {
-  display: block;
-}

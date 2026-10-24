@@ -109,6 +109,21 @@ function unshiftedCodepoint(k: KeyInput): number {
   return k.key.length === 1 ? (k.key.codePointAt(0) ?? 0) : 0;
 }
 
+/** 두 칸을 쓰는 글자인지 (한글, 한자, 가나, 전각, 이모지). 조합 중인 글자 자리를 셀 때만 쓴다 */
+function isWide(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  );
+}
+
 export class GhosttyWasmEngine implements TerminalEngine {
   private readonly rs: number;
   private readonly iterSlot: number;
@@ -123,6 +138,8 @@ export class GhosttyWasmEngine implements TerminalEngine {
   private theme: EngineColors | null = null;
   /** 대비 보정 결과 (fg * 2^24 + bg → 고친 fg) */
   private readonly contrastCache = new Map<number, number>();
+  /** 조합 중인 글자의 코드 포인트 */
+  private preedit: number[] = [];
   readonly input: InputEncoder;
 
   constructor(
@@ -200,6 +217,13 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.forceFull = true;
   }
 
+  setPreedit(text: string | null): void {
+    const cps = text ? [...text].map((c) => c.codePointAt(0)!) : [];
+    if (cps.length === this.preedit.length && cps.every((c, i) => c === this.preedit[i])) return;
+    this.preedit = cps;
+    this.forceFull = true;
+  }
+
   /** 최소 대비를 맞춘 글자색 */
   private readableFg(fg: number, bg: number, ratio: number): number {
     const key = fg * 0x1000000 + bg;
@@ -250,6 +274,18 @@ export class GhosttyWasmEngine implements TerminalEngine {
     const visible = dv.getUint8(tmp + T_A) !== 0 && dv.getUint8(tmp + T_A + 1) !== 0;
     this.cursorState = { x: dv.getUint16(tmp + T_A + 2, true), y: dv.getUint16(tmp + T_A + 4, true), visible };
     const cursorY = visible ? this.cursorState.y : -1;
+
+    // 조합 중인 글자를 놓을 칸: 커서 자리부터, 두 칸 글자는 두 칸씩 (뒤 칸은 비운다)
+    const pre = new Map<number, { cp: number; wide: boolean }>();
+    if (this.preedit.length && cursorY >= 0) {
+      let px = this.cursorState.x;
+      for (const cp of this.preedit) {
+        const wide = isWide(cp);
+        pre.set(px, { cp, wide });
+        if (wide) pre.set(px + 1, { cp: 0, wide: false });
+        px += wide ? 2 : 1;
+      }
+    }
 
     ex.ghostty_render_state_get(this.rs, RS_ROW_ITERATOR, this.iterSlot);
     const iter = w.dv().getUint32(this.iterSlot, true);
@@ -303,7 +339,13 @@ export class GhosttyWasmEngine implements TerminalEngine {
         // 같은 색은 일부러 숨긴 글자로 보고 두고, 흐린 글자는 보정한 뒤 배경 쪽으로 반만 섞는다
         if (minContrast > 1 && fg !== bg) fg = this.readableFg(fg, bg, minContrast);
         if (faint) fg = mix(fg, bg, 0.5);
-        if (x === this.cursorState.x && y === cursorY) [fg, bg] = [cursorFg, cursorBg];
+        const p = y === cursorY ? pre.get(x) : undefined;
+        if (p) {
+          // 조합 중인 글자는 기본색에 밑줄만 긋는다 (커서는 그리지 않는다)
+          sink.cell(x, y, p.cp, minContrast > 1 ? this.readableFg(defFg, defBg, minContrast) : defFg, defBg, p.cp ? CellFlags.Underline | (p.wide ? CellFlags.Wide : 0) : 0);
+          continue;
+        }
+        if (x === this.cursorState.x && y === cursorY && !pre.size) [fg, bg] = [cursorFg, cursorBg];
         let cp = 0;
         if (len > 0 && len <= 32) {
           ex.ghostty_render_state_row_cells_get(cells, CELL_GRAPHEMES_BUF, tmp + T_GRAPHEME);
