@@ -181,9 +181,11 @@ export type LayoutSpec =
   | { type: "spawn"; spawn?: Spawn };
 
 export type LayoutOp =
-  | { op: "new_tab"; workspace: WorkspaceId; spawn?: Spawn; index?: number | null; focus?: boolean; title?: string | null }
+  | { op: "new_tab"; workspace: WorkspaceId; spawn?: Spawn; index?: number | null; focus?: boolean; title?: string | null; doc?: Record<string, string> | null }
   | { op: "open_doc"; workspace: WorkspaceId; doc: Record<string, string> }
-  | { op: "split"; target: PaneRef; side: Side; size?: number | null; spawn?: Spawn; focus?: boolean }
+  | { op: "split"; target: PaneRef; side: Side; size?: number | null; spawn?: Spawn; focus?: boolean; doc?: Record<string, string> | null }
+  /** 문서 칸 내용을 바꾼다 (브라우저 칸 주소 남기기) */
+  | { op: "update_doc"; pane: PaneRef; doc: Record<string, string> }
   | { op: "resize"; target: PaneRef; size: number; axis?: Axis | null }
   | { op: "resize_by"; target: PaneRef; delta: number; axis?: Axis | null }
   | { op: "set_sizes"; tab: TabId; path: number[]; sizes: number[] }

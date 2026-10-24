@@ -1,14 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "\uba54\uc778 \ucc3d \uad8c\ud55c",
-  "windows": [
+  "description": "메인 웹뷰 권한. 브라우저 칸(자식 웹뷰)에는 주지 않는다",
+  "webviews": [
     "main"
   ],
   "permissions": [
     "core:default",
     "dialog:default",
     "opener:default",
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-url"
   ]
 }

@@ -1,11 +1,14 @@
 // term-core HostApi 의 Tauri 구현. src-tauri/src/lib.rs 의 명령을 부른다.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   Attachment,
+  BrowserEvent,
+  BrowserHost,
   BranchList,
   DirEntry,
   FileContent,
@@ -49,6 +52,31 @@ export class TauriHostApi implements HostApi {
     list: (worktree, dir) => req<DirEntry[]>({ type: "list_dir", worktree, dir }, (r) => r.entries),
     read: (worktree, file) => req<FileContent>({ type: "read_file", worktree, file }, (r) => r.file),
   };
+
+  readonly browser: BrowserHost = {
+    open: (id, url, at) => invoke("browser_open", { id, url, x: at.x, y: at.y, w: at.width, h: at.height }),
+    setBounds: (id, at) => invoke("browser_bounds", { id, x: at.x, y: at.y, w: at.width, h: at.height }),
+    setVisible: (id, visible) => invoke("browser_visible", { id, visible }),
+    navigate: (id, url) => invoke("browser_navigate", { id, url }),
+    go: (id, delta) => invoke("browser_go", { id, delta }),
+    reload: (id) => invoke("browser_reload", { id }),
+    focus: (id) => invoke("browser_focus", { id }),
+    devtools: (id) => invoke("browser_devtools", { id }),
+    close: (id) => invoke("browser_close", { id }),
+    onEvent: (cb) => {
+      let stop: (() => void) | null = null;
+      let cancelled = false;
+      void listen<BrowserEvent>("thuminal://browser", (e) => cb(e.payload)).then((un) => (cancelled ? un() : (stop = un)));
+      return () => {
+        cancelled = true;
+        stop?.();
+      };
+    },
+  };
+
+  openUrl(url: string): Promise<void> {
+    return openUrl(url);
+  }
 
   private listeners = new Set<(e: DaemonEvent) => void>();
   private subscribed: Promise<void> | null = null;

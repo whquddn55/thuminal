@@ -8,6 +8,7 @@ import {
   ArrowsInSimpleIcon,
   ArrowsOutSimpleIcon,
   FileTextIcon,
+  GlobeIcon,
   GitDiffIcon,
   RobotIcon,
   SquareSplitHorizontalIcon,
@@ -15,9 +16,12 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
 
 import type { Pane, PaneNode, Renderer, SessionInfo, Tab, WorkspaceId } from "@thuminal/term-core";
 
+import { type PageState, pageStore } from "./browser-state";
+import { BrowserPane } from "./BrowserPane";
 import { Button } from "./components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "./components/ui/context-menu";
 import { beginDrag, useDrag } from "./dnd";
@@ -60,13 +64,23 @@ export function TerminalSurface({ surface, className, children }: { surface: Sur
 }
 
 /** 탭 제목: 사용자가 붙인 이름 > 포커스 칸 내용 */
-function tabTitle(tab: Tab, sessions: Record<number, SessionInfo>): string {
+function tabTitle(tab: Tab, sessions: Record<number, SessionInfo>, pages: Record<number, PageState>): string {
   if (tab.title) return tab.title;
   const p = panesOf(tab.root).find((x) => x.id === tab.focused) ?? panesOf(tab.root)[0];
-  return p ? paneTitle(p, sessions) : "";
+  return p ? paneTitle(p, sessions, pages) : "";
 }
 
-function paneTitle(p: Pane, sessions: Record<number, SessionInfo>): string {
+function paneTitle(p: Pane, sessions: Record<number, SessionInfo>, pages: Record<number, PageState> = pageStore.getState()): string {
+  if (p.type === "doc" && p.doc.kind === "browser") {
+    const page = pages[p.id];
+    if (page?.title) return page.title;
+    const url = page?.url || p.doc.url || "";
+    try {
+      return new URL(url).host || url || "새 탭";
+    } catch {
+      return url || "새 탭";
+    }
+  }
   if (p.type === "doc") return p.doc.file?.split("/").pop() ?? "문서";
   return sessions[p.session]?.title ?? `세션 ${p.session}`;
 }
@@ -83,6 +97,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
   const model = useModel();
   const layout = useApp((s) => s.layouts[ws]);
   const sessions = useApp((s) => s.sessions);
+  const pages = useStore(pageStore);
   const drop = useDrag((d) => (d.target?.kind === "tabbar" && d.target.workspace === ws ? d.target.index : null));
   const [renaming, setRenaming] = useState<number | null>(null);
   const tabs = layout?.tabs ?? [];
@@ -95,7 +110,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
         const panes = panesOf(t.root);
         const exited = panes.every((p) => p.type === "terminal" && sessions[p.session]?.state.state === "exited");
         const isActive = t.id === active?.id;
-        const title = tabTitle(t, sessions);
+        const title = tabTitle(t, sessions, pages);
         return (
           <ContextMenu key={t.id}>
             <ContextMenuTrigger asChild>
@@ -118,7 +133,13 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 {agent ? (
                   <StatusIndicator status={agent} className="size-2.5" />
                 ) : panes[0]?.type === "doc" ? (
-                  panes[0].doc.kind === "diff" ? <GitDiffIcon className="size-3.5 shrink-0" /> : <FileTextIcon className="size-3.5 shrink-0" />
+                  panes[0].doc.kind === "browser" ? (
+                    <GlobeIcon className="size-3.5 shrink-0" />
+                  ) : panes[0].doc.kind === "diff" ? (
+                    <GitDiffIcon className="size-3.5 shrink-0" />
+                  ) : (
+                    <FileTextIcon className="size-3.5 shrink-0" />
+                  )
                 ) : null}
                 {renaming === t.id ? (
                   <input
@@ -303,7 +324,9 @@ function SplitView({
 function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: Pane; header: boolean }) {
   const model = useModel();
   const focused = tab.focused === pane.id;
-  const title = useApp((s) => paneTitle(pane, s.sessions));
+  // 브라우저 칸 제목은 페이지 제목을 따라간다
+  const pages = useStore(pageStore);
+  const title = useApp((s) => paneTitle(pane, s.sessions, pages));
   const session = useApp((s) => (pane.type === "terminal" ? s.sessions[pane.session] : undefined));
   const drop = useDrag((d) => (d.target?.kind === "pane" && d.target.pane === pane.id ? d.target.side : null));
   const dragging = useDrag((d) => d.source?.kind === "pane" && d.source.pane === pane.id);
@@ -351,6 +374,8 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           <TerminalMenu tab={tab} paneId={pane.id} session={pane.session}>
             <TerminalPane ws={ws} paneId={pane.id} session={pane.session} focused={focused} />
           </TerminalMenu>
+        ) : pane.doc.kind === "browser" ? (
+          <BrowserPane paneId={pane.id} url={pane.doc.url ?? "about:blank"} focused={focused} inFloating={ws === FLOATING_WORKSPACE} />
         ) : (
           <DocPane ws={ws} doc={pane.doc as unknown as DocSpec} onFocus={() => !focused && model.focusPane(pane.id)} />
         )}

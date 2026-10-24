@@ -39,11 +39,11 @@ fn op(s: &mut Store, f: &mut Fake, o: LayoutOp) -> Outcome {
 }
 
 fn new_tab(ws: &str) -> LayoutOp {
-    LayoutOp::NewTab { workspace: ws.into(), spawn: Spawn::default(), index: None, focus: true, title: None }
+    LayoutOp::NewTab { workspace: ws.into(), spawn: Spawn::default(), index: None, focus: true, title: None, doc: None }
 }
 
 fn split(target: u64, side: Side) -> LayoutOp {
-    LayoutOp::Split { target: PaneRef::Id(PaneId(target)), side, size: None, spawn: Spawn::default(), focus: true }
+    LayoutOp::Split { target: PaneRef::Id(PaneId(target)), side, size: None, spawn: Spawn::default(), focus: true, doc: None }
 }
 
 fn id(n: u64) -> PaneRef {
@@ -76,7 +76,7 @@ fn new_tab_and_split_make_tree_and_report_changes() {
 fn new_tab_takes_title() {
     let mut s = Store::default();
     let mut f = Fake::default();
-    let titled = |t: &str| LayoutOp::NewTab { workspace: W.into(), spawn: Spawn::default(), index: None, focus: true, title: Some(t.into()) };
+    let titled = |t: &str| LayoutOp::NewTab { workspace: W.into(), spawn: Spawn::default(), index: None, focus: true, title: Some(t.into()), doc: None };
     op(&mut s, &mut f, titled("feature/x"));
     op(&mut s, &mut f, titled("  "));
     assert_eq!(tab_of(&s, W, 0).title.as_deref(), Some("feature/x"));
@@ -96,7 +96,7 @@ fn failed_spawn_leaves_layout_unchanged() {
     assert_eq!(s, before);
     assert!(matches!(s.apply(split(9, Side::Right), &mut f), Err(LayoutError::NotFound(m)) if m == "칸 p9 이 없다"));
     assert!(matches!(
-        s.apply(LayoutOp::Split { target: id(1), side: Side::Right, size: Some(0.99), spawn: Spawn::default(), focus: true }, &mut f),
+        s.apply(LayoutOp::Split { target: id(1), side: Side::Right, size: Some(0.99), spawn: Spawn::default(), focus: true, doc: None }, &mut f),
         Err(LayoutError::Invalid(_))
     ));
     assert!(matches!(s.apply(new_tab("nope"), &mut f), Err(LayoutError::Invalid(_))));
@@ -348,4 +348,25 @@ fn labels_pick_workspace() {
     assert_eq!(workspace_for_labels(&l(&[("worktree", "/a"), ("floating", "1")])), Some("floating".into()));
     assert_eq!(workspace_for_labels(&l(&[])), Some("other".into()));
     assert_eq!(workspace_for_labels(&l(&[("layout", "none"), ("worktree", "/a")])), None);
+}
+
+#[test]
+fn browser_doc_tab_split_and_update() {
+    let (mut s, mut f) = (Store::default(), Fake::default());
+    let browser = |url: &str| BTreeMap::from([("kind".to_string(), "browser".to_string()), ("url".to_string(), url.to_string())]);
+    // 같은 주소라도 new_tab 은 새로 연다 (open_doc 과 다르다)
+    let a = op(&mut s, &mut f, LayoutOp::NewTab { workspace: W.into(), spawn: Spawn::default(), index: None, focus: true, title: None, doc: Some(browser("http://localhost:3000")) });
+    let b = op(&mut s, &mut f, LayoutOp::NewTab { workspace: W.into(), spawn: Spawn::default(), index: None, focus: true, title: None, doc: Some(browser("http://localhost:3000")) });
+    assert_ne!(a.created, b.created);
+    assert!(f.asked.is_empty(), "브라우저 칸은 세션을 띄우지 않는다");
+    let p = b.created[0];
+    let c = op(&mut s, &mut f, LayoutOp::Split { target: PaneRef::Id(p), side: Side::Right, size: None, spawn: Spawn::default(), focus: true, doc: Some(browser("https://example.com")) });
+    assert!(f.asked.is_empty());
+    op(&mut s, &mut f, LayoutOp::UpdateDoc { pane: PaneRef::Id(c.created[0]), doc: browser("https://example.com/next") });
+    let l = s.get(W).unwrap();
+    let urls: Vec<String> = l.tabs.iter().flat_map(|t| tree::panes(&t.root)).filter_map(|p| match &p.content {
+        PaneContent::Doc { doc } => doc.get("url").cloned(),
+        _ => None,
+    }).collect();
+    assert!(urls.contains(&"https://example.com/next".to_string()), "{urls:?}");
 }

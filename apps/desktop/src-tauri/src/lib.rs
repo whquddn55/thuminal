@@ -3,6 +3,8 @@
 //! 화면(웹뷰)과 데몬 사이를 잇기만 한다. 화면 쪽 `TauriHostApi` 가 이 명령들을 부른다.
 //! 세션 출력은 바이너리 채널로 흘린다 (JSON 이벤트는 바이트를 5~7배로 부풀린다).
 
+mod browser;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -320,7 +322,16 @@ pub fn run() {
             list_worktrees,
             create_worktree,
             remove_worktree,
-            daemon_request
+            daemon_request,
+            browser::browser_open,
+            browser::browser_bounds,
+            browser::browser_visible,
+            browser::browser_navigate,
+            browser::browser_go,
+            browser::browser_reload,
+            browser::browser_focus,
+            browser::browser_devtools,
+            browser::browser_close
         ])
         .run(tauri::generate_context!())
         .expect("thuminal 앱을 띄우지 못했다");

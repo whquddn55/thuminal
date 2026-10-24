@@ -60,6 +60,12 @@ function useShortcuts(model: AppModel) {
       if (arrow && e.ctrlKey) return run(() => model.focusDir(arrow));
       // ⌘⌥← → : 워크트리 방문 기록 뒤로·앞으로
       if (arrow && e.altKey && (arrow === "left" || arrow === "right")) return run(() => model.goHistory(arrow === "left" ? -1 : 1));
+      // 브라우저 칸이 포커스면 Orca 와 같이 ⌘[ ] 뒤로·앞으로, ⌘R 새로 고침, ⌘L 주소 칸
+      if (!e.shiftKey && !e.altKey && !e.ctrlKey && model.currentBrowser() !== null) {
+        const cmd = e.key === "[" ? "back" : e.key === "]" ? "forward" : key === "r" ? "reload" : key === "l" ? "address" : null;
+        if (cmd) return run(() => model.browserCommand(cmd));
+      }
+      if (e.shiftKey && key === "b") return run(() => void model.newBrowserTab());
       if (key === "j") return run(() => model.setDialog({ kind: "jump" }));
       if (key === ",") return run(() => model.setDialog({ kind: "settings" }));
       if (e.shiftKey && key === "n") {

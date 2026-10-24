@@ -317,6 +317,12 @@ impl Store {
         tree::find(&self.tab(at).root, id).and_then(Pane::session)
     }
 
+    fn doc_pane(&mut self, doc: BTreeMap<String, String>, created: &mut Vec<PaneId>) -> Pane {
+        let pane = self.alloc_pane(PaneContent::Doc { doc });
+        created.push(pane.id);
+        pane
+    }
+
     fn spawn_pane(&mut self, spawner: &mut dyn Spawner, workspace: &str, near: Option<SessionId>, spawn: Spawn, created: &mut Vec<PaneId>) -> Result<Pane> {
         let session = spawner.spawn(SpawnRequest { workspace: workspace.to_string(), near, spawn })?;
         let pane = self.alloc_pane(PaneContent::Terminal { session });
@@ -331,9 +337,13 @@ impl Store {
 
     fn run(&mut self, op: LayoutOp, spawner: &mut dyn Spawner, touched: &mut Vec<String>, created: &mut Vec<PaneId>) -> Result<()> {
         match op {
-            LayoutOp::NewTab { workspace, spawn, index, focus, title } => {
+            LayoutOp::NewTab { workspace, spawn, index, focus, title, doc } => {
                 check_workspace(&workspace)?;
-                let pane = self.spawn_pane(spawner, &workspace, None, spawn, created)?;
+                touched.push(workspace.clone());
+                let pane = match doc {
+                    Some(doc) => self.doc_pane(doc, created),
+                    None => self.spawn_pane(spawner, &workspace, None, spawn, created)?,
+                };
                 let mut tab = self.alloc_tab(tree::leaf(pane));
                 tab.title = title.filter(|t| !t.trim().is_empty());
                 self.insert_tab(&workspace, tab, index, focus);
@@ -356,20 +366,33 @@ impl Store {
                     }
                 }
             }
-            LayoutOp::Split { target, side, size, spawn, focus } => {
+            LayoutOp::Split { target, side, size, spawn, focus, doc } => {
                 let size = size.unwrap_or(0.5);
                 if !(MIN_SIZE..=1.0 - MIN_SIZE).contains(&size) {
                     return Err(invalid(format!("size 는 0.05~0.95 다: {size}")));
                 }
                 let (at, id) = self.resolve_pane(&target)?;
+                touched.push(at.0.clone());
                 let near = self.near_session(&at, id);
-                let pane = self.spawn_pane(spawner, &at.0, near, spawn, created)?;
+                let pane = match doc {
+                    Some(doc) => self.doc_pane(doc, created),
+                    None => self.spawn_pane(spawner, &at.0, near, spawn, created)?,
+                };
                 let new = pane.id;
                 let t = self.tab_mut(&at);
                 tree::insert_beside(&mut t.root, id, side, size, tree::leaf(pane)).map_err(|_| invalid("칸을 넣지 못했다"))?;
                 t.zoomed = None;
                 if focus {
                     self.focus(&at, new);
+                }
+            }
+            LayoutOp::UpdateDoc { pane, doc } => {
+                let (at, id) = self.resolve_pane(&pane)?;
+                touched.push(at.0.clone());
+                let t = self.tab_mut(&at);
+                match tree::find_mut(&mut t.root, id) {
+                    Some(Pane { content: PaneContent::Doc { doc: d }, .. }) => *d = doc,
+                    _ => return Err(invalid(format!("칸 {id} 은 문서 칸이 아니다"))),
                 }
             }
             LayoutOp::Resize { target, size, axis } => {

@@ -26,6 +26,7 @@ import {
 } from "@thuminal/term-core";
 
 import { AGENTS } from "./agents";
+import { setPage } from "./browser-state";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { TerminalController } from "./terminal-controller";
@@ -164,7 +165,12 @@ export class AppModel {
 
   async start(): Promise<void> {
     const host = this.services.host;
-    this.unsubscribe = host.onEvent((e) => this.onEvent(e));
+    const offDaemon = host.onEvent((e) => this.onEvent(e));
+    const offBrowser = host.browser?.onEvent((e) => this.onBrowserEvent(e));
+    this.unsubscribe = () => {
+      offDaemon();
+      offBrowser?.();
+    };
     try {
       await this.reloadAll();
       // 처음에는 마지막에 보던 워크트리를 고른다. 없으면 터미널이 있는 첫 워크트리
@@ -251,6 +257,7 @@ export class AppModel {
       }
       case "layout_changed":
         this.set((s) => ({ layouts: { ...s.layouts, [e.layout.workspace]: e.layout } }));
+        this.reapBrowsers();
         return;
       case "layout_removed":
         this.set((s) => {
@@ -258,9 +265,13 @@ export class AppModel {
           delete layouts[e.workspace];
           return { layouts };
         });
+        this.reapBrowsers();
         return;
       case "terminal_colors_changed":
         // 다른 창이나 CLI 가 바꿨다. 화면 테마는 앱 설정이 정하므로 따로 하지 않는다
+        return;
+      case "session_notification":
+        // 알림 기능을 만들 때 쓴다
         return;
       case "workspace_changed":
         void this.refreshWorkspace().then(
@@ -415,6 +426,7 @@ export class AppModel {
     try {
       const r = await this.services.host.layout(op);
       this.set((s) => ({ layouts: { ...s.layouts, ...Object.fromEntries(r.layouts.map((l) => [l.workspace, l])) } }));
+      this.reapBrowsers();
       return r.created;
     } catch (e) {
       this.fail(e);
@@ -578,6 +590,91 @@ export class AppModel {
     } catch (e) {
       console.warn("[thuminal] 데몬 터미널 색을 바꾸지 못했다", e);
     }
+  }
+
+  // ---- 브라우저 칸 ----
+
+  private readonly browsers = new Set<number>();
+  private readonly browserCommands = new Map<number, (cmd: "address") => void>();
+
+  browserOpened = (id: number) => void this.browsers.add(id);
+
+  /** 칸이 배치에서 없어진 웹뷰를 닫는다 */
+  private reapBrowsers() {
+    const live = new Set(Object.values(this.get().layouts).flatMap((l) => l.tabs.flatMap((t) => panesOf(t.root).map((p) => p.id))));
+    for (const id of this.browsers)
+      if (!live.has(id)) {
+        this.browsers.delete(id);
+        void this.services.host.browser?.close(id).catch(() => undefined);
+      }
+  }
+
+  onBrowserCommand(id: number, cb: (cmd: "address") => void) {
+    this.browserCommands.set(id, cb);
+    return () => {
+      if (this.browserCommands.get(id) === cb) this.browserCommands.delete(id);
+    };
+  }
+
+  private onBrowserEvent(e: import("@thuminal/term-core").BrowserEvent) {
+    switch (e.type) {
+      case "title":
+        setPage(e.id, { title: e.title });
+        return;
+      case "load": {
+        setPage(e.id, { url: e.url, loading: e.loading });
+        // 옮겨 간 주소를 배치에 남겨 다시 켜도 그 페이지로 연다
+        const hit = Object.values(this.get().layouts).flatMap((l) => l.tabs.flatMap((t) => panesOf(t.root))).find((p) => p.id === e.id);
+        if (!e.loading && hit?.type === "doc" && hit.doc.url !== e.url && !e.url.startsWith("about:"))
+          void this.op({ op: "update_doc", pane: byId(e.id), doc: { ...hit.doc, url: e.url } });
+        return;
+      }
+      case "focus":
+        this.focusPaneQuiet(e.id);
+        return;
+      case "key":
+        // 페이지가 키보드를 잡고 있을 때 누른 앱 단축키를 메인 화면 단축키로 다시 보낸다
+        this.focusPaneQuiet(e.id);
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: e.key, code: e.code, metaKey: true, altKey: e.alt, shiftKey: e.shift, ctrlKey: e.ctrl, bubbles: true, cancelable: true }));
+        return;
+      case "new_window": {
+        const ws = Object.values(this.get().layouts).find((l) => l.tabs.some((t) => panesOf(t.root).some((p) => p.id === e.id)))?.workspace;
+        if (ws) void this.newBrowserTab(ws, e.url);
+        return;
+      }
+    }
+  }
+
+  /** 이 칸이 든 면에 키보드를 두고 그 칸을 포커스 칸으로 (이미 그렇다면 아무것도 하지 않는다) */
+  private focusPaneQuiet(id: number) {
+    const s = this.get();
+    const hit = Object.values(s.layouts).find((l) => l.tabs.some((t) => panesOf(t.root).some((p) => p.id === id)));
+    if (!hit) return;
+    const area = hit.workspace === FLOATING_WORKSPACE ? "floating" : "main";
+    if (s.focusArea !== area) this.setFocusArea(area);
+    if (focusedPane(activeTab(hit))?.id !== id) this.focusPane(id);
+  }
+
+  /** ⌘⇧B, "+" 메뉴: 새 브라우저 탭 */
+  newBrowserTab = async (ws: WorkspaceId = this.currentWorkspace(), url = "about:blank") => {
+    await this.op({ op: "new_tab", workspace: ws, doc: { kind: "browser", url } });
+  };
+
+  /** 지금 포커스 칸이 브라우저면 그 칸 번호 */
+  currentBrowser(): number | null {
+    const p = focusedPane(activeTab(this.get().layouts[this.currentWorkspace()]));
+    return p?.type === "doc" && p.doc.kind === "browser" ? p.id : null;
+  }
+
+  browserCommand(cmd: "back" | "forward" | "reload" | "address"): boolean {
+    const id = this.currentBrowser();
+    const b = this.services.host.browser;
+    if (id === null || !b) return false;
+    if (cmd === "back") void b.go(id, -1);
+    else if (cmd === "forward") void b.go(id, 1);
+    else if (cmd === "reload") void b.reload(id);
+    else this.browserCommands.get(id)?.("address");
+    return true;
   }
 
   // ---- 프로젝트, 워크트리 ----

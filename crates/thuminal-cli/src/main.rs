@@ -37,6 +37,8 @@ enum Command {
     Tab(layout::TabArgs),
     /// 탭 배치를 한 줄로 보고 적용하기 (예: 'row(claude, col(zsh, "npm run dev"):40%)')
     Layout(layout::LayoutArgs),
+    /// 앱 안 브라우저 탭 (예: thuminal browser open localhost:3000)
+    Browser(layout::BrowserArgs),
     /// 저장소 등록
     #[command(subcommand)]
     Repo(workspace::RepoCmd),
@@ -324,6 +326,7 @@ async fn run(cli: Cli) -> Res<ExitCode> {
         Command::Pane(args) => layout::pane(&connect().await?, args).await?,
         Command::Tab(args) => layout::tab(&connect().await?, args).await?,
         Command::Layout(args) => layout::layout(&connect().await?, args).await?,
+        Command::Browser(args) => layout::browser(&connect().await?, args).await?,
     }
     Ok(ExitCode::SUCCESS)
 }

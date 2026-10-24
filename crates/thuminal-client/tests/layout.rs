@@ -114,6 +114,7 @@ async fn split_spawns_shell_types_input_and_close_removes_session() {
             size: Some(0.3),
             spawn: Spawn { input: Some("echo split-$((40+2))".into()), ..sh() },
             focus: true,
+            doc: None,
         })
         .await
         .unwrap();
@@ -160,7 +161,7 @@ async fn failed_op_removes_sessions_it_made_and_batch_stops_at_failure() {
     assert!(c.list().await.unwrap().is_empty(), "실패한 op 가 만든 세션은 지운다");
     assert!(c.layouts(None).await.unwrap().is_empty());
 
-    let ok = LayoutOp::NewTab { workspace: "other".into(), spawn: sh(), index: None, focus: true, title: None };
+    let ok = LayoutOp::NewTab { workspace: "other".into(), spawn: sh(), index: None, focus: true, title: None, doc: None };
     let bad = LayoutOp::SelectTab { tab: TabRef::Id(thuminal_protocol::TabId(77)) };
     let err = c.request(Request::LayoutBatch { ops: vec![ok.clone(), bad] }).await.unwrap_err();
     assert!(matches!(&err, ClientError::Daemon(ErrorCode::NotFound, m) if m.starts_with("2번째 op")), "{err:?}");
@@ -184,7 +185,7 @@ async fn removing_worktree_drops_its_layout() {
     let repo = c.add_repo(root.to_string_lossy()).await.unwrap();
     let wt = c.create_worktree(repo.id.clone(), "feature/x".into(), None).await.unwrap();
     let mut events = c.events();
-    c.layout(LayoutOp::NewTab { workspace: wt.path.clone(), spawn: sh(), index: None, focus: true, title: None }).await.unwrap();
+    c.layout(LayoutOp::NewTab { workspace: wt.path.clone(), spawn: sh(), index: None, focus: true, title: None, doc: None }).await.unwrap();
     assert!(matches!(next_layout_event(&mut events).await, Event::LayoutChanged { .. }));
     c.remove_worktree(repo.id, wt.path.clone(), true, true, true).await.unwrap();
     assert!(matches!(next_layout_event(&mut events).await, Event::LayoutRemoved { workspace } if workspace == wt.path));

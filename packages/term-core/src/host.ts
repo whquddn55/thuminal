@@ -20,6 +20,43 @@ import type {
   WorktreeInfo,
 } from "./protocol";
 
+/** 창 안의 사각형 (CSS 픽셀, 창 왼쪽 위 기준) */
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 브라우저 칸 웹뷰가 보내는 일 */
+export type BrowserEvent =
+  | { type: "title"; id: number; title: string }
+  | { type: "load"; id: number; url: string; loading: boolean }
+  /** 페이지가 키보드를 잡고 있을 때 누른 앱 단축키 (⌘ 조합) */
+  | { type: "key"; id: number; key: string; code: string; alt: boolean; shift: boolean; ctrl: boolean }
+  /** 페이지가 키보드를 받기 시작했다 */
+  | { type: "focus"; id: number }
+  /** 페이지가 새 창을 열려 했다 */
+  | { type: "new_window"; id: number; url: string };
+
+/**
+ * 브라우저 칸. 칸 자리(사각형)는 화면이 잡고, 껍데기는 그 자리에 진짜 웹뷰를 얹는다.
+ * 웹뷰는 화면(HTML) 위에 그려지므로 메뉴·창이 겹치는 동안에는 화면이 숨겨 달라고 한다. id 는 칸 번호
+ */
+export interface BrowserHost {
+  open(id: number, url: string, at: Bounds): Promise<void>;
+  setBounds(id: number, at: Bounds): Promise<void>;
+  setVisible(id: number, visible: boolean): Promise<void>;
+  navigate(id: number, url: string): Promise<void>;
+  /** 뒤로(-1) · 앞으로(+1) */
+  go(id: number, delta: number): Promise<void>;
+  reload(id: number): Promise<void>;
+  focus(id: number): Promise<void>;
+  devtools(id: number): Promise<void>;
+  close(id: number): Promise<void>;
+  onEvent(cb: (e: BrowserEvent) => void): () => void;
+}
+
 /** 워크트리의 git 작업. 경로는 워크트리 기준 상대 경로 */
 export interface GitApi {
   status(worktree: string): Promise<GitStatus>;
@@ -78,6 +115,10 @@ export interface HostApi {
   pickFolder(): Promise<string | null>;
   /** Finder 에서 보기 */
   reveal(path: string): Promise<void>;
+  /** 시스템 브라우저로 열기 */
+  openUrl?(url: string): Promise<void>;
+  /** 브라우저 칸을 지원하는 껍데기만 둔다 */
+  readonly browser?: BrowserHost;
   /**
    * 워크트리를 지운다. force 는 바뀐 파일이 있어도 지우기, forceBranch 는 합치지 않은 브랜치도 지우기.
    * 알릴 것(예: 합치지 않은 브랜치를 남겼다)이 있으면 그 글, 없으면 빈 글을 돌려준다

@@ -34,6 +34,13 @@ pub fn find(node: &PaneNode, id: PaneId) -> Option<&Pane> {
     panes(node).into_iter().find(|p| p.id == id)
 }
 
+pub fn find_mut(node: &mut PaneNode, id: PaneId) -> Option<&mut Pane> {
+    match node {
+        PaneNode::Pane { pane } => (pane.id == id).then_some(pane),
+        PaneNode::Split { children, .. } => children.iter_mut().find_map(|c| find_mut(c, id)),
+    }
+}
+
 /// 루트부터 children 인덱스로 이 칸까지 가는 길
 pub fn path_of(node: &PaneNode, id: PaneId) -> Option<Vec<usize>> {
     match node {

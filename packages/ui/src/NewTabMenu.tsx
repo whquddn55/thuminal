@@ -3,13 +3,14 @@
 // 맨 위 찾기 칸에 글을 치면 열린 탭, 에이전트, 메뉴 항목을 거르고, 맞는 것이 없으면 그 글을 새 탭에서 실행한다.
 // 그 아래 새 터미널과 패널 항목, 맨 아래 설치된 에이전트(claude, codex 등)를 띄우는 항목이 있다.
 
-import { FilesIcon, GitDiffIcon, MagnifyingGlassIcon, PlayIcon, PlusIcon, RobotIcon, SquaresFourIcon, TerminalWindowIcon } from "@phosphor-icons/react";
+import { FilesIcon, GitDiffIcon, GlobeIcon, MagnifyingGlassIcon, PlayIcon, PlusIcon, RobotIcon, SquaresFourIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 import type { WorkspaceId } from "@thuminal/term-core";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { AGENTS } from "./agents";
+import { looksLikeUrl, toUrl } from "./BrowserPane";
 import { panesOf } from "./layout";
 import { cn } from "./lib/utils";
 import { useApp, useModel } from "./store";
@@ -43,8 +44,11 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
   const newTerminal = () => void model.newTab(ws);
   const launch = (input: string) => void model.newTab(ws, input);
 
+  const browserOk = !!model.services.host.browser;
+  const newBrowser = (url?: string) => void model.newBrowserTab(ws, url);
   const menu: Option[] = [
     { id: "terminal", label: "새 터미널", hint: "terminal shell", icon: <TerminalWindowIcon />, run: newTerminal },
+    ...(browserOk ? [{ id: "browser", label: "새 브라우저 탭", hint: "browser web", icon: <GlobeIcon />, run: () => newBrowser() }] : []),
     ...installed.map((a) => ({ id: `agent:${a.cmd}`, label: a.label, hint: a.cmd, icon: <RobotIcon />, run: () => launch(a.cmd) })),
     ...(inWorktree
       ? [
@@ -58,6 +62,8 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
   const q = query.trim().toLowerCase();
   const results: Option[] = [];
   if (q) {
+    // 주소처럼 보이면 브라우저로 여는 것을 맨 위에
+    if (browserOk && looksLikeUrl(query)) results.push({ id: "open-url", label: toUrl(query), hint: "브라우저로 열기", icon: <GlobeIcon />, run: () => newBrowser(toUrl(query)) });
     for (const t of layout?.tabs ?? []) {
       const p = panesOf(t.root).find((x) => x.id === t.focused) ?? panesOf(t.root)[0];
       const title = t.title ?? (p?.type === "terminal" ? sessions[p.session]?.title : p?.doc.file) ?? "";
@@ -103,7 +109,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
             <input
               autoFocus
               className="h-full min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground"
-              placeholder="열린 탭, 에이전트, 실행할 명령…"
+              placeholder="열린 탭, 에이전트, 명령, 주소…"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -136,7 +142,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
                 >
                   {o.icon}
                   <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                  {o.hint && (o.id.startsWith("tab:") || o.id === "run") ? <span className="shrink-0 text-muted-foreground/70">{o.hint}</span> : null}
+                  {o.hint && (o.id.startsWith("tab:") || o.id === "run" || o.id === "open-url") ? <span className="shrink-0 text-muted-foreground/70">{o.hint}</span> : null}
                 </button>
               ))
             ) : (
@@ -150,6 +156,13 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
           새 터미널
           <DropdownMenuShortcut>⌘T</DropdownMenuShortcut>
         </DropdownMenuItem>
+        {browserOk && (
+          <DropdownMenuItem className={ITEM} onSelect={() => newBrowser()}>
+            <GlobeIcon className="size-4 text-muted-foreground" />
+            새 브라우저 탭
+            <DropdownMenuShortcut>⌘⇧B</DropdownMenuShortcut>
+          </DropdownMenuItem>
+        )}
         {inWorktree && (
           <>
             <DropdownMenuItem className={ITEM} onSelect={() => model.setPanel("files")}>

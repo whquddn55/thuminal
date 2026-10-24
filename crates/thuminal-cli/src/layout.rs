@@ -35,6 +35,75 @@ pub struct TabArgs {
 }
 
 #[derive(Args)]
+pub struct BrowserArgs {
+    /// 결과를 JSON 으로
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    cmd: BrowserCmd,
+}
+
+#[derive(Subcommand)]
+enum BrowserCmd {
+    /// 앱 안 브라우저로 주소를 연다 (기본: 새 탭). 새 칸을 찍는다 (`p9`)
+    Open {
+        /// 주소. 스킴이 없으면 http:// 를 붙인다 (localhost:3000 처럼)
+        url: String,
+        /// 이 워크스페이스에 연다 (경로, 브랜치, floating, other, `.`)
+        #[arg(long = "in", value_name = "W")]
+        workspace: Option<String>,
+        /// 새 탭 대신 이 칸 옆을 나눠 연다 (p7, `.` 은 이 셸이 든 칸)
+        #[arg(long, value_name = "칸")]
+        beside: Option<String>,
+        #[command(flatten)]
+        dir: Dir,
+        #[arg(long)]
+        no_focus: bool,
+    },
+}
+
+/// 주소에 스킴이 없으면 붙인다
+fn browser_url(url: &str) -> String {
+    let u = url.trim();
+    if u.contains("://") || u.starts_with("about:") { u.to_string() } else { format!("http://{u}") }
+}
+
+fn browser_doc(url: &str) -> std::collections::BTreeMap<String, String> {
+    [("kind".to_string(), "browser".to_string()), ("url".to_string(), browser_url(url))].into()
+}
+
+pub async fn browser(c: &Client, args: BrowserArgs) -> Res<()> {
+    let json = args.json;
+    match args.cmd {
+        BrowserCmd::Open { url, workspace: w, beside, dir, no_focus } => {
+            let op = match beside.or_else(|| dir.side().map(|_| ".".to_string())) {
+                Some(target) => LayoutOp::Split {
+                    target: pane_ref(Some(&target))?,
+                    side: dir.side().unwrap_or(Side::Right),
+                    size: None,
+                    spawn: Spawn::default(),
+                    focus: !no_focus,
+                    doc: Some(browser_doc(&url)),
+                },
+                None => LayoutOp::NewTab {
+                    workspace: workspace(c, w.as_deref()).await?,
+                    spawn: Spawn::default(),
+                    index: None,
+                    focus: !no_focus,
+                    title: None,
+                    doc: Some(browser_doc(&url)),
+                },
+            };
+            let (_, created) = send(c, json, op).await?;
+            if !json {
+                created.iter().for_each(|p| println!("{p}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Args)]
 pub struct LayoutArgs {
     /// 결과를 JSON 으로
     #[arg(long, global = true)]
@@ -398,6 +467,7 @@ pub async fn pane(c: &Client, args: PaneArgs) -> Res<()> {
                 size: sz.as_deref().map(size).transpose()?,
                 spawn: spawn(cwd, &command)?,
                 focus: !no_focus,
+                doc: None,
             };
             let (layouts, created) = send(c, json, op).await?;
             if !json {
@@ -496,7 +566,7 @@ pub async fn tab(c: &Client, args: TabArgs) -> Res<()> {
     match args.cmd {
         TabCmd::New { title, workspace: w, cwd, index, no_focus, command } => {
             let ws = workspace(c, w.as_deref()).await?;
-            let op = LayoutOp::NewTab { workspace: ws, spawn: spawn(cwd, &command)?, index, focus: !no_focus, title };
+            let op = LayoutOp::NewTab { workspace: ws, spawn: spawn(cwd, &command)?, index, focus: !no_focus, title, doc: None };
             let (layouts, created) = send(c, json, op).await?;
             if !json && let Some(p) = created.first() {
                 let tab = tab_with(&layouts, &PaneRef::Id(*p)).map(|(_, t)| t.id.to_string()).unwrap_or_default();

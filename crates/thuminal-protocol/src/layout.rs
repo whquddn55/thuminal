@@ -170,7 +170,8 @@ fn yes() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum LayoutOp {
-    /// 새 탭(터미널 하나). index 를 비우면 끝. focus 면 활성 탭으로. title 을 주면 탭 이름
+    /// 새 탭(터미널 하나). index 를 비우면 끝. focus 면 활성 탭으로. title 을 주면 탭 이름.
+    /// doc 을 주면 터미널 대신 그 문서 칸(예: 브라우저 `{"kind":"browser","url":…}`)으로 연다 (같은 문서가 있어도 새로 연다)
     NewTab {
         workspace: String,
         #[serde(default)]
@@ -181,10 +182,12 @@ pub enum LayoutOp {
         focus: bool,
         #[serde(default)]
         title: Option<String>,
+        #[serde(default)]
+        doc: Option<BTreeMap<String, String>>,
     },
     /// 문서 칸을 새 탭으로 연다 (같은 doc 이 이미 있으면 그 칸으로 포커스만)
     OpenDoc { workspace: String, doc: BTreeMap<String, String> },
-    /// 대상 칸 옆에 새 터미널 칸. size 는 새 칸이 차지할 비율(0.05~0.95, 기본 0.5)
+    /// 대상 칸 옆에 새 터미널 칸. size 는 새 칸이 차지할 비율(0.05~0.95, 기본 0.5). doc 을 주면 그 문서 칸으로
     Split {
         target: PaneRef,
         side: Side,
@@ -194,7 +197,11 @@ pub enum LayoutOp {
         spawn: Spawn,
         #[serde(default = "yes")]
         focus: bool,
+        #[serde(default)]
+        doc: Option<BTreeMap<String, String>>,
     },
+    /// 문서 칸의 내용을 바꾼다 (브라우저 칸이 다른 페이지로 옮겨 갔을 때 주소를 남긴다). 터미널 칸이면 오류
+    UpdateDoc { pane: PaneRef, doc: BTreeMap<String, String> },
     /// 칸 크기: 칸이 든 분할에서 이 칸 몫을 정한다. 형제들은 원래 비율대로 나머지를 나눈다.
     /// axis 를 주면 그 축의 가장 가까운 조상 분할을 고른다 (없으면 가장 가까운 분할)
     Resize {
@@ -274,6 +281,7 @@ impl LayoutOp {
             LayoutOp::NewTab { .. } => "new_tab",
             LayoutOp::OpenDoc { .. } => "open_doc",
             LayoutOp::Split { .. } => "split",
+            LayoutOp::UpdateDoc { .. } => "update_doc",
             LayoutOp::Resize { .. } => "resize",
             LayoutOp::ResizeBy { .. } => "resize_by",
             LayoutOp::SetSizes { .. } => "set_sizes",
@@ -360,7 +368,7 @@ mod tests {
         let op: LayoutOp = serde_json::from_str(r#"{"op":"split","target":{"by":"id","value":1},"side":"down"}"#).unwrap();
         assert_eq!(
             op,
-            LayoutOp::Split { target: PaneRef::Id(PaneId(1)), side: Side::Down, size: None, spawn: Spawn::default(), focus: true }
+            LayoutOp::Split { target: PaneRef::Id(PaneId(1)), side: Side::Down, size: None, spawn: Spawn::default(), focus: true, doc: None }
         );
         let spec: LayoutSpec = serde_json::from_str(r#"{"type":"split","axis":"column","children":[{"type":"spawn"}]}"#).unwrap();
         assert_eq!(spec, LayoutSpec::Split { axis: Axis::Column, children: vec![LayoutSpec::Spawn { spawn: Spawn::default() }], sizes: None });
