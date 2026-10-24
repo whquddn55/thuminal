@@ -31,6 +31,13 @@ fn git_raw(dir: &Path, args: &[&str]) -> Result<Vec<u8>, VcsError> {
     }
 }
 
+fn not_a_repo(path: &Path, e: VcsError) -> VcsError {
+    match e {
+        VcsError::Command(msg) if !msg.contains("not a git repository") => VcsError::Command(format!("{}: {msg}", path.display())),
+        _ => VcsError::NotARepo(path.display().to_string()),
+    }
+}
+
 /// git 이 돌려준 경로를 실제 경로로 맞춘다 (/tmp → /private/tmp 같은 차이를 없앤다)
 fn canonical(p: &str) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p))
@@ -99,15 +106,15 @@ fn parse_status(out: &[u8]) -> GitStatus {
 
 impl Vcs for GitCli {
     fn main_worktree(&self, path: &Path) -> Result<PathBuf, VcsError> {
-        let common = git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-            .map_err(|_| VcsError::NotARepo(path.display().to_string()))?;
+        // git 이 저장소가 아니라고 한 것만 NotARepo 로 바꾸고, 그 밖의 까닭(소유자 검사, 권한 등)은 그대로 알린다
+        let common = git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).map_err(|e| not_a_repo(path, e))?;
         let common = canonical(&common);
         // 보통 <메인>/.git 이다. bare 저장소면 그 폴더 자체
         Ok(if common.file_name().is_some_and(|n| n == ".git") { common.parent().unwrap().to_path_buf() } else { common })
     }
 
     fn worktree_root(&self, path: &Path) -> Result<PathBuf, VcsError> {
-        git(path, &["rev-parse", "--show-toplevel"]).map(|p| canonical(&p)).map_err(|_| VcsError::NotARepo(path.display().to_string()))
+        git(path, &["rev-parse", "--show-toplevel"]).map(|p| canonical(&p)).map_err(|e| not_a_repo(path, e))
     }
 
     fn list_worktrees(&self, repo: &Path) -> Result<Vec<VcsWorktree>, VcsError> {

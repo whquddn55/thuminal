@@ -261,19 +261,29 @@ impl Workspace {
 
     /// 폴더가 저장소면 등록하고, 아니면 바로 아래 폴더들에서 저장소를 찾아 모두 등록한다
     pub fn add_repos(&self, path: &Path) -> Result<Vec<RepoInfo>, WorkspaceError> {
-        if let Ok(r) = self.add_repo(path) {
-            return Ok(vec![r]);
+        match self.add_repo(path) {
+            Ok(r) => return Ok(vec![r]),
+            // 저장소인데 다른 까닭으로 못 읽었으면(소유자 검사 등) 그 까닭을 알린다
+            Err(WorkspaceError::Vcs(VcsError::NotARepo(_))) => {}
+            Err(e) => return Err(e),
         }
-        let mut found = Vec::new();
-        let mut dirs: Vec<_> = std::fs::read_dir(path)?.flatten().map(|e| e.path()).filter(|p| p.join(".git").exists()).collect();
+        let entries = std::fs::read_dir(path).map_err(|e| WorkspaceError::Invalid(format!("폴더를 읽지 못했다: {} ({e})", path.display())))?;
+        let mut dirs: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.join(".git").exists()).collect();
         dirs.sort();
+        let mut found: Vec<RepoInfo> = Vec::new();
+        let mut first_error = None;
         for d in dirs {
-            if let Ok(r) = self.add_repo(&d) {
-                found.push(r);
+            match self.add_repo(&d) {
+                // 워크트리 폴더도 메인 저장소로 풀리므로 같은 저장소가 여러 번 나온다
+                Ok(r) if !found.iter().any(|f| f.path == r.path) => found.push(r),
+                Ok(_) => {}
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
             }
         }
         if found.is_empty() {
-            return Err(WorkspaceError::Invalid(format!("git 저장소를 찾지 못했다: {}", path.display())));
+            return Err(first_error.unwrap_or_else(|| WorkspaceError::Invalid(format!("git 저장소를 찾지 못했다: {}", path.display()))));
         }
         Ok(found)
     }
