@@ -25,6 +25,25 @@ export interface CellPoint {
   y: number;
 }
 
+/**
+ * 터미널 기본색. 모두 0xRRGGBB.
+ * 기본 fg/bg 와 팔레트 번호로 칠한 칸은 바꾸면 스크롤백까지 새 색으로 다시 그려진다 (24비트 색 칸은 그대로).
+ * 프로그램이 OSC 4/10/11/12 로 바꾼 색은 엔진이 지킨다.
+ */
+export interface EngineColors {
+  fg: number;
+  bg: number;
+  cursor: number;
+  /** 커서 아래 글자 색 */
+  cursorText: number;
+  selectionBg: number;
+  selectionFg: number;
+  /** ANSI 0~15 (16개). 16~255 는 엔진 기본값을 쓴다 */
+  palette: readonly number[];
+  /** 글자와 배경의 최소 WCAG 대비 (1~21). 비우거나 1 이면 고치지 않는다. 글자색만 바꾼다 */
+  minimumContrast?: number;
+}
+
 export interface CursorState {
   x: number;
   y: number;
@@ -52,7 +71,10 @@ export interface TerminalEngine {
   clearSelection(): void;
   /** 선택한 글자. 선택이 없으면 null */
   selectionText(): string | null;
+  /** 지금 쓰는 기본 fg/bg (OSC 10/11 로 바뀌었으면 그 값). 렌더러는 bg 로 빈 자리를 칠한다 */
   defaultColors(): { fg: number; bg: number };
+  /** 기본색을 바꾸고 다음 scan 에서 모든 칸을 다시 넘긴다 */
+  setColors(colors: EngineColors): void;
   /** 키보드 입력을 터미널 모드(커서 키 모드 등)에 맞는 바이트로 바꾼다 */
   readonly input: InputEncoder;
   dispose(): void;
@@ -86,6 +108,8 @@ export interface EngineFactory {
   readonly nativeSnapshotOf: string | null;
   /** 엔진을 쓸 준비 (wasm 내려받기 등) */
   load(): Promise<void>;
+  /** 앞으로 create / restore 할 엔진의 기본색. 이미 만든 엔진은 각자 setColors 로 바꾼다 */
+  setDefaultColors(colors: EngineColors): void;
   create(opts: { cols: number; rows: number; scrollback: number }): TerminalEngine;
   /** native 저장본으로 엔진을 되살린다. 지원하지 않으면 null */
   restore?(snapshot: Uint8Array, opts: { cols: number; rows: number; scrollback: number }): TerminalEngine | null;

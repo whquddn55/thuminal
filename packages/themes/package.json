@@ -1,0 +1,11 @@
+{
+  "name": "@thuminal/themes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "터미널 테마 목록과 앱 화면 색 만들기. 다른 패키지에 기대지 않는다.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p ." },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

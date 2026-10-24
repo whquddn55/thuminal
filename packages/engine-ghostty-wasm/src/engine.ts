@@ -5,16 +5,22 @@ import {
   type CellPoint,
   type CellSink,
   type CursorState,
+  type EngineColors,
   type EngineFactory,
   type InputEncoder,
   type KeyInput,
   type TerminalEngine,
 } from "@thuminal/term-core";
 
+import { mix, readable } from "./contrast";
 import { KEY_CODES } from "./keymap";
 import { SUCCESS, Wasm } from "./wasm";
 
 // include/ghostty/vt/*.h 의 enum 값
+const OPT_COLOR_FOREGROUND = 11;
+const OPT_COLOR_BACKGROUND = 12;
+const OPT_COLOR_CURSOR = 13;
+const OPT_COLOR_PALETTE = 14; // GhosttyColorRgb[256]. OSC 4 로 바뀐 번호는 엔진이 지킨다
 const OPT_SELECTION = 21;
 const OPT_SCROLLBACK_MAX_BYTES = 27;
 const OPT_SCROLLBACK_MAX_LINES = 28;
@@ -24,6 +30,8 @@ const RS_DIRTY = 3;
 const RS_ROW_ITERATOR = 4;
 const RS_COLOR_BACKGROUND = 5;
 const RS_COLOR_FOREGROUND = 6;
+const RS_COLOR_CURSOR = 7;
+const RS_COLOR_CURSOR_HAS_VALUE = 8;
 const RS_CURSOR_VISIBLE = 11;
 const RS_CURSOR_VIEWPORT_HAS_VALUE = 14;
 const RS_CURSOR_VIEWPORT_X = 15;
@@ -36,7 +44,8 @@ const POINT_VIEWPORT = 1;
 const SCROLL_BOTTOM = 1;
 const SCROLL_DELTA = 2;
 const FORMAT_PLAIN = 0;
-const SELECTION_BG = 0x264f78;
+// setColors 를 받기 전 선택 배경
+const FALLBACK_SELECTION_BG = 0x264f78;
 const CELL_RAW = 1;
 const CELL_STYLE = 2;
 const CELL_GRAPHEMES_LEN = 3;
@@ -108,7 +117,12 @@ export class GhosttyWasmEngine implements TerminalEngine {
   private forceFull = true;
   private cursorState: CursorState = { x: 0, y: 0, visible: true };
   private lastCursorRow = -1;
+  private lastCursorColor = -1;
   private colors = { fg: 0xd0d0d0, bg: 0x101010 };
+  /** setColors 로 받은 색. 없으면 엔진 내장 기본색과 위의 대체 색을 쓴다 */
+  private theme: EngineColors | null = null;
+  /** 대비 보정 결과 (fg * 2^24 + bg → 고친 fg) */
+  private readonly contrastCache = new Map<number, number>();
   readonly input: InputEncoder;
 
   constructor(
@@ -152,22 +166,81 @@ export class GhosttyWasmEngine implements TerminalEngine {
     return this.colors;
   }
 
+  setColors(c: EngineColors): void {
+    const { w } = this;
+    const ex = w.ex;
+    const set = (opt: number, p: number) => {
+      const r = ex.ghostty_terminal_set(this.term, opt, p);
+      if (r !== SUCCESS) throw new Error(`terminal_set(${opt}) 실패 (${r})`);
+    };
+    const rgb = (opt: number, v: number) => {
+      const p = w.tmp + T_A;
+      const u = w.u8();
+      u[p] = (v >> 16) & 255;
+      u[p + 1] = (v >> 8) & 255;
+      u[p + 2] = v & 255;
+      set(opt, p);
+    };
+    rgb(OPT_COLOR_FOREGROUND, c.fg);
+    rgb(OPT_COLOR_BACKGROUND, c.bg);
+    rgb(OPT_COLOR_CURSOR, c.cursor);
+    // 16~255 는 엔진 내장 기본값 (6x6x6 큐브와 회색 단계) 을 그대로 둔다
+    const pal = w.scratchFor(256 * 3);
+    ex.ghostty_color_palette_default(pal);
+    const u = w.u8();
+    c.palette.slice(0, 16).forEach((v, i) => {
+      u[pal + i * 3] = (v >> 16) & 255;
+      u[pal + i * 3 + 1] = (v >> 8) & 255;
+      u[pal + i * 3 + 2] = v & 255;
+    });
+    set(OPT_COLOR_PALETTE, pal);
+    this.theme = { ...c, palette: [...c.palette] };
+    this.colors = { fg: c.fg, bg: c.bg };
+    this.contrastCache.clear();
+    this.forceFull = true;
+  }
+
+  /** 최소 대비를 맞춘 글자색 */
+  private readableFg(fg: number, bg: number, ratio: number): number {
+    const key = fg * 0x1000000 + bg;
+    let out = this.contrastCache.get(key);
+    if (out === undefined) {
+      if (this.contrastCache.size > 4096) this.contrastCache.clear();
+      out = readable(fg, bg, ratio);
+      this.contrastCache.set(key, out);
+    }
+    return out;
+  }
+
   scan(sink: CellSink): boolean {
     const { w } = this;
     const ex = w.ex;
     const tmp = w.tmp;
     ex.ghostty_render_state_update(this.rs, this.term);
+    ex.ghostty_render_state_get(this.rs, RS_COLOR_BACKGROUND, tmp + T_BG);
+    ex.ghostty_render_state_get(this.rs, RS_COLOR_FOREGROUND, tmp + T_FG);
+    const defBg = w.rgb(tmp + T_BG);
+    const defFg = w.rgb(tmp + T_FG);
+    const theme = this.theme;
+    // 커서: OSC 12 로 바뀐 색이 있으면 그 색, 아니면 테마 색. 테마가 없으면 기본 fg/bg 를 맞바꾼다
+    ex.ghostty_render_state_get(this.rs, RS_COLOR_CURSOR_HAS_VALUE, tmp + T_A);
+    const hasCursorColor = w.u8()[tmp + T_A] !== 0;
+    if (hasCursorColor) ex.ghostty_render_state_get(this.rs, RS_COLOR_CURSOR, tmp + T_A + 4);
+    const cursorBg = hasCursorColor ? w.rgb(tmp + T_A + 4) : (theme?.cursor ?? defFg);
+    // OSC 10/11/12 로 색만 바뀌면 엔진이 바뀜 표시를 하지 않아서 직접 비교한다
+    if (defFg !== this.colors.fg || defBg !== this.colors.bg || cursorBg !== this.lastCursorColor) this.forceFull = true;
+    this.colors = { fg: defFg, bg: defBg };
+    this.lastCursorColor = cursorBg;
+
     ex.ghostty_render_state_get(this.rs, RS_DIRTY, tmp + T_A);
     const dirty = w.dv().getUint32(tmp + T_A, true);
     if (dirty === 0 && !this.forceFull) return false;
     const full = dirty === DIRTY_FULL || this.forceFull;
     this.forceFull = false;
 
-    ex.ghostty_render_state_get(this.rs, RS_COLOR_BACKGROUND, tmp + T_BG);
-    ex.ghostty_render_state_get(this.rs, RS_COLOR_FOREGROUND, tmp + T_FG);
-    const defBg = w.rgb(tmp + T_BG);
-    const defFg = w.rgb(tmp + T_FG);
-    this.colors = { fg: defFg, bg: defBg };
+    const cursorFg = theme ? theme.cursorText : defBg;
+    const selBg = theme ? theme.selectionBg : FALLBACK_SELECTION_BG;
+    const minContrast = theme?.minimumContrast ?? 1;
 
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VISIBLE, tmp + T_A);
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VIEWPORT_HAS_VALUE, tmp + T_A + 1);
@@ -208,6 +281,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
         let fg = fgR === SUCCESS ? w.rgb(tmp + T_FG) : defFg;
         let bg = bgR === SUCCESS ? w.rgb(tmp + T_BG) : defBg;
         let flags = 0;
+        let faint = false;
         if (((dv.getUint32(tmp + T_RAW + 4, true) >>> CELL_WIDE_SHIFT_HI) & 3) === CELL_WIDE_WIDE) flags |= CellFlags.Wide;
         if (dv.getUint8(tmp + T_FLAG)) {
           dv.setUint32(tmp + T_STYLE, STYLE_SIZE, true);
@@ -219,13 +293,17 @@ export class GhosttyWasmEngine implements TerminalEngine {
           if (u[s + STYLE_STRIKE]) flags |= CellFlags.Strikethrough;
           if (w.dv().getInt32(s + STYLE_UNDERLINE, true) !== 0) flags |= CellFlags.Underline;
           if (u[s + STYLE_INVERSE]) [fg, bg] = [bg, fg];
-          if (u[s + STYLE_FAINT]) fg = (fg >> 1) & 0x7f7f7f;
+          faint = u[s + STYLE_FAINT] !== 0;
         }
         if (x >= selFrom && x <= selTo) {
-          bg = SELECTION_BG;
+          bg = selBg;
+          if (theme) fg = theme.selectionFg;
           flags |= CellFlags.Selected;
         }
-        if (x === this.cursorState.x && y === cursorY) [fg, bg] = [defBg, defFg];
+        // 같은 색은 일부러 숨긴 글자로 보고 두고, 흐린 글자는 보정한 뒤 배경 쪽으로 반만 섞는다
+        if (minContrast > 1 && fg !== bg) fg = this.readableFg(fg, bg, minContrast);
+        if (faint) fg = mix(fg, bg, 0.5);
+        if (x === this.cursorState.x && y === cursorY) [fg, bg] = [cursorFg, cursorBg];
         let cp = 0;
         if (len > 0 && len <= 32) {
           ex.ghostty_render_state_row_cells_get(cells, CELL_GRAPHEMES_BUF, tmp + T_GRAPHEME);
@@ -392,6 +470,7 @@ export interface GhosttyWasmOptions {
 
 export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
   let wasm: Wasm | null = null;
+  let defaults: EngineColors | null = null;
   const need = () => {
     if (!wasm) throw new Error("ghostty-vt.wasm 을 먼저 load() 해야 한다");
     return wasm;
@@ -408,11 +487,16 @@ export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
     async load() {
       if (!wasm) wasm = await Wasm.instantiate(await opts.wasm());
     },
+    setDefaultColors(c) {
+      defaults = { ...c, palette: [...c.palette] };
+    },
     create({ cols, rows, scrollback }) {
       const w = need();
       const term = w.create((pp) => w.ex.ghostty_terminal_new(0, pp, cols, rows), "terminal_new");
       configure(w, term, scrollback);
-      return new GhosttyWasmEngine(w, term, cols, rows);
+      const engine = new GhosttyWasmEngine(w, term, cols, rows);
+      if (defaults) engine.setColors(defaults);
+      return engine;
     },
     restore(snapshot, { cols, rows, scrollback }) {
       const w = need();
@@ -430,6 +514,7 @@ export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
             engine.dispose();
             return null;
           }
+          if (defaults) engine.setColors(defaults);
           return engine;
         } finally {
           ex.ghostty_snapshot_decoder_free(dec);
