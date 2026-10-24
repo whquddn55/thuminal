@@ -1,234 +1,183 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { FilesIcon, GitDiffIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
+import { useEffect, useMemo } from "react";
 
-import type { Renderer, WorktreeInfo } from "@thuminal/term-core";
-
-import { ContextMenu, DeleteWorktreeDialog, JumpPalette, type MenuState, NewWorktreeDialog } from "./overlays";
-import { ChangesPanel, FilesPanel } from "./RightPanel";
+import { Button } from "./components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
+import { useDrag } from "./dnd";
+import { FloatingPanel } from "./FloatingPanel";
+import { cn } from "./lib/utils";
+import { Dialogs } from "./overlays";
+import { RightPanel } from "./RightPanel";
 import type { Services } from "./services";
+import { SettingsDialog } from "./Settings";
 import { Sidebar } from "./Sidebar";
-import { OTHER, Store } from "./store";
-import { DocView } from "./viewers";
+import { AppModel, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./store";
+import { TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import "./styles.css";
 
 export function App({ services }: { services: Services }) {
-  const store = useMemo(() => new Store(services), [services]);
-  const snap = useSyncExternalStore(store.subscribe, store.get);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const paneRef = useRef<HTMLDivElement>(null);
-  const floatRef = useRef<HTMLDivElement>(null);
-  const [renderer, setRenderer] = useState<Renderer | null>(null);
-  const [menu, setMenu] = useState<MenuState | null>(null);
-  const [newWt, setNewWt] = useState<string | null>(null);
-  const [delWt, setDelWt] = useState<WorktreeInfo | null>(null);
-  const [jump, setJump] = useState(false);
-
+  const model = useMemo(() => new AppModel(services), [services]);
   useEffect(() => {
-    void store.start();
-    return () => store.stop();
-  }, [store]);
+    void model.start();
+    return () => model.stop();
+  }, [model]);
+  return (
+    <ModelContext.Provider value={model}>
+      <TooltipProvider delayDuration={400}>
+        <Shell />
+      </TooltipProvider>
+    </ModelContext.Provider>
+  );
+}
 
-  // 렌더러는 터미널 영역 하나에 하나만 둔다
+const ARROWS: Record<string, "left" | "right" | "up" | "down"> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+
+/** 앱 단축키. 터미널 입력보다 먼저 받는다 (Cmd 조합은 터미널로 가지 않는다) */
+function useShortcuts(model: AppModel) {
   useEffect(() => {
-    const r = services.renderer(stageRef.current!, services.rendererOptions);
-    setRenderer(r);
-    let raf = 0;
-    const loop = () => {
-      r.frame();
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => {
-      cancelAnimationFrame(raf);
-      r.dispose();
-    };
-  }, [services]);
-
-  // 지금 터미널 탭(플로팅이 열려 있으면 플로팅)만 렌더러에 그린다. 다른 탭은 엔진만 출력을 받는다
-  const termTab = typeof snap.activeTab === "number" ? snap.activeTab : null;
-  const shown = snap.floating ?? termTab;
-  useEffect(() => {
-    const host = snap.floating !== null ? floatRef.current : paneRef.current;
-    if (!renderer || shown === null || !host) return;
-    const c = store.controller(shown);
-    c.show(host, renderer);
-    return () => c.hide();
-  }, [renderer, shown, snap.floating, snap.generation, store]);
-
-  // 패널을 열고 닫으면 터미널 자리 크기가 바뀐다
-  useEffect(() => {
-    renderer?.layout();
-  }, [renderer, snap.panel]);
-
-  const activeWorktree = snap.worktrees.find((w) => w.path === snap.active) ?? null;
-  const activeRepo = activeWorktree?.repo ?? snap.repos[0]?.id ?? null;
-
-  const onKey = useCallback(
-    (e: KeyboardEvent) => {
-      // Ctrl+` : 플로팅 터미널
-      if (e.ctrlKey && e.code === "Backquote") {
-        e.preventDefault();
-        e.stopPropagation();
-        void store.toggleFloating();
-        return;
-      }
-      if (!e.metaKey) return;
-      const cur = store.get();
-      const key = e.key.toLowerCase();
+    const onKey = (e: KeyboardEvent) => {
       const run = (f: () => void) => {
         e.preventDefault();
         e.stopPropagation();
         f();
       };
-      if (key === "j") run(() => setJump(true));
-      else if (e.shiftKey && key === "n" && activeRepo) run(() => setNewWt(activeRepo));
-      else if (e.shiftKey && key === "e") run(() => store.setPanel("files"));
-      else if (e.shiftKey && key === "g") run(() => store.setPanel("changes"));
-      else if (key === "t" && !e.shiftKey) run(() => void store.newTab());
-      else if (key === "w" && cur.activeTab !== null) run(() => void store.closeTab(cur.activeTab!));
-      else if (/^[1-9]$/.test(e.key)) {
-        const keys = [...store.tabsAt(cur.active).map((t) => t.id), ...cur.docs.map((d) => d.id)];
-        const k = keys[Number(e.key) - 1];
-        if (k !== undefined) run(() => store.selectTab(k));
+      // Ctrl+` : 플로팅 워크스페이스
+      if (e.ctrlKey && !e.metaKey && (e.code === "Backquote" || e.key === "`")) return run(() => void model.toggleFloating());
+      if (!e.metaKey) return;
+      const s = model.get();
+      if (s.dialog) return;
+      const key = e.key.toLowerCase();
+      const arrow = ARROWS[e.key];
+      if (arrow && e.altKey) return run(() => model.focusDir(arrow));
+      if (arrow && e.ctrlKey) {
+        const axis = arrow === "left" || arrow === "right" ? "row" : "column";
+        return run(() => model.resizeBy(arrow === "right" || arrow === "down" ? 0.05 : -0.05, axis));
       }
-    },
-    [store, activeRepo],
-  );
-  useEffect(() => {
+      if (key === "j") return run(() => model.setDialog({ kind: "jump" }));
+      if (key === ",") return run(() => model.setDialog({ kind: "settings" }));
+      if (e.shiftKey && key === "n") {
+        const repo = s.worktrees.find((w) => w.path === s.active)?.repo ?? s.repos[0]?.id;
+        if (repo) run(() => model.setDialog({ kind: "new-worktree", repo }));
+        return;
+      }
+      if (e.shiftKey && key === "e") return run(() => model.setPanel("files"));
+      if (e.shiftKey && key === "g") return run(() => model.setPanel("changes"));
+      if (e.shiftKey && key === "enter") return run(() => model.zoom());
+      if (key === "d") return run(() => void model.split(e.shiftKey ? "down" : "right"));
+      if (key === "t" && !e.shiftKey) return run(() => void model.newTab());
+      if (key === "w" && !e.shiftKey) return run(() => void model.closeCurrent());
+      if (e.key === "[" || e.key === "]") return run(() => model.focusCycle(e.key === "]" ? 1 : -1));
+      if (e.altKey && key === "=") return run(() => model.equalize());
+      if (/^[1-9]$/.test(e.key) && !e.shiftKey) return run(() => model.selectTabIndex(Number(e.key) - 1));
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onKey]);
+  }, [model]);
+}
 
-  const tabs = store.tabsAt(snap.active);
-  const status = snap.status.get(snap.active);
-  const changes = status?.files.length ?? 0;
-  const activeDoc = typeof snap.activeTab === "string" ? snap.docs.find((d) => d.id === snap.activeTab) : undefined;
-  const inWorktree = snap.active !== OTHER;
+function Shell() {
+  const model = useModel();
+  useShortcuts(model);
+  const active = useApp((s) => s.active);
+  const panel = useApp((s) => s.panel);
+  const floating = useApp((s) => s.floating.open);
+  const changes = useApp((s) => s.status[s.active]?.files.length ?? 0);
+  const error = useApp((s) => s.error);
+  const inWorktree = active !== OTHER_WORKSPACE;
 
   return (
-    <div className={`thm-app ${snap.panel && inWorktree ? "with-panel" : ""}`}>
-      <Sidebar
-        store={store}
-        snap={snap}
-        actions={{
-          newWorktree: (repo) => setNewWt(repo),
-          deleteWorktree: (w) => setDelWt(w),
-          openMenu: setMenu,
-          jump: () => setJump(true),
-          reveal: (p) => void services.host.reveal(p).catch((e) => store.fail(e)),
-        }}
-      />
-      <main className="thm-main">
-        <div className="thm-tabs" data-tauri-drag-region>
-          {tabs.map((t, i) => (
-            <div
-              key={t.id}
-              className={`thm-tab ${t.id === snap.activeTab ? "active" : ""} ${t.state.state === "exited" ? "exited" : ""}`}
-              onClick={() => store.selectTab(t.id)}
-              title={t.cwd}
-            >
-              <span className="idx">{i + 1}</span>
-              {t.agent && <span className={`agent ${t.agent.state}`} title={`${t.agent.kind}: ${t.agent.state}`} />}
-              <span className="title">{t.title}</span>
-              <button
-                className="close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void store.closeTab(t.id);
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          {snap.docs.map((d) => (
-            <div key={d.id} className={`thm-tab doc ${d.id === snap.activeTab ? "active" : ""}`} onClick={() => store.selectTab(d.id)} title={d.file}>
-              <span className="idx">{d.kind === "diff" ? "±" : "▤"}</span>
-              <span className="title">{d.file.split("/").pop()}</span>
-              <button
-                className="close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void store.closeTab(d.id);
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button className="thm-new-tab" onClick={() => void store.newTab()} title="새 터미널 (⌘T)">
-            +
-          </button>
-          <div className="thm-tabs-spacer" data-tauri-drag-region />
-          {inWorktree && (
-            <>
-              <button className={`thm-panel-btn ${snap.panel === "files" ? "on" : ""}`} onClick={() => store.setPanel("files")} title="파일 (⌘⇧E)">
-                파일
-              </button>
-              <button className={`thm-panel-btn ${snap.panel === "changes" ? "on" : ""}`} onClick={() => store.setPanel("changes")} title="변경 (⌘⇧G)">
-                변경{changes > 0 && <span className="n">{changes}</span>}
-              </button>
-            </>
-          )}
-        </div>
-        <div className="thm-stage" ref={stageRef}>
-          {snap.floating !== null && (
-            <div className="thm-floating">
-              <div className="thm-floating-head">
-                <span>플로팅 터미널</span>
-                <span className="hint">Ctrl+` 로 닫기</span>
+    <div className="flex h-full">
+      <Sidebar />
+      <main className="flex min-w-0 flex-1 flex-col bg-background" onPointerDownCapture={() => model.get().focusArea !== "main" && model.setFocusArea("main")}>
+        <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
+          <TabBar ws={active} windowDrag className="h-full flex-1">
+            {inWorktree && (
+              <div className="flex items-center gap-0.5">
+                <PanelButton on={panel === "files"} label="파일 (⌘⇧E)" onClick={() => model.setPanel("files")}>
+                  <FilesIcon />
+                </PanelButton>
+                <PanelButton on={panel === "changes"} label="변경 (⌘⇧G)" onClick={() => model.setPanel("changes")}>
+                  <GitDiffIcon />
+                  {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
+                </PanelButton>
               </div>
-              <div className="thm-floating-pane" ref={floatRef} />
-            </div>
-          )}
-          {activeDoc ? (
-            <DocView host={services.host} worktree={snap.active} doc={activeDoc} generation={JSON.stringify(status ?? null).length + (status?.files.length ?? 0)} />
-          ) : termTab === null ? (
-            <div className="thm-empty">
-              <p>{inWorktree ? "이 워크트리에 열린 터미널이 없다." : "열린 터미널이 없다."}</p>
-              <div className="row">
-                <button onClick={() => void store.newTab()}>새 터미널 (⌘T)</button>
-                {inWorktree && <button onClick={() => void store.newTab(["claude"])}>claude 띄우기</button>}
-              </div>
-            </div>
-          ) : (
-            <div className="thm-pane" ref={paneRef} style={{ visibility: snap.floating !== null ? "hidden" : "visible" }} />
-          )}
+            )}
+          </TabBar>
         </div>
-        {snap.error && (
-          <div className="thm-error" onClick={() => store.clearError()} title="눌러서 닫기">
-            {snap.error}
-          </div>
-        )}
+        <TerminalSurface surface="main" className="flex-1">
+          <WorkspaceView ws={active} empty={<Empty worktree={inWorktree} />} />
+        </TerminalSurface>
       </main>
-      {snap.panel && inWorktree && (
-        <aside className="thm-right">
-          {snap.panel === "changes" ? (
-            <ChangesPanel store={store} host={services.host} worktree={snap.active} status={status} openMenu={setMenu} />
-          ) : (
-            <FilesPanel store={store} host={services.host} worktree={snap.active} status={status} />
-          )}
-        </aside>
+      {panel && inWorktree && <RightPanel />}
+      {floating && <FloatingPanel />}
+      <Dialogs />
+      <SettingsDialog />
+      <DragGhost />
+      {error && (
+        <div className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/40 bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
+          <span className="min-w-0 break-words text-destructive">{error}</span>
+          <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={model.clearError}>
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
       )}
-      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
-      {newWt && (
-        <NewWorktreeDialog
-          repos={snap.repos}
-          initialRepo={newWt}
-          loadBranches={services.host.git.branches}
-          onSubmit={(req) => void store.newWorktree(req)}
-          onClose={() => setNewWt(null)}
-        />
+    </div>
+  );
+}
+
+function PanelButton({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="xs" className={cn("h-7 gap-1 text-muted-foreground", on && "bg-accent text-foreground")} onClick={onClick}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function Empty({ worktree }: { worktree: boolean }) {
+  const model = useModel();
+  return (
+    <div className="grid h-full place-content-center gap-3 text-center text-muted-foreground">
+      <TerminalWindowIcon className="mx-auto size-8 opacity-50" />
+      <p>{worktree ? "이 워크트리에 열린 터미널이 없다." : "열린 터미널이 없다."}</p>
+      <div className="flex justify-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => void model.newTab()}>
+          새 터미널 (⌘T)
+        </Button>
+        {worktree && (
+          <Button size="sm" variant="outline" onClick={() => void model.newTab(undefined, "claude")}>
+            claude 띄우기
+          </Button>
+        )}
+      </div>
+      <p className="text-2xs">
+        ⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · Ctrl+` 플로팅
+      </p>
+    </div>
+  );
+}
+
+/** 끄는 동안 손가락 옆에 따라다니는 이름표 */
+function DragGhost() {
+  const source = useDrag((d) => d.source);
+  const x = useDrag((d) => d.x);
+  const y = useDrag((d) => d.y);
+  const hasTarget = useDrag((d) => d.target !== null);
+  if (!source) return null;
+  return (
+    <div
+      className={cn(
+        "pointer-events-none fixed z-[60] max-w-60 truncate rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg",
+        !hasTarget && "opacity-70",
       )}
-      {delWt && (
-        <DeleteWorktreeDialog
-          worktree={delWt}
-          dirty={snap.status.get(delWt.path)?.files.length ?? 0}
-          terminals={store.tabsAt(delWt.path).length}
-          onSubmit={(opts) => void store.removeWorktree(delWt, opts)}
-          onClose={() => setDelWt(null)}
-        />
-      )}
-      {jump && <JumpPalette worktrees={snap.worktrees} repos={snap.repos} onPick={(w) => store.select(w.path)} onClose={() => setJump(false)} />}
+      style={{ left: x + 12, top: y + 12 }}
+    >
+      {source.kind === "tab" ? "탭: " : "칸: "}
+      {source.title}
     </div>
   );
 }

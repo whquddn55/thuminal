@@ -9,10 +9,14 @@ import type {
   DirEntry,
   FileContent,
   GitStatus,
+  LayoutOp,
+  LayoutResult,
   RepoInfo,
   SessionId,
   SessionInfo,
   SnapshotFormat,
+  TerminalColors,
+  WorkspaceLayout,
   WorktreeInfo,
 } from "./protocol";
 
@@ -80,6 +84,14 @@ export interface HostApi {
    * 찾은 글꼴 면(굵기, 기울임) 수를 돌려준다. 없으면 0.
    */
   registerFont?(family: string): Promise<number>;
+  /** 배치. workspace 를 비우면 모두 */
+  getLayout(workspace?: string): Promise<WorkspaceLayout[]>;
+  /** 배치를 바꾼다. 바뀐 배치와 새로 만든 칸을 돌려준다 */
+  layout(op: LayoutOp): Promise<LayoutResult>;
+  layoutBatch(ops: LayoutOp[]): Promise<LayoutResult>;
+  /** 데몬 엔진의 기본 터미널 색 (아직 정한 적 없으면 null) */
+  getTerminalColors(): Promise<TerminalColors | null>;
+  setTerminalColors(colors: TerminalColors): Promise<void>;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */
   onEvent(cb: (e: DaemonEvent) => void): () => void;
 }

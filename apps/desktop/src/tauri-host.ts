@@ -12,6 +12,10 @@ import type {
   GitApi,
   GitStatus,
   CreateSession,
+  LayoutOp,
+  LayoutResult,
+  TerminalColors,
+  WorkspaceLayout,
   DaemonEvent,
   DaemonInfo,
   HostApi,
@@ -136,6 +140,26 @@ export class TauriHostApi implements HostApi {
 
   updateWorktree(path: string, change: { name?: string; pinned?: boolean }): Promise<void> {
     return req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null });
+  }
+
+  getLayout(workspace?: string): Promise<WorkspaceLayout[]> {
+    return req<WorkspaceLayout[]>({ type: "get_layout", workspace: workspace ?? null }, (r) => r.layouts);
+  }
+
+  layout(op: LayoutOp): Promise<LayoutResult> {
+    return req<LayoutResult>({ type: "layout", op }, (r) => ({ layouts: r.layouts, created: r.created }));
+  }
+
+  layoutBatch(ops: LayoutOp[]): Promise<LayoutResult> {
+    return req<LayoutResult>({ type: "layout_batch", ops }, (r) => ({ layouts: r.layouts, created: r.created }));
+  }
+
+  getTerminalColors(): Promise<TerminalColors | null> {
+    return req<TerminalColors | null>({ type: "get_terminal_colors" }, (r) => r.colors ?? null);
+  }
+
+  setTerminalColors(colors: TerminalColors): Promise<void> {
+    return req({ type: "set_terminal_colors", colors });
   }
 
   async pickFolder(): Promise<string | null> {

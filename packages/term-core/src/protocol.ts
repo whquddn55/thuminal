@@ -111,5 +111,99 @@ export type DaemonEvent =
   | { type: "session_removed"; session: SessionId }
   | { type: "workspace_changed" }
   | { type: "git_changed"; worktree: string }
+  | { type: "layout_changed"; layout: WorkspaceLayout }
+  | { type: "layout_removed"; workspace: string }
+  | { type: "terminal_colors_changed"; colors: TerminalColors }
   /** 앱 껍데기가 데몬에 다시 붙었다 (데몬이 다시 떴다). 세션 목록을 다시 읽고 다시 붙는다 */
   | { type: "daemon_reconnected" };
+
+// ---- 배치: 워크스페이스마다 탭, 탭마다 칸 트리 (tmux 식) ----
+
+/** 워크트리 경로, 또는 플로팅 워크스페이스, 워크트리 밖 세션 */
+export type WorkspaceId = string;
+export const FLOATING_WORKSPACE = "floating";
+export const OTHER_WORKSPACE = "other";
+
+export type PaneId = number;
+export type TabId = number;
+/** row: 좌우로 늘어놓는다, column: 위아래로 늘어놓는다 */
+export type Axis = "row" | "column";
+export type Side = "left" | "right" | "up" | "down";
+
+export type PaneContent = { type: "terminal"; session: SessionId } | { type: "doc"; doc: Record<string, string> };
+export type Pane = { id: PaneId } & PaneContent;
+
+export type PaneNode = { type: "split"; axis: Axis; children: PaneNode[]; sizes: number[] } | { type: "pane"; pane: Pane };
+
+export interface Tab {
+  id: TabId;
+  /** 사용자가 붙인 이름 (없으면 포커스 칸 세션 제목) */
+  title: string | null;
+  root: PaneNode;
+  focused: PaneId;
+  zoomed: PaneId | null;
+}
+
+export interface WorkspaceLayout {
+  workspace: WorkspaceId;
+  tabs: Tab[];
+  active_tab: TabId | null;
+}
+
+/** 새 세션. command 를 비우면 로그인 셸, input 은 셸이 뜬 뒤 입력할 명령 */
+export interface Spawn {
+  command?: string[];
+  input?: string | null;
+  cwd?: string | null;
+  env?: Record<string, string>;
+}
+
+export type PaneRef = { by: "id"; value: PaneId } | { by: "session"; value: SessionId } | { by: "focused"; value: WorkspaceId };
+export type TabRef = { by: "id"; value: TabId } | { by: "pane"; value: PaneRef } | { by: "active"; value: WorkspaceId };
+
+export type LayoutSpec =
+  | { type: "split"; axis: Axis; children: LayoutSpec[]; sizes?: number[] | null }
+  | { type: "pane"; pane: PaneRef }
+  | { type: "spawn"; spawn?: Spawn };
+
+export type LayoutOp =
+  | { op: "new_tab"; workspace: WorkspaceId; spawn?: Spawn; index?: number | null; focus?: boolean }
+  | { op: "open_doc"; workspace: WorkspaceId; doc: Record<string, string> }
+  | { op: "split"; target: PaneRef; side: Side; size?: number | null; spawn?: Spawn; focus?: boolean }
+  | { op: "resize"; target: PaneRef; size: number; axis?: Axis | null }
+  | { op: "resize_by"; target: PaneRef; delta: number; axis?: Axis | null }
+  | { op: "set_sizes"; tab: TabId; path: number[]; sizes: number[] }
+  | { op: "equalize"; tab: TabRef }
+  | { op: "focus"; target: PaneRef }
+  | { op: "focus_dir"; from: PaneRef; side: Side }
+  | { op: "focus_cycle"; from: PaneRef; delta: number }
+  | { op: "zoom"; target: PaneRef; on?: boolean | null }
+  | { op: "move_pane"; pane: PaneRef; to: PaneRef; side: Side }
+  | { op: "swap"; a: PaneRef; b: PaneRef }
+  | { op: "break_pane"; pane: PaneRef; workspace?: WorkspaceId | null; index?: number | null }
+  | { op: "join_tab"; tab: TabRef; to: PaneRef; side: Side }
+  | { op: "move_tab"; tab: TabRef; workspace?: WorkspaceId | null; index: number }
+  | { op: "select_tab"; tab: TabRef }
+  | { op: "rename_tab"; tab: TabRef; title?: string | null }
+  | { op: "close_pane"; target: PaneRef }
+  | { op: "close_tab"; tab: TabRef }
+  | { op: "apply"; workspace: WorkspaceId; tab?: TabRef | null; spec: LayoutSpec; focus?: boolean };
+
+export interface LayoutResult {
+  layouts: WorkspaceLayout[];
+  created: PaneId[];
+}
+
+// ---- 터미널 색 (데몬 엔진의 기본색. 프로그램 질의에 이 색으로 답한다) ----
+
+export type ColorScheme = "dark" | "light";
+
+export interface TerminalColors {
+  /** 0xRRGGBB */
+  foreground: number;
+  background: number;
+  cursor: number | null;
+  /** 16개 또는 256개 */
+  palette: number[];
+  scheme: ColorScheme;
+}

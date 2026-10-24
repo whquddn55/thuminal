@@ -3,8 +3,9 @@
 // - open(): 데몬 세션에 붙어 앱 엔진을 만든다. 탭이 열려 있는 동안 엔진은 계속 출력을 받는다.
 // - show(host): 렌더러에 그릴 대상으로 더하고 입력을 받는다. hide() 로 그리기만 멈춘다.
 //   탭을 바꿀 때 데몬에서 떨어졌다 다시 붙지 않는다.
+// - 분할한 칸이 여럿 보여도 키보드는 focus() 를 부른 칸 하나만 받는다.
 
-import type { Attachment, CellPoint, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
+import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
 
 import type { Services } from "./services";
 
@@ -26,6 +27,9 @@ export class TerminalController {
   private dragFrom: CellPoint | null = null;
   private dragged = false;
   private cleanup: (() => void)[] = [];
+  private colors: EngineColors | null = null;
+  /** 칸을 누르거나 입력을 받으면 부른다 (화면이 이 칸을 포커스 칸으로 삼는다) */
+  onActivate: (() => void) | null = null;
 
   constructor(
     private readonly s: Services,
@@ -67,6 +71,7 @@ export class TerminalController {
     }
     this.attachment = a;
     this.session = a.session;
+    if (this.colors) e.setColors(this.colors);
     for (const chunk of this.pending) e.feed(chunk);
     this.pending = [];
     this.engine = e;
@@ -100,7 +105,21 @@ export class TerminalController {
   }
 
   focus(): void {
+    this.wantFocus = true;
     this.textarea?.focus({ preventScroll: true });
+  }
+
+  blur(): void {
+    this.wantFocus = false;
+    this.textarea?.blur();
+  }
+
+  private wantFocus = false;
+
+  /** 테마 색. 엔진이 아직 없으면 붙은 뒤 넣는다 */
+  setColors(c: EngineColors | null): void {
+    this.colors = c;
+    if (c) this.engine?.setColors(c);
   }
 
   private scheduleFit() {
@@ -162,6 +181,7 @@ export class TerminalController {
         this.dragFrom = at;
         this.dragged = false;
       }
+      this.onActivate?.();
       setTimeout(() => this.focus());
     });
     on(window, "mousemove", (ev) => {
@@ -240,8 +260,9 @@ export class TerminalController {
       ev.preventDefault();
       ev.clipboardData?.setData("text/plain", text);
     });
+    ta.addEventListener("focus", () => this.onActivate?.());
     this.mountMouse(host);
-    this.focus();
+    if (this.wantFocus) this.focus();
   }
 
   /** 조합 중인 글자가 커서 자리에 보이게 textarea 를 옮긴다 */

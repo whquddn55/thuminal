@@ -1,10 +1,10 @@
-// 문서 탭: diff 보기, 파일 보기.
+// 문서 칸: diff 보기, 파일 보기.
 
 import { useEffect, useState } from "react";
 
 import type { FileContent, HostApi } from "@thuminal/term-core";
 
-import type { DocTab } from "./store";
+import { cn } from "./lib/utils";
 
 interface DiffLine {
   kind: "add" | "del" | "ctx" | "hunk" | "meta";
@@ -34,82 +34,109 @@ export function parseDiff(diff: string): DiffLine[] {
   return out;
 }
 
-export function DocView({ host, worktree, doc, generation }: { host: HostApi; worktree: string; doc: DocTab; generation: number }) {
+/** 문서 칸이 담는 것 (데몬 배치에는 글자 맵으로 들어간다) */
+export interface DocSpec {
+  kind: "diff" | "file";
+  file: string;
+  /** diff 면 스테이지된 변경을 보는지 ("1") */
+  staged?: string;
+}
+
+const ROW = "font-mono text-xs leading-[1.5]";
+const LN = "w-px select-none whitespace-nowrap px-2 text-right align-top text-muted-foreground/60";
+
+function Head({ children }: { children: React.ReactNode }) {
+  return <div className="sticky top-0 z-[1] flex items-center gap-2.5 border-b bg-card px-3 py-2 text-xs">{children}</div>;
+}
+
+export function DocView({ host, worktree, doc, generation }: { host: HostApi; worktree: string; doc: DocSpec; generation: number }) {
   const [diff, setDiff] = useState<string | null>(null);
   const [file, setFile] = useState<FileContent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const staged = doc.staged === "1";
 
   useEffect(() => {
     let alive = true;
     setError(null);
     const p =
       doc.kind === "diff"
-        ? host.git.diff(worktree, doc.file, !!doc.staged).then((d) => alive && setDiff(d))
+        ? host.git.diff(worktree, doc.file, staged).then((d) => alive && setDiff(d))
         : host.files.read(worktree, doc.file).then((f) => alive && setFile(f));
     p.catch((e) => alive && setError(String(e)));
     return () => {
       alive = false;
     };
     // generation: git 상태가 바뀔 때마다 다시 읽는다
-  }, [host, worktree, doc, generation]);
+  }, [host, worktree, doc.kind, doc.file, staged, generation]);
 
-  if (error) return <div className="thm-doc thm-doc-error">{error}</div>;
+  const frame = (children: React.ReactNode) => <div className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">{children}</div>;
+  if (error) return frame(<div className="p-4 text-destructive">{error}</div>);
 
   if (doc.kind === "diff") {
-    if (diff === null) return <div className="thm-doc">불러오는 중…</div>;
+    if (diff === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
     const lines = parseDiff(diff).filter((l) => l.kind !== "meta");
     const adds = lines.filter((l) => l.kind === "add").length;
     const dels = lines.filter((l) => l.kind === "del").length;
-    return (
-      <div className="thm-doc">
-        <div className="thm-doc-head">
-          <span className="path">{doc.file}</span>
-          <span className="tag">{doc.staged ? "스테이지됨" : "작업 폴더"}</span>
-          <span className="add">+{adds}</span>
-          <span className="del">−{dels}</span>
-        </div>
+    return frame(
+      <>
+        <Head>
+          <span className="flex-1 truncate font-mono">{doc.file}</span>
+          <span className="text-muted-foreground">{staged ? "스테이지됨" : "작업 폴더"}</span>
+          <span className="text-emerald-500">+{adds}</span>
+          <span className="text-red-500">−{dels}</span>
+        </Head>
         {lines.length === 0 ? (
-          <div className="thm-empty-note">바뀐 내용이 없다 (이미 스테이지했거나 되돌렸다)</div>
+          <div className="p-4 text-muted-foreground">바뀐 내용이 없다 (이미 스테이지했거나 되돌렸다)</div>
         ) : (
-          <table className="thm-diff">
+          <table className={cn("w-full border-collapse", ROW)}>
             <tbody>
-              {lines.map((l, i) => (
-                <tr key={i} className={l.kind}>
-                  <td className="ln">{l.old ?? ""}</td>
-                  <td className="ln">{l.new ?? ""}</td>
-                  <td className="sign">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}</td>
-                  <td className="code">{l.text}</td>
-                </tr>
-              ))}
+              {lines.map((l, i) =>
+                l.kind === "hunk" ? (
+                  <tr key={i}>
+                    <td colSpan={4} className="bg-sky-500/10 px-2 py-1 text-sky-500">
+                      {l.text}
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={i} className={cn(l.kind === "add" && "bg-emerald-500/12", l.kind === "del" && "bg-red-500/12")}>
+                    <td className={LN}>{l.old ?? ""}</td>
+                    <td className={LN}>{l.new ?? ""}</td>
+                    <td className={cn("w-px select-none px-1", l.kind === "add" ? "text-emerald-500" : "text-red-500")}>
+                      {l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}
+                    </td>
+                    <td className="whitespace-pre px-2">{l.text}</td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
         )}
-      </div>
+      </>,
     );
   }
 
-  if (file === null) return <div className="thm-doc">불러오는 중…</div>;
-  return (
-    <div className="thm-doc">
-      <div className="thm-doc-head">
-        <span className="path">{doc.file}</span>
-        <span className="tag">{(file.size / 1024).toFixed(1)} KB</span>
-        {file.truncated && <span className="tag warn">앞 2MB 만 보인다</span>}
-      </div>
+  if (file === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
+  return frame(
+    <>
+      <Head>
+        <span className="flex-1 truncate font-mono">{doc.file}</span>
+        <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
+        {file.truncated && <span className="text-amber-500">앞 2MB 만 보인다</span>}
+      </Head>
       {file.binary ? (
-        <div className="thm-empty-note">글자 파일이 아니다</div>
+        <div className="p-4 text-muted-foreground">글자 파일이 아니다</div>
       ) : (
-        <table className="thm-diff">
+        <table className={cn("w-full border-collapse", ROW)}>
           <tbody>
             {(file.text ?? "").split("\n").map((t, i) => (
-              <tr key={i} className="ctx">
-                <td className="ln">{i + 1}</td>
-                <td className="code">{t}</td>
+              <tr key={i}>
+                <td className={LN}>{i + 1}</td>
+                <td className="whitespace-pre px-2">{t}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-    </div>
+    </>,
   );
 }
