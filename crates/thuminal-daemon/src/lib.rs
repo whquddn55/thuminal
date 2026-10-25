@@ -8,6 +8,7 @@ pub mod lock;
 pub mod manager;
 pub mod orca;
 pub mod persist;
+pub mod remote;
 pub mod server;
 pub mod session;
 pub mod shell;
@@ -31,6 +32,8 @@ pub struct DaemonConfig {
     pub vcs: Arc<dyn Vcs>,
     /// thuminal claude 플러그인 폴더 (셸 통합이 `claude --plugin-dir` 로 붙인다). 없으면 붙이지 않는다
     pub claude_plugin: Option<std::path::PathBuf>,
+    /// 원격 접속이 내는 웹 화면 파일 폴더 (`apps/web` 빌드 결과). 없으면 웹소켓만 받는다
+    pub web_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -67,7 +70,8 @@ impl Daemon {
         let layouts = Arc::new(layout::Layouts::load(&paths.home));
         info!(event = "daemon_started", pid = std::process::id(), socket = %socket.display(), engine = manager.engine_name());
         let teams = teams::Teams::new(manager.clone());
-        Ok(Self { server: server::Server::new(manager, workspace, layouts, teams), listener, paths, _lock: lock })
+        let remote = remote::Remote::load(&paths.home, config.web_root);
+        Ok(Self { server: server::Server::new(manager, workspace, layouts, teams, remote), listener, paths, _lock: lock })
     }
 
     pub async fn run(self) {
@@ -78,11 +82,13 @@ impl Daemon {
         // 배치의 옛 세션 번호를 새 번호로 바꾸고, 칸에 없는 세션을 넣는다
         server.layouts.restore(&server.manager);
         let teams = tokio::spawn(server.teams.clone().watch());
+        let remote = tokio::spawn(remote::watch(server.clone()));
         let saver = tokio::spawn(save_loop(server.manager.clone(), server.layouts.clone(), persist.clone()));
 
         server.clone().serve(listener).await;
         saver.abort();
         teams.abort();
+        remote.abort();
         // 저장 작업이 다른 스레드에서 쓰는 중일 수 있다. 끝난 뒤에 지우거나 남긴다
         let _ = saver.await;
         let mode = *server.stop_mode.lock().unwrap();

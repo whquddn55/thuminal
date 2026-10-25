@@ -1,10 +1,11 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션, 알림.
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션, 알림, 원격 접속.
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
-import { CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { CheckIcon, CopyIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { renderSVG } from "uqr";
 
-import type { AgentSettings } from "@thuminal/term-core";
+import type { AgentSettings, RemoteApi, RemoteStatus } from "@thuminal/term-core";
 import { type TerminalTheme, themes } from "@thuminal/themes";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
@@ -162,6 +163,166 @@ function NotifySection() {
   );
 }
 
+function ago(ms: number): string {
+  if (!ms) return "붙은 적 없음";
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.round(s / 60)}분 전`;
+  if (s < 86400) return `${Math.round(s / 3600)}시간 전`;
+  return `${Math.round(s / 86400)}일 전`;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+      title="복사"
+      onClick={() => void navigator.clipboard.writeText(text).then(() => (setDone(true), setTimeout(() => setDone(false), 1200)))}
+    >
+      {done ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
+  );
+}
+
+/** 원격 접속: 폰·다른 컴퓨터 브라우저가 Tailscale 로 이 컴퓨터 데몬에 붙는다. 설정은 데몬이 들고 있어 앱을 꺼도 받는다 */
+function RemoteSection({ remote }: { remote: RemoteApi }) {
+  const model = useModel();
+  const [st, setSt] = useState<RemoteStatus | null>(null);
+  const [name, setName] = useState("내 폰");
+  const [paired, setPaired] = useState<{ name: string; urls: string[] } | null>(null);
+  const [port, setPort] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const load = () => void remote.status().then((r) => alive && setSt(r), model.fail);
+    load();
+    // 붙어 있는 기기 수가 바뀌는 것을 보인다
+    const t = window.setInterval(load, 3000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [remote, model]);
+  useEffect(() => {
+    if (st) setPort((p) => p || String(st.port));
+  }, [st]);
+  if (!st) return null;
+  const change = (c: { enabled?: boolean; port?: number; lan?: boolean }) => void remote.set(c).then(setSt, model.fail);
+  const pair = async () => {
+    try {
+      const r = await remote.pair(name);
+      setPaired({ name: r.device.name, urls: r.urls });
+      setSt(await remote.status());
+    } catch (e) {
+      model.fail(e);
+    }
+  };
+  const host = st.tailnet.find((a) => !a.includes(":")) ?? st.tailnet[0];
+  const apkUrl = host && st.apk ? `http://${host.includes(":") ? `[${host}]` : host}:${st.port}/download/thuminal.apk` : null;
+  const qr = (text: string) => <div className="size-40 shrink-0 rounded bg-white p-1.5 [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: renderSVG(text, { pixelSize: 4 }) }} />;
+
+  return (
+    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+      <Toggle checked={st.enabled} onChange={(v) => change({ enabled: v })} title="원격 접속 켜기">
+        같은 Tailscale 망의 폰이나 다른 컴퓨터 브라우저에서 이 컴퓨터의 터미널과 에이전트를 보고 친다. 앱을 꺼도 데몬이 계속 받는다. 등록한 기기만 붙을 수 있다.
+      </Toggle>
+      <div className="flex flex-col gap-1 rounded-md border px-3 py-2 text-xs">
+        {st.listening.length ? (
+          st.listening.map((a) => (
+            <div key={a} className="font-mono text-muted-foreground">
+              받는 중 {a}
+            </div>
+          ))
+        ) : (
+          <div className="text-muted-foreground">받고 있지 않다</div>
+        )}
+        {!st.tailnet.length && <div className="text-agent-attention">Tailscale 주소를 찾지 못했다. Tailscale 을 켜면 15초 안에 그 주소에서도 받는다.</div>}
+        {st.error && <div className="whitespace-pre-wrap text-destructive">{st.error}</div>}
+        {!st.web && <div className="text-agent-attention">웹 화면 파일이 없어 브라우저로 열면 빈 화면이다 (개발 중이면 pnpm -C apps/web build).</div>}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+        <label className="flex items-center gap-2">
+          포트
+          <input
+            className="h-7 w-20 rounded border bg-background px-2 font-mono"
+            value={port}
+            inputMode="numeric"
+            onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
+            onBlur={() => Number(port) && Number(port) !== st.port && change({ port: Number(port) })}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <Switch checked={st.lan} onCheckedChange={(v) => change({ lan: v })} />
+          같은 Wi‑Fi 에서도 받기 (내용이 암호화되지 않는다)
+        </label>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        <div className="text-sm font-medium">기기 등록</div>
+        <p className="text-xs text-muted-foreground">
+          기기마다 토큰이 든 주소를 만든다. 폰 카메라로 QR 을 찍으면 브라우저로 열리고, thuminal 안드로이드 앱에서는 [QR 찍기] 로 찍는다.
+        </p>
+        <div className="flex items-center gap-2">
+          <input className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="기기 이름" />
+          <button className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90" onClick={() => void pair()}>
+            기기 등록
+          </button>
+        </div>
+        {paired && (
+          <div className="flex gap-3 pt-1">
+            {paired.urls[0] ? qr(paired.urls[0]) : null}
+            <div className="flex min-w-0 flex-1 flex-col gap-1 text-xs">
+              <div>
+                <b>{paired.name}</b> 를 등록했다. 이 주소는 지금만 보인다.
+              </div>
+              {paired.urls.length ? (
+                paired.urls.map((u) => (
+                  <div key={u} className="flex items-center gap-1">
+                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{u}</code>
+                    <CopyButton text={u} />
+                  </div>
+                ))
+              ) : (
+                <div className="text-agent-attention">폰이 닿을 주소가 없다. Tailscale 을 켜거나 같은 Wi‑Fi 받기를 켠다.</div>
+              )}
+            </div>
+          </div>
+        )}
+        {apkUrl && (
+          <div className="flex items-center gap-3 border-t pt-2">
+            {qr(apkUrl)}
+            <div className="flex min-w-0 flex-col gap-1 text-xs">
+              <div>안드로이드 앱 내려받기 (폰이 Tailscale 에 붙어 있어야 한다)</div>
+              <div className="flex items-center gap-1">
+                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{apkUrl}</code>
+                <CopyButton text={apkUrl} />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="text-sm font-medium">등록한 기기</div>
+        {st.devices.length === 0 && <div className="text-xs text-muted-foreground">없다</div>}
+        {st.devices.map((d) => (
+          <div key={d.id} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
+            <span className={cn("size-2 rounded-full", d.connected ? "bg-agent-done" : "bg-muted-foreground/40")} />
+            <span className="min-w-0 flex-1 truncate">{d.name}</span>
+            <span className="text-muted-foreground">{d.connected ? `연결 ${d.connected}` : ago(d.last_seen)}</span>
+            <button
+              className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
+              onClick={() => confirm(`${d.name} 를 지울까? 붙어 있으면 바로 끊긴다`) && void remote.removeDevice(d.id).then(setSt, model.fail)}
+            >
+              지우기
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const model = useModel();
   const open = useApp((s) => s.dialog?.kind === "settings");
@@ -169,7 +330,8 @@ export function SettingsDialog() {
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
-  const [section, setSection] = useState<"theme" | "agent" | "notify">("theme");
+  const [section, setSection] = useState<"theme" | "agent" | "notify" | "remote">("theme");
+  const remote = model.services.host.remote;
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 
   return (
@@ -182,7 +344,9 @@ export function SettingsDialog() {
               ? "테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다."
               : section === "agent"
                 ? "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."
-                : "언제 알릴지 고른다. 누르면 바로 저장된다."}
+                : section === "remote"
+                  ? "폰·다른 컴퓨터에서 Tailscale 로 붙는다. 설정은 데몬에 남는다."
+                  : "언제 알릴지 고른다. 누르면 바로 저장된다."}
           </DialogDescription>
         </DialogHeader>
         <div className="self-start">
@@ -192,11 +356,14 @@ export function SettingsDialog() {
               ["theme", "테마"],
               ["agent", "에이전트"],
               ["notify", "알림"],
+              ...(remote ? ([["remote", "원격 접속"]] as ["remote", string][]) : []),
             ]}
             onChange={setSection}
           />
         </div>
-        {section === "agent" ? (
+        {section === "remote" && remote ? (
+          <RemoteSection remote={remote} />
+        ) : section === "agent" ? (
           <AgentSection />
         ) : section === "notify" ? (
           <NotifySection />

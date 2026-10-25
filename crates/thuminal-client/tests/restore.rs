@@ -18,6 +18,7 @@ fn config(home: &std::path::Path) -> DaemonConfig {
         pty: Arc::new(PortablePty),
         vcs: Arc::new(thuminal_vcs_git::GitCli),
         claude_plugin: None,
+        web_root: None,
     }
 }
 

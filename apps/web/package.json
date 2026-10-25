@@ -1,0 +1,29 @@
+{
+  "name": "@thuminal/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "thuminal 웹 화면. 데몬 원격 접속이 내는 파일이다 (폰·다른 컴퓨터 브라우저, 안드로이드 앱이 연다).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@thuminal/engine-ghostty-wasm": "workspace:*",
+    "@thuminal/renderer-webgl": "workspace:*",
+    "@thuminal/term-core": "workspace:*",
+    "@thuminal/ui": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

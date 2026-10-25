@@ -24,6 +24,9 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  RemoteApi,
+  RemoteDevice,
+  RemoteStatus,
   RepoInfo,
   SearchHit,
   SessionId,
@@ -80,6 +83,13 @@ export class TauriHostApi implements HostApi {
         stop?.();
       };
     },
+  };
+
+  readonly remote: RemoteApi = {
+    status: () => req<RemoteStatus>({ type: "get_remote" }, (r) => r.remote),
+    set: (c) => req<RemoteStatus>({ type: "set_remote", enabled: c.enabled ?? null, port: c.port ?? null, lan: c.lan ?? null }, (r) => r.remote),
+    pair: (name) => req({ type: "pair_remote", name }, (r) => ({ device: r.device as RemoteDevice, urls: r.urls as string[] })),
+    removeDevice: (id) => req<RemoteStatus>({ type: "remove_remote_device", id }, (r) => r.remote),
   };
 
   openUrl(url: string): Promise<void> {

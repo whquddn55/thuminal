@@ -18,6 +18,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 libc.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+fontdb = "0.24.0"
 
 [dev-dependencies]
 thuminal-engine-ghostty.workspace = true

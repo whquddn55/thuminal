@@ -70,6 +70,7 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
         pty: Arc::new(PortablePty),
         vcs: Arc::new(thuminal_vcs_git::GitCli),
         claude_plugin: Some(plugin.clone()),
+        web_root: None,
     })
     .unwrap();
     tokio::spawn(d.run());

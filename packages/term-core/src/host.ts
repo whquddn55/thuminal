@@ -14,6 +14,8 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  RemoteDevice,
+  RemoteStatus,
   RepoInfo,
   SearchHit,
   SessionId,
@@ -85,6 +87,16 @@ export interface FilesApi {
   search(worktree: string, query: string, caseSensitive: boolean): Promise<{ hits: SearchHit[]; truncated: boolean }>;
   /** 워크트리 안 파일 경로 전부 (추적 + 무시하지 않는 새 파일) */
   all(worktree: string): Promise<{ files: string[]; truncated: boolean }>;
+}
+
+/** 원격 접속 설정. 데몬이 원격 연결에서는 받지 않으므로 데스크톱 껍데기만 둔다 */
+export interface RemoteApi {
+  status(): Promise<RemoteStatus>;
+  /** 준 것만 바꾼다 */
+  set(change: { enabled?: boolean; port?: number; lan?: boolean }): Promise<RemoteStatus>;
+  /** 기기를 등록하고 그 기기가 열 주소들(토큰이 든)을 돌려준다. 꺼져 있으면 켠다 */
+  pair(name: string): Promise<{ device: RemoteDevice; urls: string[] }>;
+  removeDevice(id: string): Promise<RemoteStatus>;
 }
 
 export interface Attachment {
@@ -165,6 +177,10 @@ export interface HostApi {
   /** 운영체제 알림을 띄운다. 누르면 onNotificationClick 으로 그 세션을 알린다. 지원하지 않는 껍데기는 두지 않는다 */
   notify?(n: { title: string; subtitle?: string; body: string; session: number; sound: boolean }): Promise<void>;
   onNotificationClick?(cb: (session: number) => void): () => void;
+  /** 원격 접속 설정 (데스크톱 껍데기만) */
+  readonly remote?: RemoteApi;
+  /** 원격으로 붙은 껍데기(웹)인지. 화면이 운영체제 기능(폴더 고르기 등)을 대신할 때 본다 */
+  readonly isRemote?: boolean;
   /** Dock 배지 숫자 (0 이면 지운다) */
   setBadge?(count: number): Promise<void>;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */

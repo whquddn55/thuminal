@@ -150,6 +150,7 @@ export class TerminalController {
     if (cols === this.engine.cols && rows === this.engine.rows) return;
     this.engine.resize(cols, rows);
     this.renderer.layout();
+    this.daemonSize = { cols, rows };
     void this.s.host.resize(this.id, cols, rows);
   }
 
@@ -157,7 +158,39 @@ export class TerminalController {
     if (!bytes || !bytes.length) return;
     // 입력하면 맨 아래(지금 화면)로 돌아간다
     this.engine?.scrollToBottom();
+    this.claimSize();
     void this.s.host.input(this.id, bytes);
+  }
+
+  /** 데몬 세션 크기. 다른 화면(폰·다른 창)이 바꾸면 화면 모델이 알려 준다 */
+  private daemonSize: { cols: number; rows: number } | null = null;
+
+  noteSize(cols: number, rows: number) {
+    this.daemonSize = { cols, rows };
+  }
+
+  /** 세션 크기를 다른 화면이 바꿔 두었으면 이 칸 크기로 되돌린다. 마지막으로 입력한 화면 크기를 따른다 (tmux window-size latest) */
+  claimSize() {
+    const e = this.engine;
+    const d = this.daemonSize;
+    if (!e || !d || !this.host || (d.cols === e.cols && d.rows === e.rows)) return;
+    this.daemonSize = { cols: e.cols, rows: e.rows };
+    void this.s.host.resize(this.id, e.cols, e.rows);
+  }
+
+  /** 다른 화면이 세션 크기를 바꿔 이 칸과 다르게 그려지고 있는지 */
+  get sizeTaken(): boolean {
+    const e = this.engine;
+    const d = this.daemonSize;
+    return !!e && !!d && (d.cols !== e.cols || d.rows !== e.rows);
+  }
+
+  /** 키 하나를 보낸다 (폰 키 줄). 커서 키 모드 등은 엔진이 맞춘다 */
+  sendKey(key: string, mods: { ctrl?: boolean; alt?: boolean; shift?: boolean } = {}) {
+    // 엔진은 물리 키(code)로 바꾼다: 글자는 KeyA, 숫자는 Digit1, 나머지(ArrowUp, Escape, Tab …)는 이름 그대로
+    const code = /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : key;
+    const bytes = this.engine?.input.key({ key, code, ctrl: !!mods.ctrl, alt: !!mods.alt, shift: !!mods.shift, meta: false });
+    this.send(bytes ?? null);
   }
 
   private cellAt(ev: MouseEvent): CellPoint | null {
@@ -183,6 +216,37 @@ export class TerminalController {
         this.engine.scroll(lines);
       }
     });
+    // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
+    let touchY: number | null = null;
+    let touchMoved = false;
+    on(host, "touchstart", (ev) => {
+      if (ev.touches.length !== 1) return;
+      touchY = ev.touches[0].clientY;
+      touchMoved = false;
+    });
+    on(host, "touchmove", (ev) => {
+      if (touchY === null || !this.engine || !this.renderer || ev.touches.length !== 1) return;
+      ev.preventDefault();
+      const y = ev.touches[0].clientY;
+      this.wheelAcc += touchY - y;
+      touchY = y;
+      const lines = Math.trunc(this.wheelAcc / this.renderer.metrics.height);
+      if (lines) {
+        touchMoved = true;
+        this.wheelAcc -= lines * this.renderer.metrics.height;
+        this.engine.scroll(lines);
+      }
+    });
+    on(host, "touchend", (ev) => {
+      if (touchY === null) return;
+      touchY = null;
+      if (touchMoved) return;
+      // 누른 것은 키보드를 띄우는 것으로 받는다 (뒤따르는 mousedown 은 고르기를 지운다)
+      ev.preventDefault();
+      this.claimSize();
+      this.onActivate?.();
+      this.focus();
+    });
     on(host, "mousedown", (ev) => {
       if (ev.button !== 0 || !this.engine) return;
       const at = this.cellAt(ev);
@@ -198,6 +262,7 @@ export class TerminalController {
         this.dragged = false;
       }
       this.onActivate?.();
+      this.claimSize();
       setTimeout(() => this.focus());
     });
     on(window, "mousemove", (ev) => {
@@ -308,6 +373,12 @@ export class TerminalController {
         this.send(enc.encode(ie.data));
       } else if (ie.inputType === "insertText" && ie.data) {
         this.send(enc.encode(ie.data));
+      } else if (ie.inputType === "deleteContentBackward") {
+        // 안드로이드 키보드는 모든 키를 keyCode 229 로 보내 지우기·Enter 가 keydown 으로 오지 않는다
+        this.send(new Uint8Array([0x7f]));
+      } else if (ie.inputType === "insertLineBreak" || ie.inputType === "insertParagraph") {
+        this.send(enc.encode("\r"));
+        settle();
       }
       // 한글 입력기는 조합 이벤트 없이 앞 글자를 바꿔 쓰기도 한다 (ㅇ → 아 → 안). 글이 들어올 때마다 비우면 입력기가
       // 앞 글자를 잃어 자모가 하나씩 따로 확정된다 (ㅇㅏㄴ). 그래서 글이 길어졌을 때만 비운다

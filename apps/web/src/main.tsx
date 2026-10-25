@@ -1,0 +1,72 @@
+// 웹 화면 시작: 데몬 원격 접속에 붙는 어댑터를 골라 끼운다.
+//
+// 처음 여는 주소에는 `#token=…` 이 붙어 있다 (데스크톱 설정 → 원격 접속에서 기기를 등록하면 준다).
+// 토큰은 이 브라우저에 남기고 주소에서 지운다. 화면이 좁으면(폰) 모바일 화면을, 넓으면 데스크톱과 같은 화면을 띄운다.
+
+import { createRoot } from "react-dom/client";
+
+import { ghosttyWasmEngineForBrowser } from "@thuminal/engine-ghostty-wasm/browser";
+import { webglRenderer } from "@thuminal/renderer-webgl";
+import { App, MobileApp, PairScreen, type Services } from "@thuminal/ui";
+
+import { WebHostApi } from "./web-host";
+
+const FONT = "MesloLGLDZ Nerd Font Mono";
+const TOKEN_KEY = "thuminal.remoteToken";
+const UI_KEY = "thuminal.remoteUi";
+
+function takeToken(): string | null {
+  const m = location.hash.match(/token=([0-9a-f]+)/);
+  if (m) {
+    localStorage.setItem(TOKEN_KEY, m[1]);
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+/** `?ui=mobile|desktop` 로 고르면 그것을 이 브라우저에 남긴다. 아니면 화면 폭으로 정한다 */
+function mobileUi(): boolean {
+  const q = new URLSearchParams(location.search).get("ui");
+  if (q === "mobile" || q === "desktop") localStorage.setItem(UI_KEY, q);
+  const saved = localStorage.getItem(UI_KEY);
+  if (saved) return saved === "mobile";
+  return window.matchMedia("(max-width: 820px)").matches;
+}
+
+async function boot() {
+  const root = createRoot(document.getElementById("root")!);
+  const token = takeToken();
+  if (!token) {
+    root.render(<PairScreen onToken={(t) => (localStorage.setItem(TOKEN_KEY, t), location.reload())} />);
+    return;
+  }
+  const engines = ghosttyWasmEngineForBrowser();
+  const host = new WebHostApi(location.origin, token);
+  const [, faces] = await Promise.all([engines.load(), host.registerFont(FONT).catch(() => 0)]);
+  if (!faces) console.warn(`[thuminal] 글꼴 ${FONT} 을 받지 못해 기본 고정폭 글꼴로 그린다`);
+  const mobile = mobileUi();
+  const services: Services = {
+    host,
+    engines,
+    renderer: webglRenderer,
+    rendererOptions: { fontFamily: `'${FONT}', Menlo, 'Apple SD Gothic Neo', 'Noto Sans Mono CJK KR', monospace`, fontSize: mobile ? 12 : 13 },
+    scrollback: 10_000,
+  };
+  const forget = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    location.reload();
+  };
+  const switchUi = (ui: "mobile" | "desktop") => {
+    localStorage.setItem(UI_KEY, ui);
+    location.reload();
+  };
+  root.render(
+    mobile ? (
+      <MobileApp services={services} conn={host} onForget={forget} onDesktopUi={() => switchUi("desktop")} />
+    ) : (
+      <App services={services} />
+    ),
+  );
+}
+
+void boot();

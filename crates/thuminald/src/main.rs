@@ -37,6 +37,22 @@ fn claude_plugin_dir() -> Option<PathBuf> {
     dir.ancestors().map(|a| a.join("plugins/claude-code/thuminal")).find(|p| p.join(".claude-plugin/plugin.json").is_file())
 }
 
+/// 원격 접속 웹 화면 파일 폴더를 찾는다.
+/// 1. `THUMINAL_WEB_ROOT` 2. 앱 번들 `Contents/Resources/web` 3. 개발 중 저장소의 `apps/web/dist`
+fn web_root() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("THUMINAL_WEB_ROOT").map(PathBuf::from).filter(|p| p.is_dir()) {
+        return Some(p);
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let bundled = dir.join("../Resources/web");
+    if bundled.join("index.html").is_file() {
+        return std::fs::canonicalize(bundled).ok();
+    }
+    // 개발 중에는 아직 빌드하지 않았어도 폴더 자리를 준다 (나중에 빌드하면 바로 보인다)
+    dir.ancestors().find(|a| a.join("apps/web/package.json").is_file()).map(|a| a.join("apps/web/dist"))
+}
+
 fn main() {
     let args = Args::parse();
     let paths = args.home.map(Paths::new).unwrap_or_else(Paths::default_home);
@@ -58,6 +74,7 @@ fn main() {
         pty: Arc::new(PortablePty),
         vcs: Arc::new(GitCli),
         claude_plugin: claude_plugin_dir(),
+        web_root: web_root(),
     };
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio 런타임");
     // 소켓은 tokio 런타임 안에서 연다

@@ -228,6 +228,35 @@ export interface LayoutResult {
   created: PaneId[];
 }
 
+// ---- 원격 접속 (폰·다른 컴퓨터 브라우저가 Tailscale 로 데몬에 붙는다) ----
+
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  created_at: number;
+  /** 마지막으로 붙은 때 (ms). 붙은 적이 없으면 0 */
+  last_seen: number;
+  /** 지금 붙어 있는 연결 수 */
+  connected: number;
+}
+
+export interface RemoteStatus {
+  enabled: boolean;
+  port: number;
+  /** 같은 Wi‑Fi(모든 주소)에서도 받는다 */
+  lan: boolean;
+  /** 지금 받고 있는 주소들 */
+  listening: string[];
+  /** 찾은 Tailscale 주소들 */
+  tailnet: string[];
+  error?: string | null;
+  /** 웹 화면 파일을 찾았는지 */
+  web: boolean;
+  /** 안드로이드 앱을 내려받을 수 있는지 (`/download/thuminal.apk`) */
+  apk: boolean;
+  devices: RemoteDevice[];
+}
+
 // ---- Orca 에서 가져오기 (데몬이 Orca 상태 파일을 읽기만 한다) ----
 
 export interface OrcaScan {

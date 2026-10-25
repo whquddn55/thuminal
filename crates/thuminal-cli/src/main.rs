@@ -45,6 +45,9 @@ enum Command {
     /// 워크트리 만들기, 지우기, 보기
     #[command(subcommand, alias = "worktree")]
     Wt(workspace::WtCmd),
+    /// 원격 접속 (폰·다른 컴퓨터 브라우저가 Tailscale 로 붙는다)
+    #[command(subcommand)]
+    Remote(RemoteCmd),
     /// 에이전트 훅이 부르는 명령
     #[command(subcommand)]
     Agent(AgentCmd),
@@ -67,6 +70,29 @@ enum AgentCmd {
         #[arg(long)]
         event: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum RemoteCmd {
+    /// 켜져 있는지, 받는 주소, 등록한 기기
+    Status,
+    /// 켠다 (Tailscale 주소와 127.0.0.1 에서 받는다)
+    On {
+        #[arg(long)]
+        port: Option<u16>,
+        /// 같은 Wi‑Fi 의 모든 주소에서도 받는다 (내용이 암호화되지 않는다)
+        #[arg(long)]
+        lan: bool,
+    },
+    /// 끈다 (붙어 있던 기기는 끊긴다)
+    Off,
+    /// 기기를 등록하고 그 기기가 열 주소를 찍는다
+    Pair {
+        #[arg(default_value = "기기")]
+        name: String,
+    },
+    /// 등록한 기기를 지운다
+    Rm { id: String },
 }
 
 #[derive(Subcommand)]
@@ -362,6 +388,7 @@ async fn run(cli: Cli) -> Res<ExitCode> {
             }
             Err(_) => println!("데몬이 떠 있지 않다"),
         },
+        Command::Remote(cmd) => remote(&connect().await?, cmd).await?,
         Command::Term(cmd) => return term(cmd).await,
         Command::Repo(cmd) => workspace::repo(&connect().await?, cmd).await?,
         Command::Wt(cmd) => workspace::wt(&connect().await?, cmd).await?,
@@ -371,6 +398,45 @@ async fn run(cli: Cli) -> Res<ExitCode> {
         Command::Browser(args) => layout::browser(&connect().await?, args).await?,
     }
     Ok(ExitCode::SUCCESS)
+}
+
+async fn remote(c: &Client, cmd: RemoteCmd) -> Res<()> {
+    use thuminal_protocol::{Request, Response};
+    let req = match cmd {
+        RemoteCmd::Status => Request::GetRemote,
+        RemoteCmd::On { port, lan } => Request::SetRemote { enabled: Some(true), port, lan: Some(lan) },
+        RemoteCmd::Off => Request::SetRemote { enabled: Some(false), port: None, lan: None },
+        RemoteCmd::Pair { name } => Request::PairRemote { name },
+        RemoteCmd::Rm { id } => Request::RemoveRemoteDevice { id },
+    };
+    match c.request(req).await? {
+        Response::Remote { remote: r } => {
+            println!("원격 접속: {} · 포트 {}{}", if r.enabled { "켜짐" } else { "꺼짐" }, r.port, if r.lan { " · LAN 허용" } else { "" });
+            for a in &r.listening {
+                println!("  받는 주소 {a}");
+            }
+            if r.tailnet.is_empty() {
+                println!("  Tailscale 주소를 찾지 못했다");
+            }
+            if let Some(e) = &r.error {
+                println!("  오류: {e}");
+            }
+            if !r.web {
+                println!("  웹 화면 파일이 없다 (pnpm -C apps/web build)");
+            }
+            for d in &r.devices {
+                println!("  기기 {} {} · 연결 {}", d.id, d.name, d.connected);
+            }
+        }
+        Response::RemotePaired { device, urls } => {
+            println!("기기 {} ({}) 를 등록했다. 폰에서 이 주소를 연다:", device.name, device.id);
+            for u in urls {
+                println!("  {u}");
+            }
+        }
+        other => println!("{other:?}"),
+    }
+    Ok(())
 }
 
 async fn term(cmd: TermCmd) -> Res<ExitCode> {

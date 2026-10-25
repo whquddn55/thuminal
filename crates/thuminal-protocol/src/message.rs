@@ -456,6 +456,21 @@ pub enum Request {
     GetAgentSettings,
     /// 에이전트를 띄울 때 붙일 옵션을 바꾼다. 다음에 띄우는 에이전트부터 적용된다 (이미 뜬 셸에서 치는 `claude` 도)
     SetAgentSettings { settings: AgentSettings },
+    /// 원격 접속(폰·다른 컴퓨터 브라우저) 상태. 원격 연결에서는 원격 설정 요청을 받지 않는다
+    GetRemote,
+    /// 원격 접속을 켜고 끄거나 포트·LAN 허용을 바꾼다. 준 것만 바꾼다
+    SetRemote {
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        port: Option<u16>,
+        #[serde(default)]
+        lan: Option<bool>,
+    },
+    /// 새 기기를 등록하고 그 기기용 접속 주소(토큰이 든)를 만든다. 원격 접속이 꺼져 있으면 켠다
+    PairRemote { name: String },
+    /// 등록한 기기를 지운다. 붙어 있던 연결은 바로 끊는다
+    RemoveRemoteDevice { id: String },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     Tmux {
         /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
@@ -500,6 +515,9 @@ pub enum Response {
     AgentSettings { settings: AgentSettings },
     Tmux { stdout: String, stderr: String, code: i32 },
     OrcaScan { scan: OrcaScan },
+    Remote { remote: RemoteStatus },
+    /// 새로 등록한 기기와 그 기기가 열 주소들 (주소마다 토큰이 들어 있다. 이 응답에서만 보인다)
+    RemotePaired { device: RemoteDevice, urls: Vec<String> },
     Ok,
 }
 
@@ -611,6 +629,41 @@ pub struct OrcaSession {
     pub teams: bool,
     /// 지금 이 세션으로 떠 있는 claude 가 있다 (Orca 든 어디든). 또 띄우면 두 claude 가 한 세션을 같이 쓴다
     pub running: bool,
+}
+
+/// 원격 접속 상태 (`GetRemote`)
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteStatus {
+    pub enabled: bool,
+    pub port: u16,
+    /// Tailscale 말고 같은 Wi‑Fi(모든 주소)에서도 받는다. 끄면 Tailscale 주소와 이 컴퓨터(127.0.0.1)에서만 받는다
+    pub lan: bool,
+    /// 지금 받고 있는 주소들 (`100.80.1.2:6780`)
+    pub listening: Vec<String>,
+    /// 찾은 Tailscale 주소들 (100.64.0.0/10, fd7a:115c:a1e0::/48)
+    pub tailnet: Vec<String>,
+    /// 받기를 시작하지 못한 까닭 (포트를 다른 프로그램이 쓴다 등)
+    #[serde(default)]
+    pub error: Option<String>,
+    /// 웹 화면 파일을 찾았는지 (없으면 브라우저로 열어도 빈 화면이다)
+    pub web: bool,
+    /// 안드로이드 앱 파일을 내려받을 수 있는지 (`/download/thuminal.apk`)
+    pub apk: bool,
+    pub devices: Vec<RemoteDevice>,
+}
+
+/// 원격 접속을 허락한 기기
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteDevice {
+    pub id: String,
+    pub name: String,
+    pub created_at: u64,
+    /// 마지막으로 붙은 때 (ms). 붙은 적이 없으면 0
+    #[serde(default)]
+    pub last_seen: u64,
+    /// 지금 붙어 있는 연결 수
+    #[serde(default)]
+    pub connected: u32,
 }
 
 /// 데몬이 에이전트를 띄울 때 쓰는 설정 (`agent-settings.json`)

@@ -210,7 +210,8 @@ export class AppModel {
   get = () => this.store.getState();
   private set = (p: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => this.store.setState(p);
 
-  async start(): Promise<void> {
+  /** gitStatus 를 끄면 git 상태를 주기적으로 읽지 않는다 (폰 화면은 쓰지 않는다) */
+  async start(opts: { gitStatus?: boolean } = {}): Promise<void> {
     const host = this.services.host;
     const offDaemon = host.onEvent((e) => this.onEvent(e));
     const offBrowser = host.browser?.onEvent((e) => this.onBrowserEvent(e));
@@ -243,11 +244,12 @@ export class AppModel {
     }
     this.markSeen();
     void this.applyTheme();
-    void this.refreshStatus();
     void this.services.host.findCommands(AGENTS.map((a) => a.cmd)).then(
       (agents) => this.set({ agents }),
       () => undefined,
     );
+    if (opts.gitStatus === false) return;
+    void this.refreshStatus();
     // git 상태: 지금 워크트리는 2초, 모두는 10초마다 (워크트리가 수십 개면 한 바퀴에 몇 초 걸린다)
     this.timers.push(window.setInterval(() => void this.refreshStatus(this.get().active), 2000));
     this.timers.push(window.setInterval(() => void this.refreshStatus(), 10000));
@@ -307,6 +309,8 @@ export class AppModel {
       case "session_updated": {
         const prev = this.get().sessions[e.session.id];
         this.set((s) => ({ sessions: { ...s.sessions, [e.session.id]: e.session } }));
+        // 다른 화면(폰 등)이 크기를 바꿨는지 컨트롤러가 알게 한다 (입력하면 이 화면 크기로 되돌린다)
+        this.controllers.get(e.session.id)?.noteSize(e.session.cols, e.session.rows);
         const n = e.type === "session_updated" ? noticeFor(prev, e.session) : null;
         if (n) this.notifySession(e.session.id, n);
         return;

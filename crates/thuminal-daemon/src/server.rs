@@ -35,14 +35,15 @@ pub struct Server {
     pub workspace: Arc<Workspace>,
     pub layouts: Arc<Layouts>,
     pub teams: Arc<Teams>,
+    pub remote: Arc<crate::remote::Remote>,
     pub shutdown: Arc<Notify>,
     pub started_at: u64,
     next_conn: AtomicU64,
 }
 
 impl Server {
-    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>, layouts: Arc<Layouts>, teams: Arc<Teams>) -> Arc<Self> {
-        Arc::new(Self { manager, workspace, layouts, teams, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
+    pub fn new(manager: Arc<Manager>, workspace: Arc<Workspace>, layouts: Arc<Layouts>, teams: Arc<Teams>, remote: Arc<crate::remote::Remote>) -> Arc<Self> {
+        Arc::new(Self { manager, workspace, layouts, teams, remote, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
     }
 
     pub async fn serve(self: Arc<Self>, listener: UnixListener) {
@@ -61,8 +62,18 @@ impl Server {
     }
 
     async fn connection(self: Arc<Self>, stream: UnixStream) {
+        let (rd, wr) = stream.into_split();
+        self.serve_stream(rd, wr, None).await
+    }
+
+    /// 프레임 스트림 하나를 연결로 받는다. 유닉스 소켓 말고도 원격 접속(웹소켓을 이은 파이프)이 쓴다.
+    /// `remote` 는 원격 연결의 기기 id 다. 원격 연결은 원격 접속 설정을 바꾸지 못한다
+    pub async fn serve_stream<R, W>(self: Arc<Self>, mut rd: R, mut wr: W, remote: Option<String>)
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         let conn = self.next_conn.fetch_add(1, Ordering::Relaxed);
-        let (mut rd, mut wr) = stream.into_split();
         let (tx, mut rx) = mpsc::unbounded_channel::<Frame>();
 
         let writer = tokio::spawn(async move {
@@ -133,6 +144,10 @@ impl Server {
                     // git·파일처럼 오래 걸리는 요청은 따로 돌린다. 기다리는 동안에도 같은 연결의 키 입력·붙기·크기 요청이
                     // 바로 처리되게 한다 (응답은 id 로 짝을 맞추므로 순서가 바뀌어도 된다).
                     // 세션·배치 요청은 순서가 중요해(붙기 → 떼기 등) 받은 차례대로 처리한다
+                    if remote.is_some() && matches!(request, Request::SetRemote { .. } | Request::PairRemote { .. } | Request::RemoveRemoteDevice { .. }) {
+                        let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "원격 연결에서는 원격 접속 설정을 바꿀 수 없다".into()));
+                        continue;
+                    }
                     if is_slow(&request) {
                         let (me, tx, client) = (self.clone(), tx.clone(), client.clone());
                         tokio::spawn(async move {
@@ -263,6 +278,22 @@ impl Server {
                 let out = self.teams.call(Call { session, pane, argv, cwd, env }).await;
                 Ok(Response::Tmux { stdout: out.stdout, stderr: out.stderr, code: out.code })
             }
+            Request::GetRemote => Ok(Response::Remote { remote: self.remote.status() }),
+            Request::SetRemote { enabled, port, lan } => self
+                .remote
+                .set(enabled, port, lan)
+                .await
+                .map(|remote| Response::Remote { remote })
+                .map_err(|message| ErrorBody { code: ErrorCode::InvalidRequest, message }),
+            Request::PairRemote { name } => {
+                let (device, urls) = self.remote.pair(&name).await;
+                Ok(Response::RemotePaired { device, urls })
+            }
+            Request::RemoveRemoteDevice { id } => self
+                .remote
+                .remove_device(&id)
+                .map(|remote| Response::Remote { remote })
+                .map_err(|message| ErrorBody { code: ErrorCode::NotFound, message }),
             Request::ScanOrca => {
                 let registered: Vec<String> = self.workspace.repos().into_iter().map(|r| r.path).collect();
                 match tokio::task::spawn_blocking(move || crate::orca::scan(&registered)).await {
@@ -469,6 +500,10 @@ fn request_kind(r: &Request) -> &'static str {
         Request::FindCommands { .. } => "find_commands",
         Request::Tmux { .. } => "tmux",
         Request::ScanOrca => "scan_orca",
+        Request::GetRemote => "get_remote",
+        Request::SetRemote { .. } => "set_remote",
+        Request::PairRemote { .. } => "pair_remote",
+        Request::RemoveRemoteDevice { .. } => "remove_remote_device",
         Request::StopClaudeSession { .. } => "stop_claude_session",
         Request::GetAgentSettings => "get_agent_settings",
         Request::SetAgentSettings { .. } => "set_agent_settings",
