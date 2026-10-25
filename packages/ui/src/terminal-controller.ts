@@ -7,9 +7,11 @@
 
 import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
 
+import { HangulComposer, isJamo } from "./hangul";
 import type { Services } from "./services";
 
 const enc = new TextEncoder();
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn", "Process", "Unidentified"]);
 
 export class TerminalController {
   engine: TerminalEngine | null = null;
@@ -23,6 +25,8 @@ export class TerminalController {
   private resizeTimer = 0;
   /** 조합 시작 수 - 끝 수. WebKit 은 한글에서 다음 글자 조합 시작이 앞 글자 조합 끝보다 먼저 오기도 해서 수로 센다 */
   private composing = 0;
+  /** 입력기가 붙지 않아 자모가 그대로 올 때 직접 묶는 조합기 (hangul.ts) */
+  private hangul = new HangulComposer();
 
   private disposed = false;
   private wheelAcc = 0;
@@ -209,6 +213,14 @@ export class TerminalController {
     });
   }
 
+  /** 직접 묶던 한글 글자를 확정해 보낸다 */
+  private flushHangul() {
+    const out = this.hangul.flush();
+    if (!out) return;
+    this.engine?.setPreedit(null);
+    this.send(enc.encode(out));
+  }
+
   /** 보이지 않는 textarea 로 키보드와 한글 조합 입력을 받는다 */
   private mountInput(host: HTMLElement) {
     const ta = document.createElement("textarea");
@@ -228,6 +240,24 @@ export class TerminalController {
         ta.value = "";
       });
     ta.addEventListener("keydown", (ev) => {
+      const raw = !ev.isComposing && ev.keyCode !== 229 && !ev.metaKey && !ev.ctrlKey && !ev.altKey;
+      // 입력 소스를 바꾼 직후 입력기가 이 글 칸에 붙지 않으면 한국어 자판 자모가 조합 없이 하나씩 온다 (ㅎㅏㄴㄱㅡㄹ).
+      // 그때는 직접 글자로 묶는다
+      if (raw && isJamo(ev.key)) {
+        ev.preventDefault();
+        const done = this.hangul.feed(ev.key);
+        if (done) this.send(enc.encode(done));
+        this.engine?.setPreedit(this.hangul.preedit || null);
+        this.placeInput();
+        return;
+      }
+      if (raw && ev.key === "Backspace" && !ev.shiftKey && this.hangul.backspace()) {
+        ev.preventDefault();
+        this.engine?.setPreedit(this.hangul.preedit || null);
+        return;
+      }
+      // 수정키만 누른 것은 조합을 끝내지 않는다 (Shift 를 누르고 ㅆ 을 친다)
+      if (!MODIFIER_KEYS.has(ev.key)) this.flushHangul();
       // 조합 중(한글 등)인 키는 IME 에 맡긴다
       if (ev.isComposing || ev.keyCode === 229) return;
       if (this.macEditKey(ev)) {
@@ -253,6 +283,7 @@ export class TerminalController {
     // compositionend 때 textarea 를 바로 비우면 WebKit 에서는 막 시작한 다음 글자 조합까지 지워져
     // "가나다라" 를 치는 동안 앞 글자까지만 보였다. textarea 는 조합이 모두 끝난 뒤에 비운다
     ta.addEventListener("compositionstart", () => {
+      this.flushHangul();
       this.composing++;
       this.placeInput();
     });
@@ -284,6 +315,7 @@ export class TerminalController {
     });
     ta.addEventListener("paste", (ev) => {
       ev.preventDefault();
+      this.flushHangul();
       const text = ev.clipboardData?.getData("text/plain");
       if (text && this.engine) this.send(this.engine.input.paste(text));
     });
@@ -295,6 +327,7 @@ export class TerminalController {
       ev.clipboardData?.setData("text/plain", text);
     });
     ta.addEventListener("focus", () => this.onActivate?.());
+    ta.addEventListener("blur", () => this.flushHangul());
     this.mountMouse(host);
     if (this.wantFocus) this.focus();
   }
