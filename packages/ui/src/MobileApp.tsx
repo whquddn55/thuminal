@@ -33,6 +33,18 @@ import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
 import { AppModel, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
 import "./styles.css";
 
+/** 안드로이드 앱(apps/android)이 WebView 에 넣어 주는 기능 */
+interface AppBridge {
+  clipboardText(): string;
+  copyText(text: string): void;
+  forget(): void;
+  changeServer(): void;
+}
+
+export function appBridge(): AppBridge | null {
+  return (window as unknown as { ThuminalApp?: AppBridge }).ThuminalApp ?? null;
+}
+
 /** 원격 연결 상태를 알려 주는 껍데기 (웹 HostApi) */
 export interface RemoteConnection {
   state: string;
@@ -109,6 +121,7 @@ function Phone({ conn, onForget, onDesktopUi }: { conn: RemoteConnection; onForg
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem onSelect={onDesktopUi}>데스크톱 화면으로</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => location.reload()}>새로 고침</DropdownMenuItem>
+        {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>다른 데스크톱으로</DropdownMenuItem>}
         <DropdownMenuSeparator />
         <DropdownMenuItem className="text-destructive" onSelect={() => confirm("이 기기의 접속 정보를 지울까? 다시 쓰려면 데스크톱에서 등록해야 한다") && onForget()}>
           접속 정보 지우기
@@ -415,6 +428,13 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
     setLine("");
   };
   const paste = async () => {
+    // 안드로이드 앱 WebView 는 navigator.clipboard 를 막는다. 앱이 이어 준다
+    const app = appBridge();
+    if (app) {
+      const text = app.clipboardText();
+      if (text) c.paste(text);
+      return;
+    }
     try {
       const text = await navigator.clipboard.readText();
       if (text) c.paste(text);

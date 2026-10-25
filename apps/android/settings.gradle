@@ -1,0 +1,17 @@
+// thuminal 안드로이드 앱: 데스크톱 데몬의 웹 화면을 띄우는 얇은 껍데기 (scripts/build-android.sh)
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "thuminal"
+include ":app"

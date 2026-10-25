@@ -21,3 +21,5 @@ thuminal-pty-portable.workspace = true
 thuminal-vcs-git.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

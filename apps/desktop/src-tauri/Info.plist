@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tauri 가 번들 Info.plist 에 합친다. 원격 접속(데몬이 Tailscale·Wi‑Fi 주소에서 받는다)에 로컬 네트워크 권한이 든다 -->
+<plist version="1.0">
+<dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>원격 접속을 켜면 폰이나 다른 컴퓨터가 Tailscale·같은 Wi‑Fi 로 이 컴퓨터의 터미널에 붙습니다.</string>
+</dict>
+</plist>

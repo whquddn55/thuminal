@@ -43,7 +43,8 @@
       "binaries/thuminal"
     ],
     "resources": {
-      "../../../plugins/claude-code/thuminal/": "claude-plugin/"
+      "../../../plugins/claude-code/thuminal/": "claude-plugin/",
+      "../../web/dist/": "web/"
     }
   }
 }

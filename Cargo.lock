@@ -4223,6 +4223,7 @@ dependencies = [
 name = "thuminal-client"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "libc",
  "serde_json",
  "tempfile",
@@ -4233,6 +4234,7 @@ dependencies = [
  "thuminal-pty-portable",
  "thuminal-vcs-git",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
 ]
 

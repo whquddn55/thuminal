@@ -218,7 +218,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
     }
   };
   const host = st.tailnet.find((a) => !a.includes(":")) ?? st.tailnet[0];
-  const apkUrl = host && st.apk ? `http://${host.includes(":") ? `[${host}]` : host}:${st.port}/download/thuminal.apk` : null;
+  const apkUrl = host && st.apk && st.enabled ? `http://${host.includes(":") ? `[${host}]` : host}:${st.port}/download/thuminal.apk` : null;
   const qr = (text: string) => <div className="size-40 shrink-0 rounded bg-white p-1.5 [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: renderSVG(text, { pixelSize: 4 }) }} />;
 
   return (

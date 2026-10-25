@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 
 import { ghosttyWasmEngineForBrowser } from "@thuminal/engine-ghostty-wasm/browser";
 import { webglRenderer } from "@thuminal/renderer-webgl";
-import { App, MobileApp, PairScreen, type Services } from "@thuminal/ui";
+import { App, appBridge, MobileApp, PairScreen, type Services } from "@thuminal/ui";
 
 import { WebHostApi } from "./web-host";
 
@@ -54,7 +54,10 @@ async function boot() {
   };
   const forget = () => {
     localStorage.removeItem(TOKEN_KEY);
-    location.reload();
+    // 안드로이드 앱이면 앱에 남긴 주소도 지우고 처음 화면으로 간다
+    const app = appBridge();
+    if (app) app.forget();
+    else location.reload();
   };
   const switchUi = (ui: "mobile" | "desktop") => {
     localStorage.setItem(UI_KEY, ui);

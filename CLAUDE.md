@@ -17,6 +17,8 @@ pnpm test                            # vitest (지금은 packages/engine-ghostty
 pnpm -C packages/engine-ghostty-wasm exec vitest run -t "조합"   # 이름으로 시험 하나
 pnpm -r typecheck
 scripts/build-app.sh                 # target/release/bundle/macos/thuminal.app
+pnpm -C apps/web build               # 원격 접속 웹 화면 (데몬이 apps/web/dist 를 낸다)
+scripts/build-android.sh             # 안드로이드 앱 → apps/web/public/download/thuminal.apk (JDK 17·21, ~/Library/Android/sdk)
 ```
 
 - CLI 를 개발 데몬에 대고 돌릴 때: `THUMINAL_HOME=~/scratch/thuminal/main/dev-home target/debug/thuminal pane ls --all`. `THUMINAL_HOME` 이 없으면 기본 폴더(`~/Library/Application Support/thuminal`)의 다른 데몬을 본다.
@@ -36,12 +38,13 @@ crates/thuminal-daemon (thuminald) ── thuminal-layout, thuminal-engine(-ghos
 plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데몬
 ```
 
-- **바깥 기술은 인터페이스 뒤에 있다.** 엔진·PTY·git·렌더러·앱 껍데기는 trait/interface 로 정의하고 어댑터는 따로 둔다. 어댑터를 고르는 곳은 `crates/thuminald/src/main.rs` 와 `apps/desktop/src/main.tsx` 두 군데뿐이다.
+- **바깥 기술은 인터페이스 뒤에 있다.** 엔진·PTY·git·렌더러·앱 껍데기는 trait/interface 로 정의하고 어댑터는 따로 둔다. 어댑터를 고르는 곳은 `crates/thuminald/src/main.rs`, `apps/desktop/src/main.tsx`, `apps/web/src/main.tsx` 뿐이다.
 - **배치(탭·칸 트리·크기·포커스)의 주인은 데몬이다.** 앱과 CLI 는 `layout` 요청(`LayoutOp`)을 보내고, 데몬이 `thuminal-layout` 으로 트리를 바꾼 뒤 `layout_changed` 이벤트로 알린다. 앱은 돌려받은 배치를 통째로 바꿔 끼운다. 새 터미널이 필요한 op 는 데몬이 세션을 먼저 띄우고, 실패하면 배치를 되돌린다. 배치는 `layout-v1.json` 에 남고, 데몬이 다시 뜨면 `restored_from` 으로 옛 세션 번호를 새 번호로 바꿔 끼운다.
 - **workspace** 는 워크트리 절대 경로, `"floating"`(플로팅 패널), `"other"`(워크트리 밖) 중 하나다. `CreateSession` 으로 만든 세션은 꼬리표(`worktree`, `floating`)로 정한 workspace 의 새 탭에 들어간다.
 - **칸 내용**은 `terminal { session }` 또는 `doc { doc: map }` 이다. 문서 칸 종류는 `doc.kind` 로 가른다: `diff`, `file`, `browser`(`url`). 데몬은 doc 의 뜻을 모른다.
 - **세션 하나 = PTY 하나 + 엔진 하나**, 세션 전용 스레드(actor)가 엔진을 혼자 든다 (`daemon/src/session.rs`). 터미널 질의(커서 위치, OSC 10/11 색 등)는 데몬 엔진만 답한다. 앱 엔진은 답하지 않는다.
 - **에이전트 상태**는 claude 훅이 알려 준다. 훅 이벤트 → 상태 규칙은 `daemon/src/manager.rs` 의 `next_agent` 에 있고, 세션 환경의 `THUMINAL_HOME`·`THUMINAL_SESSION_ID`·`THUMINAL_CLI` 로 그 데몬에 닿는다. claude 는 셸 함수가 부르는 실행기 `shell/claude-launch` 가 `--plugin-dir` 로 이 플러그인을 그 실행에만 얹고, 에이전트 설정(권한 옵션·팀)을 붙인다 (`daemon/src/shell.rs`).
+- **원격 접속**: 데몬이 Tailscale 주소(기본 6780)에서 웹 화면과 웹소켓 `/ws` 를 낸다 (`daemon/src/remote.rs`). 웹소켓 메시지 하나가 길이 머리를 뗀 프레임 하나라 유닉스 소켓과 같은 처리(`Server::serve_stream`)를 탄다. 기기마다 토큰(`remote.json`). 웹 껍데기는 `apps/web`(HostApi = `web-host.ts`), 좁은 화면은 `ui/src/MobileApp.tsx`, 안드로이드 앱(`apps/android`)은 그 웹 화면을 띄우는 WebView 껍데기다. 세션 크기는 마지막으로 입력한 화면을 따른다 (`TerminalController.claimSize`).
 - **에이전트 팀**: claude 에게 가짜 tmux 를 보여 팀원 칸 명령(`split-window`, `respawn-pane`, `kill-pane` …)을 데몬이 받는다 (`daemon/src/teams.rs`). 팀원은 칸 트리에 없는 세션이고(`layout=none`, 꼬리표 `team.*`), 화면은 리더 칸 위 팝업(목록 → 팀원 터미널)으로 그린다 (`ui/src/TeamPanel.tsx`). 터미널끼리 겹치면 `RenderTarget.layer` 가 큰 것을 위에 그린다.
 
 ### 화면 (`packages/ui`)

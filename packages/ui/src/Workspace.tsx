@@ -554,7 +554,29 @@ export function TerminalPane({
     else c.blur();
   }, [model, session, keyboard, generation]);
 
-  return <div ref={ref} className="absolute inset-0" />;
+  // 폰(원격 접속)이 세션 크기를 가져갔으면 알린다. 이 칸에서 입력하거나 누르면 이 칸 크기로 돌아온다
+  const info = useApp((s) => s.sessions[session]);
+  const [taken, setTaken] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setTaken(model.controller(session).sizeTaken), 600);
+    return () => window.clearTimeout(t);
+  }, [model, session, info?.cols, info?.rows]);
+
+  return (
+    <div ref={ref} className="absolute inset-0">
+      {taken && (
+        <button
+          className="absolute top-1.5 right-1.5 z-[6] rounded-md border bg-popover/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:text-foreground"
+          onClick={() => {
+            model.controller(session).claimSize();
+            setTaken(false);
+          }}
+        >
+          다른 기기 크기({info?.cols}×{info?.rows})로 그려지는 중 · 되돌리기
+        </button>
+      )}
+    </div>
+  );
 }
 
 function DocPane({ ws, doc, onFocus }: { ws: WorkspaceId; doc: DocSpec; onFocus: () => void }) {

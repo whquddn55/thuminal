@@ -14,7 +14,9 @@ thuminal 은 워크트리마다 터미널과 에이전트를 띄워 관리하는
 ## 층
 
 ```
-apps/desktop (Tauri 껍데기) ── packages/ui (React 화면)
+apps/desktop (Tauri 껍데기) ── packages/ui (React 화면, 폰 화면 MobileApp)
+apps/web (브라우저 껍데기, 원격) ─┘    │
+apps/android (WebView 껍데기) → apps/web 화면을 띄운다
       │                              │
       │ HostApi 구현                   ├─ packages/term-core (인터페이스)
       │                              ├─ packages/engine-ghostty-wasm (엔진 어댑터)
@@ -42,10 +44,10 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 |---|---|---|---|
 | 데몬 터미널 엔진 | `thuminal_engine::TerminalEngine` | `thuminal-engine-ghostty` (libghostty-vt) | vt100, alacritty_terminal |
 | PTY | `thuminal_pty::PtySystem` | portable-pty | 직접 forkpty |
-| 데몬 통신 | `thuminal_protocol` 프레임 + 유닉스 소켓 | 유닉스 소켓 | TCP, WebSocket (원격) |
+| 데몬 통신 | `thuminal_protocol` 프레임 + 유닉스 소켓 | 유닉스 소켓, 웹소켓(원격 접속) | TCP |
 | 앱 터미널 엔진 | `term-core` 의 `TerminalEngine` | ghostty-vt.wasm | xterm.js 헤드리스 |
 | 렌더러 | `term-core` 의 `Renderer` | WebGL2 글자 그림판 | WebGPU, Canvas |
-| 앱 껍데기 | `term-core` 의 `HostApi` | Tauri | Electron, 브라우저 + 원격 데몬 |
+| 앱 껍데기 | `term-core` 의 `HostApi` | Tauri, 브라우저(`apps/web`) | Electron |
 | 버전 관리 | `thuminal_workspace::Vcs` | git 명령 | libgit2, jj |
 
 ## 데몬 (`thuminald`)
@@ -82,6 +84,19 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - 처음 주고받는 `hello` 에서 프로토콜 버전을 맞춘다. 주 버전이 다르면 끊는다.
 - 화면 저장본 형식: `native`(엔진 고유, 같은 엔진끼리만), `vt`(제어 코드로 화면을 다시 그리는 바이트, 어떤 엔진이든 먹는다).
 
+## 원격 접속
+
+폰이나 다른 컴퓨터 브라우저가 Tailscale 로 이 컴퓨터 데몬에 붙는다. Orca 의 웹 클라이언트·모바일 짝짓기와 같은 자리다.
+
+- **서버는 데몬 안에 있다** (`daemon/src/remote.rs`). 앱을 꺼도 받는다. HTTP 하나가 웹 화면 파일(`apps/web` 빌드 결과, 앱 번들은 `Resources/web`)과 웹소켓 `/ws` 를 같이 낸다. 기본 포트 6780.
+- **웹소켓 메시지 하나 = 프레임 하나**에서 길이 머리를 뗀 것(`[종류 u8][내용]`)이다. 데몬 안에서 파이프로 이어 유닉스 소켓 연결과 똑같이 처리하므로(`Server::serve_stream`) 원격 전용 프로토콜이 없다. 웹 껍데기(`apps/web/src/web-host.ts`)가 같은 요청을 TS 로 보낸다.
+- **받는 주소**: 기본은 Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)와 127.0.0.1 만. Tailscale(WireGuard)이 길을 암호화하므로 TLS 를 두지 않는다 (Orca 는 같은 망에서도 쓰려고 웹소켓 안에 따로 암호화를 넣었다). "같은 Wi‑Fi 에서도 받기"를 켜면 0.0.0.0 에서 받고, 그때는 같은 망에서 내용이 보인다. Tailscale 이 나중에 켜지거나 주소가 바뀌면 15초 안에 맞춘다.
+- **기기 등록**: 기기마다 토큰(24바이트)을 만들어 `remote.json`(0600)에 둔다. 주소는 `http://<Tailscale 주소>:6780/#token=…` 이고 설정 창이 QR 로 보인다. 웹 화면은 토큰을 그 브라우저 localStorage 에 옮기고 주소에서 지운다. 웹소켓·`/api/*` 는 토큰이 맞아야 열고, 화면 파일은 토큰 없이 낸다. 기기를 지우면 붙어 있던 연결을 바로 끊는다. 원격 연결은 원격 설정 요청(`set_remote`, `pair_remote`, `remove_remote_device`)을 받지 않는다.
+- **글꼴**: 폰에는 Nerd Font 가 없어 프롬프트 기호가 깨지므로 `/api/fonts`·`/api/font/<n>` 이 데스크톱에 설치된 글꼴 파일을 낸다.
+- **화면**: 넓으면 데스크톱과 같은 화면, 좁으면 폰 화면(`ui/src/MobileApp.tsx`: 에이전트 목록 → 워크트리 → 터미널, 키 줄·입력 줄). `?ui=mobile|desktop` 으로 고정한다. 안드로이드 키보드는 모든 키를 keyCode 229 로 보내므로 지우기·Enter 를 `input` 이벤트(`deleteContentBackward`, `insertLineBreak`)로 받는다.
+- **세션 크기**: 마지막으로 입력한(누른) 화면 크기를 따른다 (tmux `window-size latest`). 다른 화면이 크기를 가져가면 데스크톱 칸 오른쪽 위에 "다른 기기 크기로 그려지는 중 · 되돌리기"가 뜬다.
+- **안드로이드 앱**(`apps/android`, Java, 의존성은 Play 서비스 QR 찍기 하나): WebView 로 웹 화면을 띄우는 얇은 껍데기다. QR 찍기·주소 붙여 넣기·`thuminal://open?url=…` 로 주소를 받아 남기고, 뒤로 가기·클립보드·접속 정보 지우기를 `window.ThuminalApp` 으로 이어 준다. Orca 는 Expo(React Native) 앱이지만 터미널은 그 안 WebView 의 xterm.js 이고 화면 일부도 데스크톱이 내는 웹 묶음을 WebView 로 그린다. thuminal 은 그 웹 부분만 남겨 데스크톱이 화면을 모두 내게 했다 (앱을 다시 깔지 않아도 화면이 바뀐다). `scripts/build-android.sh` 가 만들어 `apps/web/public/download/thuminal.apk` 에 두고, 데몬이 `/download/thuminal.apk` 로 낸다.
+
 ## 데이터 폴더
 
 `~/Library/Application Support/thuminal/` (환경 변수 `THUMINAL_HOME` 으로 바꿀 수 있다. 시험은 임시 폴더를 쓴다).
@@ -96,6 +111,7 @@ sessions/<번호>.vt  되살릴 화면 저장본
 layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 안에 쓴다. daemon stop 이면 지운다)
 terminal-colors.json 터미널 기본색 (앱 테마)
 agent-settings.json  에이전트를 띄울 때 붙일 옵션 (설정 창 · 에이전트)
+remote.json         원격 접속 설정과 등록한 기기 토큰 (0600)
 shell/              셸 통합 파일, claude 실행기(claude-launch), 에이전트 팀용 가짜 tmux(teams-bin/tmux)
 ```
 
@@ -112,6 +128,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 - `layout show` / `layout apply '<한 줄>'`: 탭 배치를 한 줄로 보고 적용한다. 예: `row(claude, col(zsh, "npm run dev"):40%)`. 칸 자리의 `p7` 은 이미 있는 칸, 그 밖의 글은 새 셸에 입력할 명령(`zsh`, `_` 은 그냥 셸)이다. `show` 의 출력은 그대로 `apply` 에 다시 넣을 수 있다
 - `browser open <주소>`: 앱 안 브라우저 탭을 연다 (스킴이 없으면 http:// 를 붙인다). `--beside p7` 이나 `--right` 류를 주면 그 칸 옆을 나눠 연다. 새 칸 번호를 찍는다
 - `--in <대상>`: 워크트리 경로나 브랜치 이름, `floating`, `other`, `.`(이 셸의 workspace, 기본)
+- `remote status|on|off|pair <이름>|rm <id>`: 원격 접속 켜기·끄기, 기기 등록 (주소를 찍는다)
 - `repo …`, `wt …`: 저장소 등록, 워크트리 만들기·지우기·상태. `wt rm --force` 는 워크트리만, `--delete-branch` 는 합친 브랜치만 지우고, 합치지 않은 브랜치는 `--force-branch` 를 줘야 지운다
 
 ## 화면 (`packages/ui`)
@@ -128,4 +145,4 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 
 ## 앱 번들
 
-`scripts/build-app.sh` 가 `thuminal.app` 을 만든다. 데몬(`thuminald`)과 CLI(`thuminal`)가 `Contents/MacOS` 에 함께 들어가고, 앱과 CLI 는 자기 옆의 `thuminald` 를 띄운다. 개발할 때는 `pnpm dev` (데이터 폴더 `~/scratch/thuminal/main/dev-home`).
+`scripts/build-app.sh` 가 `thuminal.app` 을 만든다. 데몬(`thuminald`)과 CLI(`thuminal`)가 `Contents/MacOS` 에 함께 들어가고, 앱과 CLI 는 자기 옆의 `thuminald` 를 띄운다. 원격 접속 웹 화면은 `Contents/Resources/web` 에 들어간다 (Android SDK 가 있으면 안드로이드 앱도 그 안 `download/` 에). 개발할 때는 `pnpm dev` (데이터 폴더 `~/scratch/thuminal/main/dev-home`).
