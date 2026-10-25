@@ -251,6 +251,24 @@ export class TauriHostApi implements HostApi {
     };
   }
 
+  notify(n: { title: string; subtitle?: string; body: string; session: number; sound: boolean }): Promise<void> {
+    return invoke("notify", { title: n.title, subtitle: n.subtitle ?? null, body: n.body, session: n.session, sound: n.sound });
+  }
+
+  onNotificationClick(cb: (session: number) => void): () => void {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void listen<{ session: number }>("thuminal://notification-click", (e) => cb(e.payload.session)).then((un) => (cancelled ? un() : (stop = un)));
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }
+
+  setBadge(count: number): Promise<void> {
+    return invoke("set_badge", { count });
+  }
+
   onEvent(cb: (e: DaemonEvent) => void): () => void {
     this.listeners.add(cb);
     this.subscribed ??= (async () => {

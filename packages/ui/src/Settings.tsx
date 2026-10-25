@@ -1,4 +1,4 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션.
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션, 알림.
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
 import { CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
@@ -133,6 +133,35 @@ function AgentSection() {
   );
 }
 
+/** 알림 설정 (이 앱에 남는다) */
+function NotifySection() {
+  const model = useModel();
+  const n = useApp((s) => s.notify);
+  const sub = !n.enabled && "pointer-events-none opacity-50";
+  return (
+    <div className="flex flex-col gap-3">
+      <Toggle checked={n.enabled} onChange={(v) => model.setNotify({ enabled: v })} title="알림 쓰기">
+        에이전트가 일을 마치거나 묻거나, 터미널 벨이 울리면 macOS 알림을 띄운다. 알림을 누르면 그 칸으로 간다. 지금 보고 있는 칸이면 띄우지 않는다. Dock 에는 안 읽은
+        워크트리 수가 뜬다.
+      </Toggle>
+      <div className={cn("flex flex-col gap-3", sub)}>
+        <Toggle checked={n.done} onChange={(v) => model.setNotify({ done: v })} title="에이전트가 일을 마쳤을 때">
+          claude 턴이 끝나면 마지막 답과 함께 알린다.
+        </Toggle>
+        <Toggle checked={n.attention} onChange={(v) => model.setNotify({ attention: v })} title="에이전트가 묻거나 오류로 끝났을 때">
+          권한 확인처럼 사용자를 부를 때, 턴이 오류로 끝났을 때 알린다.
+        </Toggle>
+        <Toggle checked={n.bell} onChange={(v) => model.setNotify({ bell: v })} title="터미널 벨과 터미널 알림">
+          터미널 프로그램이 벨을 울리거나 알림(OSC 9 · 777)을 보내면 알린다.
+        </Toggle>
+        <Toggle checked={n.sound} onChange={(v) => model.setNotify({ sound: v })} title="알림 소리">
+          알림과 함께 기본 소리를 낸다.
+        </Toggle>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const model = useModel();
   const open = useApp((s) => s.dialog?.kind === "settings");
@@ -140,7 +169,7 @@ export function SettingsDialog() {
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
-  const [section, setSection] = useState<"theme" | "agent">("theme");
+  const [section, setSection] = useState<"theme" | "agent" | "notify">("theme");
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 
   return (
@@ -149,7 +178,11 @@ export function SettingsDialog() {
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>
-            {section === "theme" ? "테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다." : "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."}
+            {section === "theme"
+              ? "테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다."
+              : section === "agent"
+                ? "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."
+                : "언제 알릴지 고른다. 누르면 바로 저장된다."}
           </DialogDescription>
         </DialogHeader>
         <div className="self-start">
@@ -158,12 +191,15 @@ export function SettingsDialog() {
             options={[
               ["theme", "테마"],
               ["agent", "에이전트"],
+              ["notify", "알림"],
             ]}
             onChange={setSection}
           />
         </div>
         {section === "agent" ? (
           <AgentSection />
+        ) : section === "notify" ? (
+          <NotifySection />
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">

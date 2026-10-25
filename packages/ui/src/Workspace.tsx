@@ -29,7 +29,7 @@ import { activeTab, dropRect, panesOf } from "./layout";
 import { cn } from "./lib/utils";
 import { NewTabMenu } from "./NewTabMenu";
 import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
-import { StatusIndicator } from "./Sidebar";
+import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { type DocSpec, DocView } from "./viewers";
 
@@ -86,10 +86,10 @@ function paneTitle(p: Pane, sessions: Record<number, SessionInfo>, pages: Record
   return sessions[p.session]?.title ?? `세션 ${p.session}`;
 }
 
-/** 탭에서 가장 급한 에이전트 상태 */
+/** 탭에서 가장 급한 에이전트 상태 (에이전트가 없으면 null) */
 function tabAgent(tab: Tab, sessions: Record<number, SessionInfo>) {
-  const states = panesOf(tab.root).flatMap((p) => (p.type === "terminal" && sessions[p.session]?.agent ? [sessions[p.session].agent!.state] : []));
-  return states.includes("needs_attention") ? "needs_attention" : states.includes("working") ? "working" : states.includes("idle") ? "idle" : null;
+  const list = panesOf(tab.root).flatMap((p) => (p.type === "terminal" && sessions[p.session]?.agent ? [sessions[p.session]] : []));
+  return list.length ? statusOf(list) : null;
 }
 
 /** 탭 줄. windowDrag 면 빈 곳을 끌어 앱 창을 옮긴다 (메인 제목 줄) */
@@ -355,7 +355,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
         >
           {session?.agent && (
             <>
-              <StatusIndicator status={session.agent.state} className="size-2.5" />
+              <StatusIndicator status={agentStatus(session.agent)} className="size-2.5" />
               <RobotIcon className="size-3 shrink-0" />
             </>
           )}

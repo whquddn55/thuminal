@@ -104,6 +104,8 @@ pub enum AgentState {
     Working,
     /// 권한 확인 등 사용자를 부르고 있다
     NeedsAttention,
+    /// 턴이 오류로 끝났다 (StopFailure). 다음 프롬프트까지 남는다
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

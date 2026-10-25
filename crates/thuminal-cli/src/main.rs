@@ -153,8 +153,8 @@ struct WaitArgs {
     #[arg(long = "match", value_name = "TEXT")]
     pattern: Option<String>,
     /// 에이전트(claude)가 이 상태가 될 때까지. idle 은 이미 idle 이면 막 보낸 입력이 훅에 닿을 틈(1.5초)을
-    /// 지켜본 뒤 끝낸다 (그 사이 일을 시작하면 턴이 끝날 때까지 기다린다)
-    #[arg(long, value_name = "STATE", value_parser = ["idle", "working", "attention"])]
+    /// 지켜본 뒤 끝낸다 (그 사이 일을 시작하면 턴이 끝날 때까지 기다린다). idle 은 오류로 끝난 턴(failed)도 받고 `failed` 를 찍는다
+    #[arg(long, value_name = "STATE", value_parser = ["idle", "working", "attention", "failed"])]
     agent: Option<String>,
     /// 최대 기다림(초)
     #[arg(long, default_value_t = 600)]
@@ -441,6 +441,7 @@ fn agent_state(name: &str) -> AgentState {
     match name {
         "working" => AgentState::Working,
         "attention" => AgentState::NeedsAttention,
+        "failed" => AgentState::Failed,
         _ => AgentState::Idle,
     }
 }
@@ -478,11 +479,13 @@ async fn wait(c: &Client, w: WaitArgs) -> Res<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
         if let Some(want) = want_agent {
-            if let Some(a) = info.agent.as_ref().filter(|a| a.state == want) {
+            // idle 을 기다리면 오류로 끝난 턴(failed)도 턴이 끝난 것으로 받는다
+            let matches = |s: AgentState| s == want || (want == AgentState::Idle && s == AgentState::Failed);
+            if let Some(a) = info.agent.as_ref().filter(|a| matches(a.state)) {
                 // idle 은 기다리기 시작한 뒤에 idle 이 되었거나, 틈 동안 그대로였을 때만
                 let fresh = want != AgentState::Idle || a.updated_at >= started_ms || started.elapsed() >= AGENT_IDLE_GRACE;
                 if fresh {
-                    println!("{}", w.agent.as_deref().unwrap_or_default());
+                    println!("{}", if a.state == AgentState::Failed { "failed" } else { w.agent.as_deref().unwrap_or_default() });
                     return Ok(ExitCode::SUCCESS);
                 }
             }

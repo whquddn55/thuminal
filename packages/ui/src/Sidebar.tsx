@@ -9,8 +9,8 @@ import {
   CaretDownIcon,
   ChatCircleDotsIcon,
   DotsThreeIcon,
-  FolderIcon,
   DownloadSimpleIcon,
+  FolderIcon,
   FolderPlusIcon,
   GearSixIcon,
   MagnifyingGlassIcon,
@@ -18,11 +18,12 @@ import {
   PushPinIcon,
   RobotIcon,
   TerminalWindowIcon,
+  WarningCircleIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import type { AgentState, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
+import type { AgentInfo, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import {
@@ -62,14 +63,29 @@ function ago(t: number, now: number): string {
   return `${Math.floor(s / 86400)}일`;
 }
 
-type Status = "attention" | "working" | "done" | "active" | "failed" | "inactive";
+export type Status = "attention" | "working" | "error" | "done" | "ready" | "active" | "failed" | "inactive";
 
-/** 워크스페이스 상태: 사용자를 부르는 에이전트 > 일하는 에이전트 > 끝낸 에이전트 > 열린 터미널 > 없음 */
-function statusOf(sessions: SessionInfo[]): Status {
-  const agents = sessions.map((s) => s.agent?.state).filter(Boolean) as AgentState[];
-  if (agents.includes("needs_attention")) return "attention";
-  if (agents.includes("working")) return "working";
-  if (agents.includes("idle")) return "done";
+/** 에이전트 하나의 상태: 부름, 일하는 중, 오류로 끝남, 턴을 끝냄, 막 떠서 기다림 */
+export function agentStatus(a: AgentInfo): Status {
+  switch (a.state) {
+    case "needs_attention":
+      return "attention";
+    case "working":
+      return "working";
+    case "failed":
+      return "error";
+    default:
+      return a.turn_ended_at ? "done" : "ready";
+  }
+}
+
+const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
+
+/** 워크스페이스 상태: 부름 > 오류 > 일하는 중 > 끝낸 에이전트 > 막 뜬 에이전트 > 열린 터미널 > 없음 */
+export function statusOf(sessions: SessionInfo[]): Status {
+  const agents = sessions.flatMap((s) => (s.agent ? [agentStatus(s.agent)] : []));
+  const top = RANK.find((r) => agents.includes(r));
+  if (top) return top;
   if (sessions.some((s) => s.state.state === "running")) return "active";
   if (sessions.length) return "failed";
   return "inactive";
@@ -78,20 +94,26 @@ function statusOf(sessions: SessionInfo[]): Status {
 const STATUS_LABEL: Record<Status, string> = {
   attention: "에이전트가 묻고 있다",
   working: "에이전트가 일하는 중",
-  done: "에이전트가 기다린다",
+  error: "에이전트 턴이 오류로 끝났다",
+  done: "에이전트가 일을 마쳤다",
+  ready: "에이전트가 첫 입력을 기다린다",
   active: "터미널이 열려 있다",
   failed: "터미널이 끝났다",
   inactive: "열린 터미널이 없다",
 };
 
-export function StatusIndicator({ status, className }: { status: Status | AgentState; className?: string }) {
-  const s = status === "needs_attention" ? "attention" : status === "idle" ? "done" : status;
+export function StatusIndicator({ status, className }: { status: Status; className?: string }) {
+  const s = status;
   return (
-    <span className={cn("inline-flex size-3 shrink-0 items-center justify-center", className)}>
+    <span className={cn("inline-flex size-3 shrink-0 items-center justify-center", className)} title={STATUS_LABEL[s]}>
       {s === "working" ? (
         <span className="thm-spinner block size-2 rounded-full border-2 border-agent-working border-t-transparent" />
       ) : s === "attention" ? (
         <ChatCircleDotsIcon weight="fill" className="size-3 text-agent-attention" />
+      ) : s === "error" ? (
+        <WarningCircleIcon weight="fill" className="size-3 text-agent-failed" />
+      ) : s === "ready" ? (
+        <span className="block size-2 rounded-full border-[1.5px] border-muted-foreground/70" />
       ) : (
         <span
           className={cn(
@@ -539,7 +561,7 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
         model.focusPane(hit.pane.id);
       }}
     >
-      <StatusIndicator status={agent.state} className="size-2.5" />
+      <StatusIndicator status={agentStatus(agent)} className="size-2.5" />
       <RobotIcon className="size-[13px] shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         <span className="text-muted-foreground/90">{lead}</span>

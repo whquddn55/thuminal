@@ -151,6 +151,11 @@ export interface HostApi {
    * 지원하지 않는 껍데기는 두지 않는다. 돌려준 함수로 끊는다
    */
   onFileDrop?(cb: (paths: string[], x: number, y: number) => void): () => void;
+  /** 운영체제 알림을 띄운다. 누르면 onNotificationClick 으로 그 세션을 알린다. 지원하지 않는 껍데기는 두지 않는다 */
+  notify?(n: { title: string; subtitle?: string; body: string; session: number; sound: boolean }): Promise<void>;
+  onNotificationClick?(cb: (session: number) => void): () => void;
+  /** Dock 배지 숫자 (0 이면 지운다) */
+  setBadge?(count: number): Promise<void>;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */
   onEvent(cb: (e: DaemonEvent) => void): () => void;
 }

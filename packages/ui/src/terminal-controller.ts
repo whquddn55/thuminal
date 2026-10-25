@@ -220,6 +220,13 @@ export class TerminalController {
     host.appendChild(ta);
     this.textarea = ta;
 
+    // textarea 를 비운다. 조합 중이면 조합이 모두 끝난 뒤에 비운다
+    const settle = () =>
+      setTimeout(() => {
+        if (this.composing > 0) return;
+        this.engine?.setPreedit(null);
+        ta.value = "";
+      });
     ta.addEventListener("keydown", (ev) => {
       // 조합 중(한글 등)인 키는 IME 에 맡긴다
       if (ev.isComposing || ev.keyCode === 229) return;
@@ -238,17 +245,13 @@ export class TerminalController {
       if (bytes) {
         ev.preventDefault();
         this.send(bytes);
+        // Enter·방향키 같은 키는 조합을 끝내므로 여기서 textarea 를 비운다
+        settle();
       }
     });
     // 조합 중인 글자는 엔진에 넘겨 다른 글자와 같은 글꼴·색으로 커서 자리에 밑줄을 그어 그린다.
     // compositionend 때 textarea 를 바로 비우면 WebKit 에서는 막 시작한 다음 글자 조합까지 지워져
     // "가나다라" 를 치는 동안 앞 글자까지만 보였다. textarea 는 조합이 모두 끝난 뒤에 비운다
-    const settle = () =>
-      setTimeout(() => {
-        if (this.composing > 0) return;
-        this.engine?.setPreedit(null);
-        ta.value = "";
-      });
     ta.addEventListener("compositionstart", () => {
       this.composing++;
       this.placeInput();
@@ -275,7 +278,9 @@ export class TerminalController {
       } else if (ie.inputType === "insertText" && ie.data) {
         this.send(enc.encode(ie.data));
       }
-      settle();
+      // 한글 입력기는 조합 이벤트 없이 앞 글자를 바꿔 쓰기도 한다 (ㅇ → 아 → 안). 글이 들어올 때마다 비우면 입력기가
+      // 앞 글자를 잃어 자모가 하나씩 따로 확정된다 (ㅇㅏㄴ). 그래서 글이 길어졌을 때만 비운다
+      if (ta.value.length > 64) settle();
     });
     ta.addEventListener("paste", (ev) => {
       ev.preventDefault();

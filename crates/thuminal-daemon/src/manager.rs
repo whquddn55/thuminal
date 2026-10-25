@@ -47,7 +47,7 @@ fn is_question_tool(name: &str) -> bool {
 /// - UserPromptSubmit, PostToolUse, PostToolUseFailure, PreToolUse → 일하는 중 (묻는 도구의 PreToolUse 는 부름)
 /// - PermissionRequest → 부름
 /// - Notification: `permission_prompt`/`elicitation_dialog` 면 부름, `idle_prompt` 면 기다림, 그 밖은 그대로
-/// - Stop, StopFailure → 기다림 + 턴 끝난 때. SessionStart(compact 말고) → 기다림, 지난 턴 글을 비운다
+/// - Stop → 기다림, StopFailure → 실패. 둘 다 턴 끝난 때를 남긴다. SessionStart(compact 말고) → 기다림, 지난 턴 글을 비운다
 /// - SessionEnd → 에이전트 없음. 모르는 훅 → 상태는 그대로 두고 세션 id 만 받는다
 pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<AgentInfo> {
     use thuminal_protocol::{AGENT_TEXT_MAX, clip_text};
@@ -110,7 +110,8 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         }
         "Notification" => match r.notification_type.as_deref() {
             Some("permission_prompt" | "elicitation_dialog") => Some(AgentState::NeedsAttention),
-            Some("idle_prompt") => Some(AgentState::Idle),
+            // 쉬고 있다는 알림이 실패 표시를 지우지 않게 한다
+            Some("idle_prompt") => (a.state != AgentState::Failed).then_some(AgentState::Idle),
             _ => None,
         },
         "Stop" | "StopFailure" => {
@@ -119,7 +120,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
             }
             a.tool_name = None;
             a.turn_ended_at = Some(now);
-            Some(AgentState::Idle)
+            Some(if r.event == "StopFailure" { AgentState::Failed } else { AgentState::Idle })
         }
         _ => None,
     };
@@ -379,6 +380,8 @@ impl Manager {
                 .agent
                 .as_ref()
                 .filter(|a| a.kind == "claude")
+                // 메시지를 한 번도 보내지 않은 claude 는 기록 파일이 없어 이어 붙일 수 없다 ("No conversation found")
+                .filter(|a| a.transcript.as_deref().is_none_or(|t| Path::new(t).exists()))
                 .and_then(|a| a.session_id.as_ref())
                 .filter(|sid| sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
                 .map(|sid| format!("claude --resume {sid}\r").into_bytes());
@@ -472,7 +475,13 @@ mod tests {
         // 새 프롬프트면 지난 답과 끝난 때를 비운다
         let c = step(Some(a.clone()), report("UserPromptSubmit"), 9);
         assert_eq!((c.last_assistant_message, c.turn_ended_at, c.prompt.as_deref()), (None, None, Some("고쳐 줘")));
-        assert!(next_agent(Some(a), report("SessionEnd"), 10).is_none());
+        assert!(next_agent(Some(a.clone()), report("SessionEnd"), 10).is_none());
+        // 오류로 끝난 턴은 실패로 남고, 쉬고 있다는 알림에도 그대로다
+        let f = step(Some(a), report("StopFailure"), 11);
+        assert_eq!((f.state, f.turn_ended_at), (AgentState::Failed, Some(11)));
+        let f = step(Some(f), AgentReport { notification_type: Some("idle_prompt".into()), ..report("Notification") }, 12);
+        assert_eq!(f.state, AgentState::Failed);
+        assert_eq!(step(Some(f), report("UserPromptSubmit"), 13).state, AgentState::Working);
     }
 
     #[test]

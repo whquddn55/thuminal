@@ -29,7 +29,7 @@ export interface SessionInfo {
   bell_at: number;
 }
 
-export type AgentState = "idle" | "working" | "needs_attention";
+export type AgentState = "idle" | "working" | "needs_attention" | "failed";
 
 export interface AgentInfo {
   kind: string;

@@ -61,4 +61,6 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다 (`ui/src/App.tsx` `useShortcuts`).
 - 주석·문서·CLI 도움말·화면 글은 한국어 `-다` 평서형이다. 주변 코드의 주석 밀도와 말투를 따른다.
 - CLI 는 orca CLI 와 호환하지 않는다. 명령 하나 = 연결 하나 + 바꾸는 요청 하나가 원칙이고, 대상(`p7`, `t3`, `s12`, `.`)은 데몬이 푼다.
+- **macOS 알림에 `mac-notification-sys` 나 `tauri-plugin-notification`(속으로 같은 것을 쓴다)을 쓰지 않는다.** 처음 알림을 보낼 때 `NSBundle` 번들 id 를 바꿔치기(swizzle)해서, 그 뒤로 앱이 macOS 에 Finder 로 보이고 입력기(IMK)·창 끌기가 몇 초씩 막힌다.
+- 데몬의 연결마다 읽기 루프는 세션·배치 요청을 받은 차례대로 처리한다. git·파일처럼 오래 걸리는 요청은 `server.rs` `is_slow` 에 넣어 따로 돌린다 (안 그러면 같은 연결의 키 입력·붙기가 그 뒤에 줄을 선다).
 - `libghostty-vt` 는 crates.io 판에 snapshot API 가 없어 git rev 를 고정해 쓴다 (`Cargo.toml`). 스크롤백 바이트 한도 기본값이 작아 엔진을 만들 때 풀어 준다.

@@ -130,7 +130,17 @@ impl Server {
                             }
                         }
                     }
-                    if let Some(frame) = self.handle(conn, &client, id, request, &tx).await {
+                    // git·파일처럼 오래 걸리는 요청은 따로 돌린다. 기다리는 동안에도 같은 연결의 키 입력·붙기·크기 요청이
+                    // 바로 처리되게 한다 (응답은 id 로 짝을 맞추므로 순서가 바뀌어도 된다).
+                    // 세션·배치 요청은 순서가 중요해(붙기 → 떼기 등) 받은 차례대로 처리한다
+                    if is_slow(&request) {
+                        let (me, tx, client) = (self.clone(), tx.clone(), client.clone());
+                        tokio::spawn(async move {
+                            if let Some(frame) = me.handle(conn, &client, id, request, &tx).await {
+                                let _ = tx.send(frame);
+                            }
+                        });
+                    } else if let Some(frame) = self.handle(conn, &client, id, request, &tx).await {
                         let _ = tx.send(frame);
                     }
                 }
@@ -442,6 +452,22 @@ fn request_kind(r: &Request) -> &'static str {
         Request::GetAgentSettings => "get_agent_settings",
         Request::SetAgentSettings { .. } => "set_agent_settings",
     }
+}
+
+/// 오래 걸릴 수 있고 다른 요청과 순서가 상관없는 요청 (git, 파일, 셸에 묻기, Orca 읽기)
+fn is_slow(r: &Request) -> bool {
+    matches!(
+        r,
+        Request::GitStatus { .. }
+            | Request::GitDiff { .. }
+            | Request::ListBranches { .. }
+            | Request::ListDir { .. }
+            | Request::ReadFile { .. }
+            | Request::ListWorktrees { .. }
+            | Request::ListRepos
+            | Request::FindCommands { .. }
+            | Request::ScanOrca
+    )
 }
 
 fn err_frame(id: u64, code: ErrorCode, message: String) -> Frame {

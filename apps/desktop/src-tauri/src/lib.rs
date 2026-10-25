@@ -4,6 +4,7 @@
 //! 세션 출력은 바이너리 채널로 흘린다 (JSON 이벤트는 바이트를 5~7배로 부풀린다).
 
 mod browser;
+mod notify;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -276,6 +277,18 @@ async fn font_face_data(id: usize) -> CmdResult<tauri::ipc::Response> {
     .map_err(|e| e.to_string())?
 }
 
+/// 앱 메뉴. Tauri 기본 메뉴에는 "윈도우 닫기 ⌘W" 가 있어 웹뷰보다 먼저 ⌘W 를 받아 앱 창을 닫아 버린다.
+/// ⌘W 는 칸 닫기(화면 단축키)이므로 그 항목만 빼고 기본 메뉴와 같게 만든다
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, SubmenuBuilder};
+    let name = app.package_info().name.clone();
+    let main = SubmenuBuilder::new(app, &name).about(None).separator().services().separator().hide().hide_others().show_all().separator().quit().build()?;
+    let edit = SubmenuBuilder::new(app, "Edit").undo().redo().separator().cut().copy().paste().select_all().build()?;
+    let view = SubmenuBuilder::new(app, "View").fullscreen().build()?;
+    let window = SubmenuBuilder::new(app, "Window").minimize().maximize().build()?;
+    MenuBuilder::new(app).items(&[&main, &edit, &view, &window]).build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -283,6 +296,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AppState::default());
+            app.set_menu(app_menu(app.handle())?)?;
             // 데몬이 내려가거나 다시 뜨면 2초 안에 다시 붙는다
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -323,6 +337,8 @@ pub fn run() {
             create_worktree,
             remove_worktree,
             daemon_request,
+            notify::notify,
+            notify::set_badge,
             browser::browser_open,
             browser::browser_bounds,
             browser::browser_visible,

@@ -30,6 +30,7 @@ import { AGENTS } from "./agents";
 import { setPage } from "./browser-state";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
+import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
 import { applyTheme, loadThemeSettings, saveThemeSettings, type ThemeSettings } from "./theme";
 
@@ -100,6 +101,8 @@ export interface AppState {
   recent: WorkspaceId[];
   /** 만드는 중인 워크트리 */
   creating: { repo: string; branch: string }[];
+  /** 알림 설정 */
+  notify: NotifySettings;
   /** 에이전트 팀 패널을 펼쳤는지, 어느 팀원이 키보드를 받는지 (리더 세션마다) */
   teams: Record<SessionId, TeamView>;
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
@@ -181,6 +184,7 @@ export class AppModel {
       seen: loadJson<Record<string, number>>(SEEN_KEY, {}),
       recent: JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[],
       creating: [],
+      notify: loadNotifySettings(),
       teams: {},
       generation: 0,
       error: null,
@@ -199,9 +203,21 @@ export class AppModel {
     const host = this.services.host;
     const offDaemon = host.onEvent((e) => this.onEvent(e));
     const offBrowser = host.browser?.onEvent((e) => this.onBrowserEvent(e));
+    const offClick = host.onNotificationClick?.((session) => this.revealSession(session));
+    // Dock 배지: 안 읽은 워크스페이스 수
+    let badge = -1;
+    const offBadge = this.store.subscribe((st) => {
+      const n = Object.keys(st.layouts).filter((ws) => this.unread(ws, st)).length;
+      if (n !== badge) {
+        badge = n;
+        void host.setBadge?.(n).catch(() => undefined);
+      }
+    });
     this.unsubscribe = () => {
       offDaemon();
       offBrowser?.();
+      offClick?.();
+      offBadge();
     };
     try {
       await this.reloadAll();
@@ -221,9 +237,9 @@ export class AppModel {
       (agents) => this.set({ agents }),
       () => undefined,
     );
-    // git 상태: 지금 워크트리는 2초, 모두는 4초마다
+    // git 상태: 지금 워크트리는 2초, 모두는 10초마다 (워크트리가 수십 개면 한 바퀴에 몇 초 걸린다)
     this.timers.push(window.setInterval(() => void this.refreshStatus(this.get().active), 2000));
-    this.timers.push(window.setInterval(() => void this.refreshStatus(), 4000));
+    this.timers.push(window.setInterval(() => void this.refreshStatus(), 10000));
   }
 
   stop() {
@@ -248,29 +264,42 @@ export class AppModel {
   }
 
   /** git 상태를 다시 읽는다. `only` 를 주면 그 워크트리만 */
+  /** git 상태를 읽고 있는 워크트리. 앞 요청이 끝나기 전에는 다시 묻지 않는다 */
+  private statusInFlight = new Set<string>();
+
   async refreshStatus(only?: string) {
     const { worktrees } = this.get();
-    const targets = only !== undefined ? worktrees.filter((w) => w.path === only) : worktrees;
+    const targets = (only !== undefined ? worktrees.filter((w) => w.path === only) : worktrees).filter((w) => !this.statusInFlight.has(w.path));
     const next: Record<string, GitStatus> = {};
-    await Promise.all(
-      targets.map(async (w) => {
+    // 워크트리가 많으면 git 이 한꺼번에 수십 개 뜨지 않게 4개씩 묻는다
+    const queue = [...targets];
+    const worker = async () => {
+      for (let w = queue.shift(); w; w = queue.shift()) {
+        this.statusInFlight.add(w.path);
         try {
           const st = await this.services.host.git.status(w.path);
           if (JSON.stringify(st) !== JSON.stringify(this.get().status[w.path])) next[w.path] = st;
         } catch {
           // 지워지는 중인 워크트리 등은 넘어간다
+        } finally {
+          this.statusInFlight.delete(w.path);
         }
-      }),
-    );
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
     if (Object.keys(next).length) this.set((s) => ({ status: { ...s.status, ...next } }));
   }
 
   private onEvent(e: DaemonEvent) {
     switch (e.type) {
       case "session_created":
-      case "session_updated":
+      case "session_updated": {
+        const prev = this.get().sessions[e.session.id];
         this.set((s) => ({ sessions: { ...s.sessions, [e.session.id]: e.session } }));
+        const n = e.type === "session_updated" ? noticeFor(prev, e.session) : null;
+        if (n) this.notifySession(e.session.id, n);
         return;
+      }
       case "session_exited":
         this.set((s) => {
           const cur = s.sessions[e.session];
@@ -303,7 +332,7 @@ export class AppModel {
         // 다른 창이나 CLI 가 바꿨다. 화면 테마는 앱 설정이 정하므로 따로 하지 않는다
         return;
       case "session_notification":
-        // 알림 기능을 만들 때 쓴다
+        this.notifySession(e.session, { kind: "bell", subtitle: e.title || "터미널 알림", body: e.body });
         return;
       case "workspace_changed":
         void this.refreshWorkspace().then(
@@ -439,6 +468,55 @@ export class AppModel {
   setPanel = (p: Panel) => this.set((s) => ({ panel: s.panel === p ? null : p }));
   setDialog = (d: Dialog) => this.set({ dialog: d });
   setFocusArea = (a: AppState["focusArea"]) => this.set({ focusArea: a });
+
+  // ---- 알림 ----
+
+  setNotify = (patch: Partial<NotifySettings>) => {
+    const notify = { ...this.get().notify, ...patch };
+    saveNotifySettings(notify);
+    this.set({ notify });
+  };
+
+  /** 세션이 든 워크스페이스 이름 (알림 제목) */
+  private workspaceTitle(ws: WorkspaceId): string {
+    if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
+    if (ws === OTHER_WORKSPACE) return "워크트리 밖 터미널";
+    const w = this.get().worktrees.find((x) => x.path === ws);
+    return w ? worktreeTitle(w) : (ws.split("/").pop() ?? ws);
+  }
+
+  /** 지금 그 칸을 보고 있는지: 앱이 앞에 있고, 그 워크스페이스·탭이 화면에 있다 */
+  private watching(session: SessionId): boolean {
+    if (!document.hasFocus()) return false;
+    const s = this.get();
+    const at = paneOfSession(Object.values(s.layouts), session);
+    if (!at) return false;
+    const ws = at.layout.workspace;
+    const shown = ws === FLOATING_WORKSPACE ? s.floating.open : ws === s.active;
+    return shown && activeTab(at.layout)?.id === at.tab.id;
+  }
+
+  private notifySession(session: SessionId, n: Notice) {
+    const s = this.get();
+    const notify = this.services.host.notify;
+    if (!notify || !allowed(s.notify, n.kind) || this.watching(session)) return;
+    const at = paneOfSession(Object.values(s.layouts), session);
+    if (!at) return;
+    void notify({ title: this.workspaceTitle(at.layout.workspace), subtitle: n.subtitle, body: n.body, session, sound: s.notify.sound }).catch(() => undefined);
+  }
+
+  /** 알림을 눌렀다: 그 세션이 든 워크스페이스·탭·칸으로 간다 */
+  revealSession = (session: SessionId) => {
+    const s = this.get();
+    const at = paneOfSession(Object.values(s.layouts), session);
+    if (!at) return;
+    const ws = at.layout.workspace;
+    if (ws === FLOATING_WORKSPACE) {
+      if (!s.floating.open) void this.toggleFloating();
+    } else if (ws !== s.active) this.select(ws);
+    if (activeTab(at.layout)?.id !== at.tab.id) this.selectTab(at.tab.id);
+    this.focusPane(at.pane.id);
+  };
 
   // ---- 에이전트 팀 (팀원은 칸이 아니라 리더 칸에 딸린 패널에 그린다) ----
 
