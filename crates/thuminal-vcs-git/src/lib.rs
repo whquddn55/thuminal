@@ -335,11 +335,25 @@ mod tests {
         let r = ws.add_repo(&root).unwrap();
         assert_eq!(r.name, "proj");
 
-        let w = ws.create_worktree(&r.id, "feature/x", None, Some("로그인 작업")).unwrap();
+        let w = ws.create_worktree(&r.id, "feature/x", None, Some("로그인 작업"), None).unwrap();
         assert_eq!(w.branch.as_deref(), Some("feature/x"));
         assert_eq!(w.name.as_deref(), Some("로그인 작업"));
-        ws.update_worktree(&w.path, None, Some(true)).unwrap();
+        ws.update_worktree(&w.path, None, Some(true), None).unwrap();
         assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == w.path && x.pinned));
+
+        // 하위 워크트리: 부모를 기억하고, 자기 밑의 워크트리를 부모로 삼지 못하고, 빈 글로 뗀다
+        let child = ws.create_worktree(&r.id, "feature/y", None, None, Some(&w.path)).unwrap();
+        assert_eq!(child.parent.as_deref(), Some(w.path.as_str()));
+        assert!(ws.update_worktree(&w.path, None, None, Some(child.path.clone())).is_err(), "부모가 돌고 돌면 안 된다");
+        ws.update_worktree(&child.path, None, None, Some(String::new())).unwrap();
+        assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == child.path && x.parent.is_none()));
+        ws.update_worktree(&child.path, None, None, Some(root.to_string_lossy().into_owned())).unwrap();
+        assert!(Workspace::open(Arc::new(GitCli), home.path()).worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == child.path && x.parent.as_deref() == Some(&*root.to_string_lossy())), "다시 열어도 남는다");
+        // 손자: 가운데(child)를 지우면 손자는 메인 밑으로 옮겨진다
+        let grandchild = ws.create_worktree(&r.id, "feature/z", None, None, Some(&child.path)).unwrap();
+        ws.remove_worktree(&r.id, Path::new(&child.path), true, true, true).unwrap();
+        assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == grandchild.path && x.parent.as_deref() == Some(&*root.to_string_lossy())));
+        ws.remove_worktree(&r.id, Path::new(&grandchild.path), true, true, true).unwrap();
         assert!(w.path.ends_with("proj-thm-wt-feature-x"), "{}", w.path);
 
         // 워크트리 안의 경로로 등록해도 같은 저장소다
@@ -423,7 +437,7 @@ mod tests {
         };
 
         // 합치지 않은 커밋 + 바뀐 파일: force 는 워크트리만 지우고 브랜치는 남긴다
-        let w = ws.create_worktree(&r.id, "wip", None, None).unwrap();
+        let w = ws.create_worktree(&r.id, "wip", None, None, None).unwrap();
         commit(&w.path);
         std::fs::write(Path::new(&w.path).join("dirty.txt"), "d\n").unwrap();
         let note = ws.remove_worktree(&r.id, Path::new(&w.path), true, true, false).unwrap();
@@ -433,7 +447,7 @@ mod tests {
         assert!(git(&root, &["rev-parse", "--verify", "refs/heads/wip"]).is_ok(), "합치지 않은 브랜치를 지웠다");
 
         // force_branch 면 지운다
-        let w = ws.create_worktree(&r.id, "wip2", None, None).unwrap();
+        let w = ws.create_worktree(&r.id, "wip2", None, None, None).unwrap();
         commit(&w.path);
         assert_eq!(ws.remove_worktree(&r.id, Path::new(&w.path), false, true, true).unwrap(), "");
         assert!(git(&root, &["rev-parse", "--verify", "refs/heads/wip2"]).is_err());

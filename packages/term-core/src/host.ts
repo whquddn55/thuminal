@@ -109,8 +109,9 @@ export interface HostApi {
   addRepos(path: string): Promise<RepoInfo[]>;
   removeRepo(repo: string): Promise<void>;
   listWorktrees(): Promise<WorktreeInfo[]>;
-  createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string }): Promise<WorktreeInfo>;
-  updateWorktree(path: string, change: { name?: string; pinned?: boolean }): Promise<void>;
+  createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo>;
+  /** 이름·고정·부모를 바꾼다. 준 것만 바꾼다. parent 를 null 로 주면 부모에서 뗀다 */
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void>;
   readonly git: GitApi;
   readonly files: FilesApi;
   /** 운영체제 폴더 고르기 창. 고르지 않으면 null */

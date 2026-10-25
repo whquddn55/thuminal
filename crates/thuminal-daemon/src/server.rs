@@ -346,8 +346,8 @@ impl Server {
             Ok(match req {
                 Request::AddRepo { path } => Response::Repo { repo: ws.add_repo(std::path::Path::new(&path))? },
                 Request::AddRepos { path } => Response::Repos { repos: ws.add_repos(std::path::Path::new(&path))? },
-                Request::UpdateWorktree { path, name, pinned } => {
-                    ws.update_worktree(&path, name, pinned)?;
+                Request::UpdateWorktree { path, name, pinned, parent } => {
+                    ws.update_worktree(&path, name, pinned, parent)?;
                     Response::Ok
                 }
                 Request::GitStatus { worktree } => Response::GitStatus { status: ws.status(&worktree)? },
@@ -374,8 +374,8 @@ impl Server {
                     Response::Ok
                 }
                 Request::ListWorktrees { repo } => Response::Worktrees { worktrees: ws.worktrees(repo.as_deref())? },
-                Request::CreateWorktree { repo, branch, base, name } => {
-                    Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref(), name.as_deref())? }
+                Request::CreateWorktree { repo, branch, base, name, parent } => {
+                    Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref(), name.as_deref(), parent.as_deref())? }
                 }
                 Request::RemoveWorktree { repo, path, force, delete_branch, force_branch } => Response::Text {
                     text: ws.remove_worktree(&repo, std::path::Path::new(&path), force, delete_branch, force_branch)?,

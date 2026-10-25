@@ -260,8 +260,8 @@ impl Client {
         }
     }
 
-    pub async fn create_worktree(&self, repo: String, branch: String, base: Option<String>) -> Result<WorktreeInfo> {
-        match self.request(Request::CreateWorktree { repo, branch, base, name: None }).await? {
+    pub async fn create_worktree(&self, repo: String, branch: String, base: Option<String>, parent: Option<String>) -> Result<WorktreeInfo> {
+        match self.request(Request::CreateWorktree { repo, branch, base, name: None, parent }).await? {
             Response::Worktree { worktree } => Ok(worktree),
             other => Err(ClientError::Unexpected(Box::new(other))),
         }

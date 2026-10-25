@@ -183,7 +183,7 @@ async fn removing_worktree_drops_its_layout() {
     git(&root, &["init", "-q", "-b", "main"]);
     git(&root, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
     let repo = c.add_repo(root.to_string_lossy()).await.unwrap();
-    let wt = c.create_worktree(repo.id.clone(), "feature/x".into(), None).await.unwrap();
+    let wt = c.create_worktree(repo.id.clone(), "feature/x".into(), None, None).await.unwrap();
     let mut events = c.events();
     c.layout(LayoutOp::NewTab { workspace: wt.path.clone(), spawn: sh(), index: None, focus: true, title: None, doc: None }).await.unwrap();
     assert!(matches!(next_layout_event(&mut events).await, Event::LayoutChanged { .. }));

@@ -38,6 +38,9 @@ pub enum WtCmd {
         /// 저장소 id 나 이름 (기본: 지금 폴더의 저장소)
         #[arg(long)]
         repo: Option<String>,
+        /// 이 워크트리(경로나 브랜치)의 하위 워크트리로 만든다. 사이드바에서 그 밑에 들여 보인다
+        #[arg(long)]
+        parent: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -147,9 +150,13 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 print_worktrees(&list);
             }
         }
-        WtCmd::New { branch, base, repo, json } => {
+        WtCmd::New { branch, base, repo, parent, json } => {
             let r = resolve_repo(c, repo).await?;
-            let w = c.create_worktree(r.id, branch, base).await?;
+            let parent = match parent {
+                Some(p) => Some(find_worktree(c, &p, false).await?.path),
+                None => None,
+            };
+            let w = c.create_worktree(r.id, branch, base, parent).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&w)?);
             } else {

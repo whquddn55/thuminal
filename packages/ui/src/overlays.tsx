@@ -34,7 +34,7 @@ export function Dialogs() {
   if (!dialog) return null;
   switch (dialog.kind) {
     case "new-worktree":
-      return <NewWorktreeDialog initialRepo={dialog.repo} onClose={close} />;
+      return <NewWorktreeDialog initialRepo={dialog.repo} parent={dialog.parent} onClose={close} />;
     case "delete-worktree":
       return <DeleteWorktreeDialog worktree={dialog.worktree} onClose={close} />;
     case "jump":
@@ -81,9 +81,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function NewWorktreeDialog({ initialRepo, onClose }: { initialRepo: string; onClose: () => void }) {
+function NewWorktreeDialog({ initialRepo, parent, onClose }: { initialRepo: string; parent?: string; onClose: () => void }) {
   const model = useModel();
   const repos = useApp((s) => s.repos);
+  const parentWt = useApp((s) => (parent ? s.worktrees.find((w) => w.path === parent) : undefined));
   const [repo, setRepo] = useState(initialRepo);
   const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
@@ -99,19 +100,20 @@ function NewWorktreeDialog({ initialRepo, onClose }: { initialRepo: string; onCl
     void model.services.host.git.branches(repo).then((b) => {
       if (!alive) return;
       setBranches(b);
-      setBase(b.default ?? b.current ?? b.local[0] ?? "");
+      // 하위 워크트리는 부모 브랜치에서 시작한다
+      setBase((parentWt?.branch && b.local.includes(parentWt.branch) ? parentWt.branch : null) ?? b.default ?? b.current ?? b.local[0] ?? "");
     });
     return () => {
       alive = false;
     };
-  }, [repo, model]);
+  }, [repo, model, parentWt?.branch]);
 
   const effectiveBranch = branchEdited ? branch : branchFromName(name);
   const taken = !!branches?.local.includes(effectiveBranch);
   const ok = effectiveBranch.length > 0 && !taken;
   const submit = () => {
     if (!ok) return;
-    void model.newWorktree({ repo, name: name.trim(), branch: effectiveBranch, base: base || undefined, start });
+    void model.newWorktree({ repo, name: name.trim(), branch: effectiveBranch, base: base || undefined, start, parent: parentWt && parentWt.repo === repo ? parentWt.path : undefined });
     onClose();
   };
 
@@ -119,8 +121,12 @@ function NewWorktreeDialog({ initialRepo, onClose }: { initialRepo: string; onCl
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
-          <DialogTitle>새 워크트리</DialogTitle>
-          <DialogDescription>새 브랜치를 저장소 옆 폴더에 꺼내고 터미널을 띄운다.</DialogDescription>
+          <DialogTitle>{parentWt ? "하위 워크트리" : "새 워크트리"}</DialogTitle>
+          <DialogDescription>
+            {parentWt
+              ? `"${worktreeTitle(parentWt)}" 밑에 하위 워크트리를 만든다. 부모 브랜치에서 시작하고, 사이드바에서 부모 밑에 들여 보인다.`
+              : "새 브랜치를 저장소 옆 폴더에 꺼내고 터미널을 띄운다."}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <Field label="이름">
@@ -378,6 +384,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [repos, setRepos] = useState<Set<string>>(new Set());
   const [names, setNames] = useState(true);
+  const [lineage, setLineage] = useState(true);
   const [sessions, setSessions] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -392,6 +399,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
   }, [model]);
 
   const named = (scan?.worktrees ?? []).filter((w) => w.name);
+  const children = (scan?.worktrees ?? []).filter((w) => w.parent);
   const place = (s: OrcaSession) => {
     if (s.floating) return "떠 있는 터미널";
     const w = worktrees.find((x) => x.path === s.worktree);
@@ -411,6 +419,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
     await model.importOrca({
       repos: [...repos],
       names: names ? named.map((w) => ({ path: w.path, name: w.name! })) : [],
+      parents: lineage ? children.map((w) => ({ path: w.path, parent: w.parent! })) : [],
       sessions: scan.sessions.filter((s) => sessions.has(s.session_id)),
     });
     setBusy(false);
@@ -456,6 +465,14 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                 </span>
               </label>
             )}
+            {children.length > 0 && (
+              <label className={row}>
+                <Checkbox checked={lineage} onCheckedChange={(v) => setLineage(v === true)} />
+                <span>
+                  하위 워크트리 관계 {children.length}개 가져오기 <span className="text-muted-foreground">(사이드바에서 부모 워크트리 밑에 들여 보인다. thuminal 에서 부모를 정하지 않은 워크트리만)</span>
+                </span>
+              </label>
+            )}
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center">
                 <span className={cn(section, "flex-1")}>claude 세션 {scan.sessions.length} · 고른 세션은 새 탭에서 claude --resume 으로 이어진다</span>
@@ -496,7 +513,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
           <Button variant="outline" onClick={onClose} disabled={busy}>
             취소
           </Button>
-          <Button disabled={!scan || busy || (repos.size === 0 && sessions.size === 0 && !(names && named.length))} onClick={() => void run()}>
+          <Button disabled={!scan || busy || (repos.size === 0 && sessions.size === 0 && !(names && named.length) && !(lineage && children.length))} onClick={() => void run()}>
             {busy ? "가져오는 중…" : `가져오기 (프로젝트 ${repos.size} · 세션 ${sessions.size})`}
           </Button>
         </DialogFooter>

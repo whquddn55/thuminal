@@ -13,6 +13,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GearSixIcon,
+  GitForkIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   PushPinIcon,
@@ -32,6 +33,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "./components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
@@ -135,7 +139,8 @@ export function Sidebar() {
   const creating = useApp((s) => s.creating);
   const width = useApp((s) => s.sidebarWidth);
   const hasOther = useApp((s) => (s.layouts[OTHER_WORKSPACE]?.tabs.length ?? 0) > 0);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // 접은 묶음(저장소, 고정, 기타)과 접은 하위 워크트리(`lineage:<경로>`). 다시 켜도 남는다
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]));
   const pinned = worktrees.filter((w) => w.pinned);
   const order = (list: WorktreeInfo[]) => [...list].sort((a, b) => Number(b.is_main) - Number(a.is_main));
 
@@ -144,6 +149,7 @@ export function Sidebar() {
     if (next.has(key)) next.delete(key);
     else next.add(key);
     setCollapsed(next);
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
   };
 
   return (
@@ -208,9 +214,7 @@ export function Sidebar() {
               </>
             }
           >
-            {order(worktrees.filter((w) => w.repo === r.id && !w.pinned)).map((w) => (
-              <WorktreeCard key={w.path} w={w} />
-            ))}
+            <WorktreeTree list={order(worktrees.filter((w) => w.repo === r.id && !w.pinned))} collapsed={collapsed} onToggle={toggle} />
             {creating
               .filter((c) => c.repo === r.id)
               .map((c) => (
@@ -353,10 +357,102 @@ function useWorkspaceSessions(ws: WorkspaceId): SessionInfo[] {
   return useApp(useShallow((s: AppState) => sessionsOf(s.layouts[ws]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))));
 }
 
+const COLLAPSED_KEY = "thuminal.sidebarCollapsed";
+
+/** 저장소 안 워크트리를 부모 → 자식으로 늘어놓는다. 부모가 목록에 없으면(지웠거나 고정했으면) 맨 위로 올린다 */
+function WorktreeTree({ list, collapsed, onToggle }: { list: WorktreeInfo[]; collapsed: Set<string>; onToggle: (key: string) => void }) {
+  const paths = new Set(list.map((w) => w.path));
+  const kids = new Map<string, WorktreeInfo[]>();
+  const roots: WorktreeInfo[] = [];
+  for (const w of list) {
+    if (w.parent && w.parent !== w.path && paths.has(w.parent)) kids.set(w.parent, [...(kids.get(w.parent) ?? []), w]);
+    else roots.push(w);
+  }
+  // 부모가 돌고 도는 고리(데몬이 막지만 혹시)는 빠지지 않게 맨 위로 올린다
+  const seen = new Set<string>();
+  const walk = (w: WorktreeInfo) => {
+    if (seen.has(w.path)) return;
+    seen.add(w.path);
+    for (const k of kids.get(w.path) ?? []) walk(k);
+  };
+  roots.forEach(walk);
+  for (const w of list) if (!seen.has(w.path)) (roots.push(w), walk(w));
+  return (
+    <>
+      {roots.map((w) => (
+        <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={onToggle} />
+      ))}
+    </>
+  );
+}
+
+function descendantsOf(path: string, kids: Map<string, WorktreeInfo[]>): WorktreeInfo[] {
+  return (kids.get(path) ?? []).flatMap((k) => [k, ...descendantsOf(k.path, kids)]);
+}
+
+function WorktreeBranch({ w, kids, collapsed, onToggle }: { w: WorktreeInfo; kids: Map<string, WorktreeInfo[]>; collapsed: Set<string>; onToggle: (key: string) => void }) {
+  const mine = kids.get(w.path) ?? [];
+  const key = `lineage:${w.path}`;
+  const open = !collapsed.has(key);
+  return (
+    <>
+      <WorktreeCard w={w} />
+      {mine.length > 0 && <LineageToggle paths={descendantsOf(w.path, kids).map((d) => d.path)} count={mine.length} open={open} onToggle={() => onToggle(key)} />}
+      {mine.length > 0 && open && (
+        // 하위 워크트리는 부모 밑에 세로 안내선과 함께 들여 그린다
+        <div className="ml-3.5 border-l border-sidebar-border pl-0.5">
+          {mine.map((c) => (
+            <WorktreeBranch key={c.path} w={c} kids={kids} collapsed={collapsed} onToggle={onToggle} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 부모 카드 밑 "⑂ 3개 하위 · 상태별 개수 ▾" 단추. 접어도 하위 워크트리의 에이전트 상태가 보인다 */
+function LineageToggle({ paths, count, open, onToggle }: { paths: string[]; count: number; open: boolean; onToggle: () => void }) {
+  const statuses = useApp(
+    useShallow((s: AppState) => paths.map((p) => statusOf(sessionsOf(s.layouts[p]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))))),
+  );
+  const shown: Status[] = ["attention", "error", "working", "done"];
+  const counts = shown.map((st) => [st, statuses.filter((x) => x === st).length] as const).filter(([, n]) => n > 0);
+  return (
+    <div className="mb-0.5 ml-6 flex">
+      <button
+        className="flex h-5 items-center gap-1 rounded-md border border-sidebar-border px-1.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+        title={open ? "하위 워크트리 접기" : "하위 워크트리 펴기"}
+        onClick={onToggle}
+      >
+        <GitForkIcon className="size-2.5" />
+        <span className="tabular-nums">{count}</span>
+        <span>개 하위</span>
+        {counts.length > 0 && (
+          <span className="flex items-center gap-1 border-l border-sidebar-border pl-1">
+            {counts.map(([st, n]) => (
+              <span key={st} className="flex items-center gap-0.5 tabular-nums">
+                <StatusIndicator status={st} className="size-2.5" />
+                {n}
+              </span>
+            ))}
+          </span>
+        )}
+        <CaretDownIcon className={cn("size-2.5 transition-transform", !open && "-rotate-90")} />
+      </button>
+    </div>
+  );
+}
+
 function WorktreeCard({ w }: { w: WorktreeInfo }) {
   const model = useModel();
   const [renaming, setRenaming] = useState(false);
   const title = worktreeTitle(w);
+  const siblings = useApp(useShallow((s: AppState) => s.worktrees.filter((x) => x.repo === w.repo && x.path !== w.path)));
+  // 부모로 삼을 수 있는 워크트리: 같은 저장소에서 자기와 자기 밑의 워크트리를 뺀 것
+  const below = new Set<string>();
+  const grow = (p: string) => siblings.filter((x) => x.parent === p && !below.has(x.path)).forEach((x) => (below.add(x.path), grow(x.path)));
+  grow(w.path);
+  const parentChoices = siblings.filter((x) => !below.has(x.path) && x.path !== w.parent);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -383,6 +479,21 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
       <ContextMenuContent className="w-56">
         <ContextMenuItem onSelect={() => setRenaming(true)}>이름 바꾸기</ContextMenuItem>
         <ContextMenuItem onSelect={() => void model.togglePin(w)}>{w.pinned ? "고정 풀기" : "맨 위에 고정"}</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: w.repo, parent: w.path })}>하위 워크트리 만들기…</ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={parentChoices.length === 0}>부모 정하기</ContextMenuSubTrigger>
+          <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+            {parentChoices.map((p) => (
+              <ContextMenuItem key={p.path} onSelect={() => void model.setWorktreeParent(w, p.path)}>
+                <span className="truncate">{worktreeTitle(p)}</span>
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuItem disabled={!w.parent} onSelect={() => void model.setWorktreeParent(w, null)}>
+          부모에서 떼기
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           onSelect={() => {

@@ -106,7 +106,7 @@ fn worktree_path(id: &str) -> Option<String> {
 pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
     let home = orca_home().filter(|h| h.is_dir()).ok_or("Orca 데이터 폴더가 없다 (~/Library/Application Support/orca)")?;
     let profile = profile_dir(&home);
-    let docs = documents(&profile, &["repos", "worktreeMeta", "workspaceSession"])?;
+    let docs = documents(&profile, &["repos", "worktreeMeta", "workspaceSession", "worktreeLineageById"])?;
 
     let repos: Vec<OrcaRepo> = docs
         .get("repos")
@@ -123,7 +123,15 @@ pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
         })
         .collect();
 
-    let worktrees: Vec<OrcaWorktree> = docs
+    // 하위 워크트리: 자식 워크트리 id → 부모 워크트리 id
+    let parents: BTreeMap<String, String> = docs
+        .get("worktreeLineageById")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, l)| Some((worktree_path(str_of(l, "worktreeId")?)?, worktree_path(str_of(l, "parentWorktreeId")?)?)))
+        .collect();
+    let mut worktrees: Vec<OrcaWorktree> = docs
         .get("worktreeMeta")
         .and_then(Value::as_object)
         .into_iter()
@@ -132,9 +140,16 @@ pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
             let path = worktree_path(id)?;
             let name = str_of(m, "displayName").map(str::to_string);
             let comment = str_of(m, "comment").map(str::to_string);
-            (name.is_some() || comment.is_some()).then_some(OrcaWorktree { path, name, comment })
+            let parent = parents.get(&path).cloned();
+            (name.is_some() || comment.is_some() || parent.is_some()).then_some(OrcaWorktree { path, name, comment, parent })
         })
         .collect();
+    // 이름·메모 없이 부모만 있는 워크트리
+    for (child, parent) in &parents {
+        if !worktrees.iter().any(|w| &w.path == child) {
+            worktrees.push(OrcaWorktree { path: child.clone(), name: None, comment: None, parent: Some(parent.clone()) });
+        }
+    }
 
     // 탭 제목에 붙은 claude 세션과, 잠재운 에이전트 기록에 남은 claude 세션을 모은다
     let mut found: BTreeMap<String, (Option<String>, String, Option<String>, bool)> = BTreeMap::new();

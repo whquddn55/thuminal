@@ -158,9 +158,9 @@ export class TauriHostApi implements HostApi {
     return invoke("list_worktrees");
   }
 
-  createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string }): Promise<WorktreeInfo> {
+  createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo> {
     return req<WorktreeInfo>(
-      { type: "create_worktree", repo, branch, base: opts?.base ?? null, name: opts?.name ?? null },
+      { type: "create_worktree", repo, branch, base: opts?.base ?? null, name: opts?.name ?? null, parent: opts?.parent ?? null },
       (r) => r.worktree,
     );
   }
@@ -169,8 +169,10 @@ export class TauriHostApi implements HostApi {
     return req<RepoInfo[]>({ type: "add_repos", path }, (r) => r.repos);
   }
 
-  updateWorktree(path: string, change: { name?: string; pinned?: boolean }): Promise<void> {
-    return req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null });
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void> {
+    // 데몬은 빈 글을 "부모에서 떼기" 로 받는다
+    const parent = change.parent === undefined ? null : (change.parent ?? "");
+    return req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent });
   }
 
   getLayout(workspace?: string): Promise<WorkspaceLayout[]> {

@@ -186,7 +186,7 @@ async fn list_worktrees(state: State<'_, AppState>) -> CmdResult<Vec<WorktreeInf
 
 #[tauri::command]
 async fn create_worktree(state: State<'_, AppState>, repo: String, branch: String, base: Option<String>) -> CmdResult<WorktreeInfo> {
-    state.client().await?.create_worktree(repo, branch, base).await.map_err(err)
+    state.client().await?.create_worktree(repo, branch, base, None).await.map_err(err)
 }
 
 #[tauri::command]

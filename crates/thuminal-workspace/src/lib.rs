@@ -85,6 +85,15 @@ struct WorktreeMeta {
     name: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pinned: bool,
+    /// 부모 워크트리 (하위 워크트리면)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent: Option<PathBuf>,
+}
+
+impl WorktreeMeta {
+    fn is_empty(&self) -> bool {
+        self.name.is_none() && !self.pinned && self.parent.is_none()
+    }
 }
 
 /// 파일 보기로 읽는 최대 크기
@@ -204,6 +213,7 @@ impl Workspace {
                     head: w.head,
                     name: m.name,
                     pinned: m.pinned,
+                    parent: m.parent.map(|p| p.to_string_lossy().into_owned()),
                 });
             }
         }
@@ -211,7 +221,7 @@ impl Workspace {
     }
 
     /// 저장소 옆 폴더 `<저장소>-thm-wt-<브랜치>` 에 새 워크트리를 만든다
-    pub fn create_worktree(&self, repo: &str, branch: &str, base: Option<&str>, name: Option<&str>) -> Result<WorktreeInfo, WorkspaceError> {
+    pub fn create_worktree(&self, repo: &str, branch: &str, base: Option<&str>, name: Option<&str>, parent: Option<&str>) -> Result<WorktreeInfo, WorkspaceError> {
         if branch.trim().is_empty() {
             return Err(WorkspaceError::Invalid("브랜치 이름이 비었다".into()));
         }
@@ -221,11 +231,14 @@ impl Workspace {
         if path.exists() {
             return Err(WorkspaceError::Invalid(format!("이미 있는 폴더: {}", path.display())));
         }
+        // 부모는 만들기 전에 확인한다 (등록한 워크트리여야 한다)
+        let parent = parent.filter(|p| !p.is_empty()).map(|p| self.known_worktree(p)).transpose()?;
         self.vcs.create_worktree(&root, &path, branch, base)?;
-        info!(event = "worktree_created", repo, branch, path = %path.display());
-        if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        info!(event = "worktree_created", repo, branch, path = %path.display(), parent = ?parent);
+        let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+        if name.is_some() || parent.is_some() {
             let canonical = std::fs::canonicalize(&path).unwrap_or(path.clone());
-            self.meta.lock().unwrap().insert(canonical, WorktreeMeta { name: Some(n.to_string()), pinned: false });
+            self.meta.lock().unwrap().insert(canonical, WorktreeMeta { name, pinned: false, parent });
             let repos = self.repos.lock().unwrap().clone();
             self.save(&repos)?;
         }
@@ -246,7 +259,17 @@ impl Workspace {
         let path_s = path.to_string_lossy();
         let branch = self.worktrees(Some(repo))?.into_iter().find(|w| w.path == path_s).and_then(|w| w.branch);
         self.vcs.remove_worktree(&root, path, force)?;
-        self.meta.lock().unwrap().remove(path);
+        {
+            // 지운 워크트리의 하위 워크트리는 그 부모 밑으로 옮긴다 (없으면 맨 위로)
+            let mut meta = self.meta.lock().unwrap();
+            let grand = meta.remove(path).and_then(|m| m.parent);
+            for m in meta.values_mut().filter(|m| m.parent.as_deref() == Some(path)) {
+                m.parent = grand.clone();
+            }
+            meta.retain(|_, m| !m.is_empty());
+        }
+        let repos = self.repos.lock().unwrap().clone();
+        self.save(&repos)?;
         let mut note = String::new();
         if let (true, Some(b)) = (delete_branch, branch) {
             match self.vcs.delete_branch(&root, &b, force_branch) {
@@ -298,8 +321,25 @@ impl Workspace {
         }
     }
 
-    pub fn update_worktree(&self, path: &str, name: Option<String>, pinned: Option<bool>) -> Result<(), WorkspaceError> {
+    pub fn update_worktree(&self, path: &str, name: Option<String>, pinned: Option<bool>, parent: Option<String>) -> Result<(), WorkspaceError> {
         let p = self.known_worktree(path)?;
+        // 부모: 빈 글이면 뗀다. 자기 자신이나 자기 밑의 워크트리는 부모로 삼지 못한다
+        let parent = match parent {
+            Some(s) if s.is_empty() => Some(None),
+            Some(s) => {
+                let q = self.known_worktree(&s)?;
+                let meta = self.meta.lock().unwrap();
+                let mut cur = Some(q.clone());
+                while let Some(c) = cur {
+                    if c == p {
+                        return Err(WorkspaceError::Invalid("자기 자신이나 자기 밑의 워크트리를 부모로 삼을 수 없다".into()));
+                    }
+                    cur = meta.get(&c).and_then(|m| m.parent.clone());
+                }
+                Some(Some(q))
+            }
+            None => None,
+        };
         {
             let mut meta = self.meta.lock().unwrap();
             let m = meta.entry(p.clone()).or_default();
@@ -309,7 +349,10 @@ impl Workspace {
             if let Some(pin) = pinned {
                 m.pinned = pin;
             }
-            if m.name.is_none() && !m.pinned {
+            if let Some(par) = parent {
+                m.parent = par;
+            }
+            if m.is_empty() {
                 meta.remove(&p);
             }
         }

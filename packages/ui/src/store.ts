@@ -48,10 +48,12 @@ export interface NewWorktree {
   base?: string;
   /** 처음 띄울 것 */
   start: "shell" | "claude" | "none";
+  /** 이 워크트리의 하위 워크트리로 만든다 */
+  parent?: string;
 }
 
 export type Dialog =
-  | { kind: "new-worktree"; repo: string }
+  | { kind: "new-worktree"; repo: string; parent?: string }
   | { kind: "delete-worktree"; worktree: WorktreeInfo }
   | { kind: "jump" }
   | { kind: "settings" }
@@ -835,7 +837,7 @@ export class AppModel {
    * Orca 에서 고른 것을 가져온다: 저장소 등록, (이름 없는) 워크트리에 Orca 표시 이름, claude 세션은 새 탭에서 `claude --resume`.
    * 하나가 실패해도 나머지는 한다. 끝나면 무엇을 했는지 알린다
    */
-  importOrca = async (pick: { repos: string[]; names: { path: string; name: string }[]; sessions: OrcaSession[] }) => {
+  importOrca = async (pick: { repos: string[]; names: { path: string; name: string }[]; parents: { path: string; parent: string }[]; sessions: OrcaSession[] }) => {
     const host = this.services.host;
     const failed: string[] = [];
     let repos = 0;
@@ -852,6 +854,12 @@ export class AppModel {
     let names = 0;
     const unnamed = pick.names.filter(({ path }) => this.get().worktrees.some((w) => w.path === path && !w.name));
     await Promise.all(unnamed.map(({ path, name }) => host.updateWorktree(path, { name }).then(() => names++, () => undefined)));
+    // 하위 워크트리: thuminal 에 부모가 없는 워크트리만, 부모도 등록돼 있을 때
+    let parents = 0;
+    const wts = this.get().worktrees;
+    const orphan = pick.parents.filter(({ path, parent }) => wts.some((w) => w.path === path && !w.parent) && wts.some((w) => w.path === parent));
+    // 부모가 돌고 도는 경우는 데몬이 거절한다. 차례로 보낸다
+    for (const { path, parent } of orphan) await host.updateWorktree(path, { parent }).then(() => parents++, () => undefined);
     let sessions = 0;
     for (const s of pick.sessions) {
       const wts = this.get().worktrees;
@@ -865,8 +873,8 @@ export class AppModel {
         (e) => failed.push(`${s.title || s.session_id}: ${e}`),
       );
     }
-    if (names) await this.refreshWorkspace();
-    const done = `Orca 에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, claude 세션 ${sessions}개`;
+    if (names || parents) await this.refreshWorkspace();
+    const done = `Orca 에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, 하위 워크트리 ${parents}개, claude 세션 ${sessions}개`;
     if (failed.length) this.fail(`${done}. 못 가져온 것: ${failed.join(" · ")}`);
     else this.notice(done);
   };
@@ -880,7 +888,7 @@ export class AppModel {
     const item = { repo: req.repo, branch: req.branch };
     this.set((s) => ({ creating: [...s.creating, item] }));
     try {
-      const w = await this.services.host.createWorktree(req.repo, req.branch, { base: req.base, name: req.name || undefined });
+      const w = await this.services.host.createWorktree(req.repo, req.branch, { base: req.base, name: req.name || undefined, parent: req.parent });
       await this.refreshWorkspace();
       this.select(w.path);
       if (req.start === "shell") await this.newTab(w.path);
@@ -910,6 +918,11 @@ export class AppModel {
 
   togglePin = async (w: WorktreeInfo) => {
     await this.services.host.updateWorktree(w.path, { pinned: !w.pinned }).catch(this.fail);
+  };
+
+  /** 부모 워크트리를 바꾼다 (null 이면 부모에서 뗀다) */
+  setWorktreeParent = async (w: WorktreeInfo, parent: string | null) => {
+    await this.services.host.updateWorktree(w.path, { parent }).catch(this.fail);
   };
 }
 

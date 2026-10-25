@@ -73,6 +73,8 @@ export interface WorktreeInfo {
   /** 사용자가 붙인 이름 */
   name: string | null;
   pinned: boolean;
+  /** 부모 워크트리 경로 (하위 워크트리면) */
+  parent?: string | null;
 }
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed" | "untracked" | "conflicted";
@@ -214,8 +216,8 @@ export interface LayoutResult {
 
 export interface OrcaScan {
   repos: { path: string; name: string; exists: boolean; registered: boolean }[];
-  /** 표시 이름이나 메모가 있는 워크트리 */
-  worktrees: { path: string; name: string | null; comment: string | null }[];
+  /** 표시 이름·메모·부모가 있는 워크트리 */
+  worktrees: { path: string; name: string | null; comment: string | null; parent?: string | null }[];
   /** Orca 탭에 붙은 claude 세션 (최근에 쓴 것부터) */
   sessions: OrcaSession[];
 }

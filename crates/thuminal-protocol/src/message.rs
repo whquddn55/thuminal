@@ -176,6 +176,9 @@ pub struct WorktreeInfo {
     /// 프로젝트 맨 위에 고정
     #[serde(default)]
     pub pinned: bool,
+    /// 부모 워크트리 경로 (하위 워크트리면). 사이드바가 부모 카드 밑에 들여 그린다
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,14 +348,19 @@ pub enum Request {
         /// 사용자가 붙인 이름
         #[serde(default)]
         name: Option<String>,
+        /// 부모 워크트리 경로 (하위 워크트리로 만든다)
+        #[serde(default)]
+        parent: Option<String>,
     },
-    /// 워크트리 이름이나 고정을 바꾼다 (None 이면 그대로 둔다. 이름을 빈 글로 주면 지운다)
+    /// 워크트리 이름·고정·부모를 바꾼다 (None 이면 그대로 둔다. 이름·부모를 빈 글로 주면 지운다)
     UpdateWorktree {
         path: String,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
         pinned: Option<bool>,
+        #[serde(default)]
+        parent: Option<String>,
     },
     GitStatus { worktree: String },
     /// 파일 하나의 diff. `staged` 면 스테이지된 변경, 아니면 작업 폴더 변경 (새 파일 포함)
@@ -524,7 +532,7 @@ pub enum ResponseResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrcaScan {
     pub repos: Vec<OrcaRepo>,
-    /// 표시 이름이나 메모가 있는 워크트리
+    /// 표시 이름·메모·부모가 있는 워크트리
     pub worktrees: Vec<OrcaWorktree>,
     /// Orca 탭에 붙은 claude 세션 (최근에 쓴 것부터)
     pub sessions: Vec<OrcaSession>,
@@ -545,6 +553,9 @@ pub struct OrcaWorktree {
     pub path: String,
     pub name: Option<String>,
     pub comment: Option<String>,
+    /// Orca 에서 이 워크트리의 부모 워크트리 경로 (하위 워크트리)
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
