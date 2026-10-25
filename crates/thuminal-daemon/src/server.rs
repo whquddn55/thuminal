@@ -271,6 +271,11 @@ impl Server {
                     Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
                 }
             }
+            Request::StopClaudeSession { session_id } => match tokio::task::spawn_blocking(move || crate::orca::stop_session(&session_id)).await {
+                Ok(Ok(())) => Ok(Response::Ok),
+                Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
+                Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+            },
             Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings() }),
             Request::SetAgentSettings { settings } => {
                 m.set_agent_settings(settings.clone());
@@ -297,7 +302,10 @@ impl Server {
             | Request::GitPush { .. }
             | Request::ListBranches { .. }
             | Request::ListDir { .. }
-            | Request::ReadFile { .. }) => self.workspace_request(req).await,
+            | Request::ReadFile { .. }
+            | Request::SearchText { .. }
+            | Request::ListFiles { .. }
+            | Request::GitLineCounts { .. }) => self.workspace_request(req).await,
             Request::Shutdown => {
                 info!(event = "shutdown_requested", conn);
                 *self.stop_mode.lock().unwrap() = StopMode::Clear;
@@ -369,6 +377,15 @@ impl Server {
                 Request::ListBranches { repo } => Response::Branches { branches: ws.branches(&repo)? },
                 Request::ListDir { worktree, dir } => Response::Dir { entries: ws.list_dir(&worktree, &dir)? },
                 Request::ReadFile { worktree, file } => Response::File { file: ws.read_file(&worktree, &file)? },
+                Request::SearchText { worktree, query, case_sensitive } => {
+                    let (hits, truncated) = ws.search(&worktree, &query, case_sensitive)?;
+                    Response::SearchHits { hits, truncated }
+                }
+                Request::ListFiles { worktree } => {
+                    let (files, truncated) = ws.list_files(&worktree)?;
+                    Response::FileList { files, truncated }
+                }
+                Request::GitLineCounts { worktree } => Response::LineCounts { counts: ws.line_counts(&worktree)? },
                 Request::RemoveRepo { repo } => {
                     ws.remove_repo(&repo)?;
                     Response::Ok
@@ -437,6 +454,9 @@ fn request_kind(r: &Request) -> &'static str {
         Request::ListBranches { .. } => "list_branches",
         Request::ListDir { .. } => "list_dir",
         Request::ReadFile { .. } => "read_file",
+        Request::SearchText { .. } => "search_text",
+        Request::ListFiles { .. } => "list_files",
+        Request::GitLineCounts { .. } => "git_line_counts",
         Request::RemoveRepo { .. } => "remove_repo",
         Request::ListWorktrees { .. } => "list_worktrees",
         Request::CreateWorktree { .. } => "create_worktree",
@@ -449,6 +469,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::FindCommands { .. } => "find_commands",
         Request::Tmux { .. } => "tmux",
         Request::ScanOrca => "scan_orca",
+        Request::StopClaudeSession { .. } => "stop_claude_session",
         Request::GetAgentSettings => "get_agent_settings",
         Request::SetAgentSettings { .. } => "set_agent_settings",
     }
@@ -463,6 +484,9 @@ fn is_slow(r: &Request) -> bool {
             | Request::ListBranches { .. }
             | Request::ListDir { .. }
             | Request::ReadFile { .. }
+            | Request::SearchText { .. }
+            | Request::ListFiles { .. }
+            | Request::GitLineCounts { .. }
             | Request::ListWorktrees { .. }
             | Request::ListRepos
             | Request::FindCommands { .. }

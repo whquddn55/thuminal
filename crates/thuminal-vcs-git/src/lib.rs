@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use thuminal_workspace::protocol::{BranchList, ChangeKind, FileChange, GitStatus};
+use thuminal_workspace::protocol::{BranchList, ChangeKind, FileChange, GitStatus, LineCount, SearchHit};
 use thuminal_workspace::{Vcs, VcsError, VcsWorktree};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -270,6 +270,66 @@ impl Vcs for GitCli {
         if out.status.success() { Ok(text) } else { Err(VcsError::Command(text)) }
     }
 
+    fn grep(&self, worktree: &Path, query: &str, case_sensitive: bool, max: usize) -> Result<(Vec<SearchHit>, bool), VcsError> {
+        // 글 그대로(-F), 바이너리 빼고(-I), 새 파일도(--untracked, 무시하는 파일은 뺀다), 파일마다 50줄까지
+        let mut args = vec!["grep", "-n", "-z", "-I", "-F", "--untracked", "--no-color", "--max-count=50"];
+        if !case_sensitive {
+            args.push("-i");
+        }
+        args.extend(["-e", query]);
+        let out = Command::new("git").arg("-C").arg(worktree).args(&args).env("GIT_PAGER", "cat").output().map_err(|e| VcsError::Command(e.to_string()))?;
+        // 찾은 것이 없으면 종료 코드 1 이다
+        if !out.status.success() && out.status.code() != Some(1) {
+            return Err(VcsError::Command(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut hits = Vec::new();
+        for line in text.lines() {
+            if hits.len() >= max {
+                return Ok((hits, true));
+            }
+            // -z: 경로\0줄번호\0내용
+            let mut parts = line.splitn(3, '\0');
+            let (Some(path), Some(no), Some(body)) = (parts.next(), parts.next(), parts.next()) else { continue };
+            let body = body.trim_end();
+            let text: String = if body.chars().count() > 300 { body.chars().take(300).collect() } else { body.to_string() };
+            hits.push(SearchHit { path: path.to_string(), line: no.parse().unwrap_or(0), text });
+        }
+        Ok((hits, false))
+    }
+
+    fn list_files(&self, worktree: &Path, max: usize) -> Result<(Vec<String>, bool), VcsError> {
+        let out = git_raw(worktree, &["ls-files", "-co", "--exclude-standard", "-z"])?;
+        let mut files: Vec<String> = out.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+        files.sort();
+        files.dedup();
+        let cut = files.len() > max;
+        files.truncate(max);
+        Ok((files, cut))
+    }
+
+    fn line_counts(&self, worktree: &Path) -> Result<Vec<LineCount>, VcsError> {
+        let mut out = Vec::new();
+        for staged in [false, true] {
+            let args: &[&str] = if staged { &["diff", "--cached", "--numstat", "-z"] } else { &["diff", "--numstat", "-z"] };
+            let raw = git_raw(worktree, args)?;
+            let mut parts = raw.split(|b| *b == 0).map(|s| String::from_utf8_lossy(s).into_owned());
+            // "더함\t지움\t경로" 또는 이름 바꿈이면 "더함\t지움\t" 다음에 옛 경로, 새 경로
+            while let Some(head) = parts.next() {
+                let mut f = head.splitn(3, '\t');
+                let (Some(a), Some(r), Some(p)) = (f.next(), f.next(), f.next()) else { continue };
+                let path = if p.is_empty() {
+                    parts.next();
+                    parts.next().unwrap_or_default()
+                } else {
+                    p.to_string()
+                };
+                out.push(LineCount { path, staged, added: a.parse().ok(), removed: r.parse().ok() });
+            }
+        }
+        Ok(out)
+    }
+
     fn ignored(&self, worktree: &Path, paths: &[String]) -> Result<Vec<String>, VcsError> {
         use std::io::Write;
         if paths.is_empty() {
@@ -369,6 +429,34 @@ mod tests {
 
         // 다시 열어도 저장소 목록이 남아 있다
         assert_eq!(Workspace::open(Arc::new(GitCli), home.path()).repos().len(), 1);
+        drop(dir);
+    }
+
+    #[test]
+    fn grep_list_files_line_counts() {
+        let (dir, root) = repo();
+        let g = GitCli;
+        std::fs::write(root.join("a.txt"), "hello\nworld\nHello again\n").unwrap();
+        git(&root, &["add", "a.txt"]).unwrap();
+        git(&root, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"]).unwrap();
+        std::fs::write(root.join("a.txt"), "hello\nworld!\nHello again\nnew line\n").unwrap();
+        std::fs::write(root.join("새 파일.md"), "hello 한글\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(root.join("ignored.txt"), "hello\n").unwrap();
+
+        let (hits, cut) = g.grep(&root, "hello", false, 100).unwrap();
+        assert!(!cut);
+        let mut got: Vec<_> = hits.iter().map(|h| (h.path.as_str(), h.line)).collect();
+        got.sort();
+        assert_eq!(got, vec![("a.txt", 1), ("a.txt", 3), ("새 파일.md", 1)], "무시하는 파일은 빼고, 대소문자 없이");
+        assert_eq!(g.grep(&root, "Hello", true, 100).unwrap().0.len(), 1);
+        assert_eq!(g.grep(&root, "hello", false, 2).unwrap(), (hits[..2].to_vec(), true));
+
+        let (files, _) = g.list_files(&root, 100).unwrap();
+        assert_eq!(files, vec![".gitignore", "a.txt", "새 파일.md"]);
+
+        let counts = g.line_counts(&root).unwrap();
+        assert_eq!(counts, vec![LineCount { path: "a.txt".into(), staged: false, added: Some(2), removed: Some(1) }]);
         drop(dir);
     }
 

@@ -3,11 +3,12 @@
 // 맨 위 찾기 칸에 글을 치면 열린 탭, 에이전트, 메뉴 항목을 거르고, 맞는 것이 없으면 그 글을 새 탭에서 실행한다.
 // 그 아래 새 터미널과 패널 항목, 맨 아래 설치된 에이전트(claude, codex 등)를 띄우는 항목이 있다.
 
-import { FilesIcon, GitDiffIcon, GlobeIcon, MagnifyingGlassIcon, PlayIcon, PlusIcon, RobotIcon, SquaresFourIcon, TerminalWindowIcon } from "@phosphor-icons/react";
+import { FilesIcon, GitDiffIcon, GlobeIcon, MagnifyingGlassIcon, PlayIcon, PlusIcon, SquaresFourIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 import type { WorkspaceId } from "@thuminal/term-core";
 
+import { AgentIcon } from "./agent-icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { AGENTS } from "./agents";
 import { looksLikeUrl, toUrl } from "./BrowserPane";
@@ -49,11 +50,12 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
   const menu: Option[] = [
     { id: "terminal", label: "새 터미널", hint: "terminal shell", icon: <TerminalWindowIcon />, run: newTerminal },
     ...(browserOk ? [{ id: "browser", label: "새 브라우저 탭", hint: "browser web", icon: <GlobeIcon />, run: () => newBrowser() }] : []),
-    ...installed.map((a) => ({ id: `agent:${a.cmd}`, label: a.label, hint: a.cmd, icon: <RobotIcon />, run: () => launch(a.cmd) })),
+    ...installed.map((a) => ({ id: `agent:${a.cmd}`, label: a.label, hint: a.cmd, icon: <AgentIcon kind={a.cmd} />, run: () => launch(a.cmd) })),
     ...(inWorktree
       ? [
           { id: "files", label: "파일 패널", hint: "files explorer", icon: <FilesIcon />, run: () => model.setPanel("files") },
           { id: "changes", label: "변경 패널", hint: "changes git diff commit", icon: <GitDiffIcon />, run: () => model.setPanel("changes") },
+          { id: "search", label: "파일 내용 찾기", hint: "search grep find", icon: <MagnifyingGlassIcon />, run: () => model.setPanel("search") },
         ]
       : []),
   ];
@@ -175,6 +177,11 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
               변경 보기
               <DropdownMenuShortcut>⌘⇧G</DropdownMenuShortcut>
             </DropdownMenuItem>
+            <DropdownMenuItem className={ITEM} onSelect={() => model.setPanel("search")}>
+              <MagnifyingGlassIcon className="size-4 text-muted-foreground" />
+              파일 내용 찾기…
+              <DropdownMenuShortcut>⌘⇧F</DropdownMenuShortcut>
+            </DropdownMenuItem>
           </>
         )}
         {installed.length > 0 && (
@@ -182,7 +189,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
             <DropdownMenuSeparator />
             {installed.map((a) => (
               <DropdownMenuItem key={a.cmd} className={ITEM} onSelect={() => launch(a.cmd)}>
-                <RobotIcon className="size-4 text-muted-foreground" />
+                <AgentIcon kind={a.cmd} />
                 {a.label}
                 <DropdownMenuShortcut className="font-mono tracking-normal">{a.cmd}</DropdownMenuShortcut>
               </DropdownMenuItem>

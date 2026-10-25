@@ -10,14 +10,12 @@ import {
   ChatCircleDotsIcon,
   DotsThreeIcon,
   DownloadSimpleIcon,
-  FolderIcon,
   FolderPlusIcon,
   GearSixIcon,
   GitForkIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   PushPinIcon,
-  RobotIcon,
   TerminalWindowIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
@@ -27,6 +25,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { AgentInfo, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
+import { AgentIcon } from "./agent-icons";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -198,7 +197,8 @@ export function Sidebar() {
             key={r.id}
             label={r.name}
             title={r.path}
-            icon={<FolderIcon className="size-3.5" />}
+            icon={<RepoMark name={r.name} />}
+            count={worktrees.filter((w) => w.repo === r.id).length}
             collapsed={collapsed.has(r.id)}
             onToggle={() => toggle(r.id)}
             onNew={() => model.setDialog({ kind: "new-worktree", repo: r.id })}
@@ -290,10 +290,26 @@ function SidebarResizer() {
   );
 }
 
+/** 저장소 표시: 이름 첫 글자를 이름에서 뽑은 색 사각형에 (Orca 의 저장소 배지처럼) */
+function RepoMark({ name }: { name: string }) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return (
+    <span className="flex size-4 items-center justify-center rounded-[4px] text-[9px] leading-none font-bold text-white uppercase" style={{ background: `hsl(${h} 45% 45%)` }}>
+      {[...name][0] ?? "?"}
+    </span>
+  );
+}
+
+/**
+ * 사이드바 묶음 (저장소, 고정, 기타). 묶음 사이에 구분선을 두고, 안의 카드는 머리 줄보다 들여 그린다
+ * (저장소 이름과 워크트리가 같은 단계로 보이지 않게)
+ */
 function Group({
   label,
   title,
   icon,
+  count,
   collapsed,
   onToggle,
   onNew,
@@ -303,6 +319,8 @@ function Group({
   label: string;
   title?: string;
   icon: React.ReactNode;
+  /** 머리 줄 오른쪽에 흐리게 보일 개수 (워크트리 수) */
+  count?: number;
   collapsed: boolean;
   onToggle: () => void;
   onNew?: () => void;
@@ -311,16 +329,17 @@ function Group({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div className="pt-1">
+    <div className="border-t border-sidebar-border/70 pt-1.5 pb-1 first:border-t-0 first:pt-1">
       <div
         role="button"
         tabIndex={0}
         title={title}
-        className="group sticky top-0 z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2.5"
+        className="group sticky top-0 z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2"
         onClick={onToggle}
       >
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-4">{label}</span>
+        {count !== undefined && <span className={cn("text-[11px] tabular-nums text-muted-foreground/70 group-hover:hidden", menuOpen && "hidden")}>{count}</span>}
         <span
           className={cn("flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100", menuOpen && "opacity-100")}
           onClick={(e) => e.stopPropagation()}
@@ -347,7 +366,7 @@ function Group({
           </span>
         </span>
       </div>
-      {!collapsed && <div className="flex flex-col gap-1.5 pt-0.5">{children}</div>}
+      {!collapsed && <div className="flex flex-col gap-1.5 pt-0.5 pl-3">{children}</div>}
     </div>
   );
 }
@@ -400,7 +419,7 @@ function WorktreeBranch({ w, kids, collapsed, onToggle }: { w: WorktreeInfo; kid
       {mine.length > 0 && <LineageToggle paths={descendantsOf(w.path, kids).map((d) => d.path)} count={mine.length} open={open} onToggle={() => onToggle(key)} />}
       {mine.length > 0 && open && (
         // 하위 워크트리는 부모 밑에 세로 안내선과 함께 들여 그린다
-        <div className="ml-3.5 border-l border-sidebar-border pl-0.5">
+        <div className="ml-3.5 flex flex-col gap-1.5 border-l border-sidebar-border pl-0.5">
           {mine.map((c) => (
             <WorktreeBranch key={c.path} w={c} kids={kids} collapsed={collapsed} onToggle={onToggle} />
           ))}
@@ -673,7 +692,7 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
       }}
     >
       <StatusIndicator status={agentStatus(agent)} className="size-2.5" />
-      <RobotIcon className="size-[13px] shrink-0" />
+      <AgentIcon kind={agent.kind} className="size-[13px]" />
       <span className="min-w-0 flex-1 truncate">
         <span className="text-muted-foreground/90">{lead}</span>
         {trail && <span className="text-muted-foreground/60"> - {trail}</span>}

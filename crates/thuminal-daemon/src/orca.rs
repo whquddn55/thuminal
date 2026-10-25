@@ -80,8 +80,12 @@ fn transcript(session: &str, hint: Option<&str>) -> Option<(String, u64)> {
     Some((cwd, at))
 }
 
-/// 지금 떠 있는 claude 의 세션 id. claude 는 `~/.claude/sessions/<pid>.json` 에 pid 와 세션 id 를 적는다
-fn running_sessions() -> std::collections::BTreeSet<String> {
+fn alive(pid: i32) -> bool {
+    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+}
+
+/// 지금 떠 있는 claude: 세션 id → pid. claude 는 `~/.claude/sessions/<pid>.json` 에 pid 와 세션 id 를 적는다
+fn running_sessions() -> BTreeMap<String, i32> {
     let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude/sessions")) else { return Default::default() };
     std::fs::read_dir(dir)
         .into_iter()
@@ -89,13 +93,32 @@ fn running_sessions() -> std::collections::BTreeSet<String> {
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
         .filter_map(|e| serde_json::from_slice::<Value>(&std::fs::read(e.path()).ok()?).ok())
-        .filter(|v| {
+        .filter_map(|v| {
             // 끝난 프로세스의 파일이 남아 있을 수 있다. 살아 있는지 본다
             let pid = v.get("pid").and_then(Value::as_i64).unwrap_or(0) as i32;
-            pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+            alive(pid).then(|| str_of(&v, "sessionId").map(|s| (s.to_string(), pid)))?
         })
-        .filter_map(|v| str_of(&v, "sessionId").map(str::to_string))
         .collect()
+}
+
+/// 이 세션으로 떠 있는 claude 를 끝낸다. claude 는 SIGTERM 을 받으면 기록을 남기고 0.2초쯤에 끝난다
+pub fn stop_session(session_id: &str) -> Result<(), String> {
+    let Some(&pid) = running_sessions().get(session_id) else { return Ok(()) };
+    // 다른 프로세스를 잘못 끄지 않게 이름을 확인한다 (pid 는 다시 쓰일 수 있다)
+    let comm = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().map_err(|e| e.to_string())?;
+    let comm = String::from_utf8_lossy(&comm.stdout);
+    if !comm.contains("claude") && !comm.trim().rsplit('/').next().is_some_and(|n| n.starts_with("2.")) {
+        return Err(format!("pid {pid} 은 claude 가 아니다 ({})", comm.trim()));
+    }
+    info!(event = "claude_stop", session = session_id, pid);
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    for _ in 0..50 {
+        if !alive(pid) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(format!("claude(pid {pid})가 5초 안에 끝나지 않았다"))
 }
 
 /// Orca 워크트리 id(`<저장소 id>::<경로>`)에서 경로
@@ -184,7 +207,7 @@ pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
             // 기록 파일이 없으면 이어 붙일 수 없다
             let (cwd, updated_at) = transcript(&id, hint.as_deref())?;
             let floating = worktree.is_none();
-            let running = running.contains(&id);
+            let running = running.contains_key(&id);
             Some(OrcaSession { session_id: id, title, worktree, cwd, updated_at, floating, teams, running })
         })
         .collect();

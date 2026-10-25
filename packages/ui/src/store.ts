@@ -39,7 +39,8 @@ export { FLOATING_WORKSPACE, OTHER_WORKSPACE };
 /** 플로팅 터미널 세션 꼬리표 (데몬이 이 꼬리표로 플로팅 워크스페이스에 넣는다) */
 export const FLOATING_LABEL = "floating";
 
-export type Panel = "files" | "changes" | null;
+/** 오른쪽 사이드바의 탭 (null 이면 닫혀 있다) */
+export type Panel = "files" | "changes" | "search" | null;
 
 export interface NewWorktree {
   repo: string;
@@ -85,6 +86,10 @@ export interface AppState {
   /** 고른 워크스페이스 (워크트리 경로나 OTHER_WORKSPACE) */
   active: WorkspaceId;
   panel: Panel;
+  /** 오른쪽 사이드바 폭 (CSS 픽셀). 다시 켜도 남는다 */
+  rightWidth: number;
+  /** 워크트리마다 쓰다 만 커밋 메시지 (워크트리를 바꿔도 남는다) */
+  commitDrafts: Record<string, string>;
   floating: FloatingState;
   /** 키보드가 가는 곳 */
   focusArea: "main" | "floating";
@@ -147,6 +152,8 @@ const SIDEBAR_KEY = "thuminal.sidebarWidth";
 const SEEN_KEY = "thuminal.seen";
 const SIDEBAR_OPEN_KEY = "thuminal.sidebarOpen";
 const RECENT_KEY = "thuminal.recent";
+const RIGHT_WIDTH_KEY = "thuminal.rightWidth";
+const RIGHT_TAB_KEY = "thuminal.rightTab";
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -175,6 +182,8 @@ export class AppModel {
       layouts: {},
       active: OTHER_WORKSPACE,
       panel: null,
+      rightWidth: Number(localStorage.getItem(RIGHT_WIDTH_KEY)) || 300,
+      commitDrafts: {},
       floating: { ...loadJson<FloatingState>(FLOATING_KEY, { open: false, rect: null, maximized: false }), open: false },
       focusArea: "main",
       dialog: null,
@@ -467,7 +476,23 @@ export class AppModel {
     this.select(list[(i + delta + list.length) % list.length]);
   };
 
-  setPanel = (p: Panel) => this.set((s) => ({ panel: s.panel === p ? null : p }));
+  /** 그 탭을 연다. 이미 그 탭이 열려 있으면 오른쪽 사이드바를 닫는다 */
+  setPanel = (p: Panel) => {
+    if (p) localStorage.setItem(RIGHT_TAB_KEY, p);
+    this.set((s) => ({ panel: s.panel === p ? null : p }));
+  };
+
+  /** 오른쪽 사이드바를 열고 닫는다 (⌘L). 열면 마지막에 본 탭 */
+  toggleRight = () =>
+    this.set((s) => ({ panel: s.panel ? null : ((localStorage.getItem(RIGHT_TAB_KEY) as Panel) ?? "changes") }));
+
+  setRightWidth = (w: number) => {
+    const width = Math.round(Math.min(720, Math.max(220, w)));
+    localStorage.setItem(RIGHT_WIDTH_KEY, String(width));
+    this.set({ rightWidth: width });
+  };
+
+  setCommitDraft = (ws: string, text: string) => this.set((s) => ({ commitDrafts: { ...s.commitDrafts, [ws]: text } }));
   setDialog = (d: Dialog) => this.set({ dialog: d });
   setFocusArea = (a: AppState["focusArea"]) => this.set({ focusArea: a });
 
@@ -674,6 +699,8 @@ export class AppModel {
     for (const tab of this.get().layouts[ws]?.tabs ?? [])
       for (const p of panesOf(tab.root))
         if (p.type === "doc" && sameDoc(p.doc, doc)) {
+          // 같은 파일이 열려 있으면 그 칸으로. 줄이 다르면 그 줄로 옮긴다
+          if ((p.doc.line ?? "") !== (doc.line ?? "")) void this.op({ op: "update_doc", pane: byId(p.id), doc: { ...p.doc, ...doc } });
           void this.op({ op: "focus", target: byId(p.id) });
           return;
         }
@@ -837,7 +864,18 @@ export class AppModel {
    * Orca 에서 고른 것을 가져온다: 저장소 등록, (이름 없는) 워크트리에 Orca 표시 이름, claude 세션은 새 탭에서 `claude --resume`.
    * 하나가 실패해도 나머지는 한다. 끝나면 무엇을 했는지 알린다
    */
-  importOrca = async (pick: { repos: string[]; names: { path: string; name: string }[]; parents: { path: string; parent: string }[]; sessions: OrcaSession[] }) => {
+  /**
+   * 떠 있는 claude 세션(`running`)은 `running` 방식으로 가져온다:
+   * - fork: `--fork-session` 으로 기록을 복사한 새 세션을 연다. Orca 쪽 claude 는 그대로 돈다
+   * - move: Orca 쪽 claude 를 끝낸 뒤 같은 세션을 이어 붙인다
+   */
+  importOrca = async (pick: {
+    repos: string[];
+    names: { path: string; name: string }[];
+    parents: { path: string; parent: string }[];
+    sessions: OrcaSession[];
+    running: "fork" | "move";
+  }) => {
     const host = this.services.host;
     const failed: string[] = [];
     let repos = 0;
@@ -867,8 +905,17 @@ export class AppModel {
       const ws = s.floating
         ? FLOATING_WORKSPACE
         : (wts.find((w) => w.path === s.worktree)?.path ?? wts.filter((w) => inside(w.path)).sort((a, b) => b.path.length - a.path.length)[0]?.path ?? OTHER_WORKSPACE);
+      let input = `claude --resume ${s.session_id}`;
+      if (s.running && pick.running === "fork") input += " --fork-session";
+      if (s.running && pick.running === "move") {
+        const stopped = await host.stopClaudeSession(s.session_id).then(
+          () => true,
+          (e) => (failed.push(`${s.title || s.session_id}: Orca 쪽 claude 를 끄지 못했다 (${e})`), false),
+        );
+        if (!stopped) continue;
+      }
       // 셸에서 치게 해서 thuminal claude 실행기(훅·권한·팀)로 뜨게 한다
-      await host.layout({ op: "new_tab", workspace: ws, spawn: { command: [], input: `claude --resume ${s.session_id}`, cwd: s.cwd, env: {} }, focus: false }).then(
+      await host.layout({ op: "new_tab", workspace: ws, spawn: { command: [], input, cwd: s.cwd, env: {} }, focus: false }).then(
         () => sessions++,
         (e) => failed.push(`${s.title || s.session_id}: ${e}`),
       );

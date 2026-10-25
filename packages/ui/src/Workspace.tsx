@@ -10,7 +10,6 @@ import {
   FileTextIcon,
   GlobeIcon,
   GitDiffIcon,
-  RobotIcon,
   SquareSplitHorizontalIcon,
   SquareSplitVerticalIcon,
   XIcon,
@@ -22,6 +21,7 @@ import type { Pane, PaneNode, Renderer, SessionInfo, Tab, WorkspaceId } from "@t
 
 import { type PageState, pageStore } from "./browser-state";
 import { BrowserPane } from "./BrowserPane";
+import { AgentIcon } from "./agent-icons";
 import { Button } from "./components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "./components/ui/context-menu";
 import { beginDrag, useDrag } from "./dnd";
@@ -356,7 +356,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           {session?.agent && (
             <>
               <StatusIndicator status={agentStatus(session.agent)} className="size-2.5" />
-              <RobotIcon className="size-3 shrink-0" />
+              <AgentIcon kind={session.agent.kind} className="size-3" />
             </>
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>

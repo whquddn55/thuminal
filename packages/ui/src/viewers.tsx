@@ -1,6 +1,6 @@
 // 문서 칸: diff 보기, 파일 보기.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { FileContent, HostApi } from "@thuminal/term-core";
 
@@ -40,6 +40,8 @@ export interface DocSpec {
   file: string;
   /** diff 면 스테이지된 변경을 보는지 ("1") */
   staged?: string;
+  /** 파일이면 이 줄(1 부터)로 스크롤하고 강조한다 (검색 결과에서 열 때) */
+  line?: string;
 }
 
 const ROW = "font-mono text-xs leading-[1.5]";
@@ -54,6 +56,8 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
   const [file, setFile] = useState<FileContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const staged = doc.staged === "1";
+  const line = Number(doc.line) || 0;
+  const body = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -69,7 +73,17 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
     // generation: git 상태가 바뀔 때마다 다시 읽는다
   }, [host, worktree, doc.kind, doc.file, staged, generation]);
 
-  const frame = (children: React.ReactNode) => <div className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">{children}</div>;
+  // 검색 결과에서 열었으면 그 줄을 가운데로
+  useEffect(() => {
+    if (!line || !file) return;
+    body.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" });
+  }, [line, file]);
+
+  const frame = (children: React.ReactNode) => (
+    <div ref={body} className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">
+      {children}
+    </div>
+  );
   if (error) return frame(<div className="p-4 text-destructive">{error}</div>);
 
   if (doc.kind === "diff") {
@@ -129,7 +143,7 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
         <table className={cn("w-full border-collapse", ROW)}>
           <tbody>
             {(file.text ?? "").split("\n").map((t, i) => (
-              <tr key={i}>
+              <tr key={i} data-line={i + 1} className={cn(i + 1 === line && "bg-amber-500/15")}>
                 <td className={LN}>{i + 1}</td>
                 <td className="whitespace-pre px-2">{t}</td>
               </tr>

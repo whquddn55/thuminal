@@ -233,6 +233,27 @@ pub struct DirEntry {
     pub ignored: bool,
 }
 
+/// 파일 내용 찾기 결과 한 줄
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchHit {
+    /// 워크트리 기준 상대 경로
+    pub path: String,
+    /// 1 부터
+    pub line: u32,
+    /// 그 줄 (너무 길면 자른다)
+    pub text: String,
+}
+
+/// 파일 하나의 바뀐 줄 수 (`git diff --numstat`). 바이너리면 None
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineCount {
+    pub path: String,
+    /// 스테이지된 변경의 줄 수인지 (아니면 작업 폴더 변경)
+    pub staged: bool,
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileContent {
     /// 글자 파일이면 내용 (너무 크면 앞부분만)
@@ -390,6 +411,17 @@ pub enum Request {
         dir: String,
     },
     ReadFile { worktree: String, file: String },
+    /// 워크트리 안 파일 내용에서 글을 찾는다 (git grep, 무시하는 파일은 뺀다). 결과가 많으면 앞부분만
+    SearchText {
+        worktree: String,
+        query: String,
+        #[serde(default)]
+        case_sensitive: bool,
+    },
+    /// 워크트리 안 파일 경로 전부 (추적 + 무시하지 않는 새 파일). 이름 거르기·빠른 열기에 쓴다
+    ListFiles { worktree: String },
+    /// 바뀐 파일마다 더하고 지운 줄 수
+    GitLineCounts { worktree: String },
     /// 워크트리를 지운다. 답은 `Text`: 알릴 것(예: 브랜치를 남긴 까닭)이 있으면 그 글, 없으면 빈 글
     RemoveWorktree {
         repo: String,
@@ -419,6 +451,8 @@ pub enum Request {
     FindCommands { names: Vec<String> },
     /// Orca 에 등록한 저장소·워크트리 이름·claude 세션을 읽는다 (바꾸지 않는다)
     ScanOrca,
+    /// 이 claude 세션으로 떠 있는 claude 프로세스를 끝낸다 (SIGTERM, 끝날 때까지 기다린다). 가져와 이어 붙이기 전에 쓴다
+    StopClaudeSession { session_id: String },
     GetAgentSettings,
     /// 에이전트를 띄울 때 붙일 옵션을 바꾼다. 다음에 띄우는 에이전트부터 적용된다 (이미 뜬 셸에서 치는 `claude` 도)
     SetAgentSettings { settings: AgentSettings },
@@ -454,6 +488,9 @@ pub enum Response {
     Branches { branches: BranchList },
     Dir { entries: Vec<DirEntry> },
     File { file: FileContent },
+    SearchHits { hits: Vec<SearchHit>, truncated: bool },
+    FileList { files: Vec<String>, truncated: bool },
+    LineCounts { counts: Vec<LineCount> },
     Worktrees { worktrees: Vec<WorktreeInfo> },
     Worktree { worktree: WorktreeInfo },
     Layouts { layouts: Vec<WorkspaceLayout> },

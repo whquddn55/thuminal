@@ -3,6 +3,7 @@
 // 화면 코드는 이 인터페이스로만 데몬과 운영체제에 닿는다. 껍데기를 바꾸면 이 구현만 새로 쓴다.
 
 import type {
+  AgentSettings,
   BranchList,
   CreateSession,
   DaemonEvent,
@@ -11,13 +12,14 @@ import type {
   GitStatus,
   LayoutOp,
   LayoutResult,
+  LineCount,
+  OrcaScan,
   RepoInfo,
+  SearchHit,
   SessionId,
   SessionInfo,
   SnapshotFormat,
   TerminalColors,
-  AgentSettings,
-  OrcaScan,
   WorkspaceLayout,
   WorktreeInfo,
 } from "./protocol";
@@ -71,12 +73,18 @@ export interface GitApi {
   commit(worktree: string, message: string, all: boolean): Promise<string>;
   push(worktree: string): Promise<string>;
   branches(repo: string): Promise<BranchList>;
+  /** 바뀐 파일마다 더하고 지운 줄 수 */
+  lineCounts(worktree: string): Promise<LineCount[]>;
 }
 
 /** 워크트리 안 파일 읽기 */
 export interface FilesApi {
   list(worktree: string, dir: string): Promise<DirEntry[]>;
   read(worktree: string, file: string): Promise<FileContent>;
+  /** 파일 내용에서 글을 찾는다 (무시하는 파일은 뺀다). 많으면 앞부분과 truncated */
+  search(worktree: string, query: string, caseSensitive: boolean): Promise<{ hits: SearchHit[]; truncated: boolean }>;
+  /** 워크트리 안 파일 경로 전부 (추적 + 무시하지 않는 새 파일) */
+  all(worktree: string): Promise<{ files: string[]; truncated: boolean }>;
 }
 
 export interface Attachment {
@@ -142,6 +150,8 @@ export interface HostApi {
   setTerminalColors(colors: TerminalColors): Promise<void>;
   /** Orca 에 등록한 저장소·워크트리 이름·claude 세션 (읽기만) */
   scanOrca(): Promise<OrcaScan>;
+  /** 이 claude 세션으로 떠 있는 claude 를 끝낸다 (Orca 에서 옮겨 올 때) */
+  stopClaudeSession(sessionId: string): Promise<void>;
   /** 에이전트를 띄울 때 붙일 옵션 (데몬이 들고 있다) */
   getAgentSettings(): Promise<AgentSettings>;
   setAgentSettings(settings: AgentSettings): Promise<AgentSettings>;

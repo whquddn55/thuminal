@@ -6,29 +6,31 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
+  AgentSettings,
   Attachment,
+  BranchList,
   BrowserEvent,
   BrowserHost,
-  BranchList,
+  CreateSession,
+  DaemonEvent,
+  DaemonInfo,
   DirEntry,
   FileContent,
   FilesApi,
   GitApi,
   GitStatus,
-  CreateSession,
+  HostApi,
   LayoutOp,
   LayoutResult,
-  TerminalColors,
-  AgentSettings,
+  LineCount,
   OrcaScan,
-  WorkspaceLayout,
-  DaemonEvent,
-  DaemonInfo,
-  HostApi,
   RepoInfo,
+  SearchHit,
   SessionId,
   SessionInfo,
   SnapshotFormat,
+  TerminalColors,
+  WorkspaceLayout,
   WorktreeInfo,
 } from "@thuminal/term-core";
 
@@ -48,11 +50,15 @@ export class TauriHostApi implements HostApi {
     commit: (worktree, message, all) => req<string>({ type: "git_commit", worktree, message, all }, (r) => r.text),
     push: (worktree) => req<string>({ type: "git_push", worktree }, (r) => r.text),
     branches: (repo) => req<BranchList>({ type: "list_branches", repo }, (r) => r.branches),
+    lineCounts: (worktree) => req<LineCount[]>({ type: "git_line_counts", worktree }, (r) => r.counts),
   };
 
   readonly files: FilesApi = {
     list: (worktree, dir) => req<DirEntry[]>({ type: "list_dir", worktree, dir }, (r) => r.entries),
     read: (worktree, file) => req<FileContent>({ type: "read_file", worktree, file }, (r) => r.file),
+    search: (worktree, query, caseSensitive) =>
+      req({ type: "search_text", worktree, query, case_sensitive: caseSensitive }, (r) => ({ hits: r.hits as SearchHit[], truncated: !!r.truncated })),
+    all: (worktree) => req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
   };
 
   readonly browser: BrowserHost = {
@@ -197,6 +203,10 @@ export class TauriHostApi implements HostApi {
 
   scanOrca(): Promise<OrcaScan> {
     return req<OrcaScan>({ type: "scan_orca" }, (r) => r.scan);
+  }
+
+  stopClaudeSession(sessionId: string): Promise<void> {
+    return req({ type: "stop_claude_session", session_id: sessionId });
   }
 
   getAgentSettings(): Promise<AgentSettings> {

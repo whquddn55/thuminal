@@ -1,14 +1,30 @@
-// 오른쪽 패널: 파일 탐색기와 소스 관리(변경 파일, 커밋, 푸시).
+// 오른쪽 사이드바: 위쪽 탭(파일 · 변경 · 검색) 하나로 묶는다 (Orca 와 같다).
+// - 파일: 파일 트리, 이름으로 거르기
+// - 변경: 소스 관리 (스테이지됨 · 변경 · 새 파일, 줄 수, 커밋, 푸시)
+// - 검색: 워크트리 안 파일 내용 찾기. 결과를 누르면 그 파일의 그 줄을 연다
+// 왼쪽 경계를 끌어 폭을 바꾼다.
 
-import { ArrowClockwiseIcon, ArrowCounterClockwiseIcon, CaretDownIcon, CaretRightIcon, GitBranchIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import {
+  ArrowClockwiseIcon,
+  ArrowCounterClockwiseIcon,
+  CaretDownIcon,
+  CaretRightIcon,
+  FilesIcon,
+  GitBranchIcon,
+  GitDiffIcon,
+  MagnifyingGlassIcon,
+  MinusIcon,
+  PlusIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ChangeKind, DirEntry, FileChange, GitStatus } from "@thuminal/term-core";
+import type { ChangeKind, DirEntry, FileChange, GitStatus, LineCount, SearchHit } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "./components/ui/context-menu";
 import { cn } from "./lib/utils";
-import { useApp, useModel } from "./store";
+import { type Panel, useApp, useModel } from "./store";
 
 const LETTER: Record<ChangeKind, string> = {
   added: "A",
@@ -44,26 +60,110 @@ function dirOf(path: string) {
 
 const HEAD = "flex items-center justify-between px-3 pt-2.5 pb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground";
 
+const TABS: { id: NonNullable<Panel>; label: string; key: string; icon: React.ReactNode }[] = [
+  { id: "files", label: "파일", key: "⌘⇧E", icon: <FilesIcon /> },
+  { id: "changes", label: "변경", key: "⌘⇧G", icon: <GitDiffIcon /> },
+  { id: "search", label: "검색", key: "⌘⇧F", icon: <MagnifyingGlassIcon /> },
+];
+
 export function RightPanel() {
+  const model = useModel();
   const panel = useApp((s) => s.panel);
   const worktree = useApp((s) => s.active);
   const status = useApp((s) => s.status[s.active]);
+  const width = useApp((s) => s.rightWidth);
+  const changes = status?.files.length ?? 0;
   return (
-    <aside className="flex min-h-0 w-72 shrink-0 flex-col overflow-auto border-l bg-sidebar text-sidebar-foreground thm-scroll">
-      {panel === "changes" ? <ChangesPanel worktree={worktree} status={status} /> : <FilesPanel worktree={worktree} status={status} />}
+    <aside className="relative flex min-h-0 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground" style={{ width }}>
+      <RightResizer />
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            title={`${t.label} (${t.key})`}
+            className={cn(
+              "flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground [&>svg]:size-3.5",
+              panel === t.id && "bg-sidebar-accent text-foreground",
+            )}
+            onClick={() => panel !== t.id && model.setPanel(t.id)}
+          >
+            {t.icon}
+            {t.label}
+            {t.id === "changes" && changes > 0 && <span className="rounded bg-foreground/10 px-1 text-[10px] tabular-nums">{changes}</span>}
+          </button>
+        ))}
+        <button
+          className="ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          title="오른쪽 사이드바 닫기 (⌘L)"
+          onClick={() => model.toggleRight()}
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto thm-scroll">
+        {panel === "changes" ? (
+          <ChangesPanel worktree={worktree} status={status} />
+        ) : panel === "search" ? (
+          <SearchPanel key={worktree} worktree={worktree} />
+        ) : (
+          <FilesPanel worktree={worktree} status={status} />
+        )}
+      </div>
     </aside>
+  );
+}
+
+/** 오른쪽 사이드바 왼쪽 경계를 끌어 폭을 바꾼다 */
+function RightResizer() {
+  const model = useModel();
+  return (
+    <div
+      className="group absolute top-0 -left-1.5 z-10 flex h-full w-3 cursor-col-resize justify-center"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const x0 = e.clientX;
+        const w0 = model.get().rightWidth;
+        const move = (ev: PointerEvent) => model.setRightWidth(w0 - (ev.clientX - x0));
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          document.body.style.cursor = "";
+        };
+        document.body.style.cursor = "col-resize";
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      }}
+    >
+      <div className="h-full w-px transition-colors group-hover:bg-ring/50 group-active:bg-ring" />
+    </div>
   );
 }
 
 function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatus | undefined }) {
   const model = useModel();
   const host = model.services.host;
-  const [message, setMessage] = useState("");
+  // 쓰다 만 메시지는 워크트리마다 store 에 둔다 (워크트리를 바꿔도 남는다)
+  const message = useApp((s) => s.commitDrafts[worktree] ?? "");
+  const setMessage = (t: string) => model.setCommitDraft(worktree, t);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const files = status?.files ?? [];
   const staged = files.filter((f) => f.staged);
-  const unstaged = files.filter((f) => f.unstaged);
+  const unstaged = files.filter((f) => f.unstaged && f.unstaged !== "untracked");
+  const untracked = files.filter((f) => f.unstaged === "untracked");
+  // 파일마다 더하고 지운 줄 수. 바뀐 파일 목록이 바뀔 때마다 다시 묻는다
+  const [counts, setCounts] = useState<Map<string, LineCount>>(new Map());
+  const filesKey = JSON.stringify(files);
+  useEffect(() => {
+    let alive = true;
+    void host.git.lineCounts(worktree).then(
+      (list) => alive && setCounts(new Map(list.map((c) => [`${c.staged}:${c.path}`, c]))),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [host, worktree, filesKey]);
 
   const run = async (label: string, f: () => Promise<unknown>) => {
     setBusy(label);
@@ -132,6 +232,7 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
                 </>
               )}
             </span>
+            <LineCountBadge count={counts.get(`${isStaged}:${f.path}`)} />
             <span className={cn("w-3.5 text-center font-mono text-2xs", TONE[kind])}>{LETTER[kind]}</span>
           </div>
         </ContextMenuTrigger>
@@ -224,7 +325,19 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
       {files.length === 0 && <div className="p-4 text-muted-foreground">바뀐 파일이 없다</div>}
       {group("스테이지됨", staged, true)}
       {group("변경", unstaged, false)}
+      {group("새 파일", untracked, false)}
     </div>
+  );
+}
+
+/** +3 −1 (바이너리면 비운다) */
+function LineCountBadge({ count }: { count: LineCount | undefined }) {
+  if (!count || count.added === null) return null;
+  return (
+    <span className="shrink-0 font-mono text-[10px] tabular-nums group-hover:hidden">
+      {!!count.added && <span className="text-emerald-500">+{count.added}</span>}
+      {!!count.removed && <span className="ml-0.5 text-red-500">−{count.removed}</span>}
+    </span>
   );
 }
 
@@ -233,6 +346,7 @@ function FilesPanel({ worktree, status }: { worktree: string; status: GitStatus 
   const model = useModel();
   const [open, setOpen] = useState<Set<string>>(new Set([""]));
   const [entries, setEntries] = useState<Map<string, DirEntry[]>>(new Map());
+  const [filter, setFilter] = useState("");
 
   const load = async (dir: string) => {
     try {
@@ -298,7 +412,193 @@ function FilesPanel({ worktree, status }: { worktree: string; status: GitStatus 
           <ArrowClockwiseIcon />
         </Button>
       </div>
-      {render("", 0)}
+      <div className="px-2 pb-1.5">
+        <SearchInput value={filter} onChange={setFilter} placeholder="파일 이름으로 거르기" />
+      </div>
+      {filter.trim() ? <NameMatches worktree={worktree} query={filter.trim()} kindOf={kindOf} /> : render("", 0)}
+    </div>
+  );
+}
+
+/** 이름 거르기 결과: 파일 이름에 든 것 먼저, 그다음 경로에 든 것, 글자가 차례로 든 것 */
+function NameMatches({ worktree, query, kindOf }: { worktree: string; query: string; kindOf: (path: string, isDir: boolean) => ChangeKind | null }) {
+  const model = useModel();
+  const [all, setAll] = useState<{ files: string[]; truncated: boolean } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void model.services.host.files.all(worktree).then((r) => alive && setAll(r), model.fail);
+    return () => {
+      alive = false;
+    };
+  }, [model, worktree]);
+  const matches = useMemo(() => {
+    if (!all) return [];
+    const q = query.toLowerCase();
+    const scored: [number, string][] = [];
+    for (const f of all.files) {
+      const low = f.toLowerCase();
+      const name = low.slice(low.lastIndexOf("/") + 1);
+      let score = -1;
+      if (name.startsWith(q)) score = 0;
+      else if (name.includes(q)) score = 1;
+      else if (low.includes(q)) score = 2;
+      else {
+        let i = 0;
+        for (const ch of low) if (ch === q[i]) i++;
+        if (i === q.length) score = 3;
+      }
+      if (score >= 0) scored.push([score, f]);
+    }
+    scored.sort((a, b) => a[0] - b[0] || a[1].length - b[1].length);
+    return scored.slice(0, 300).map(([, f]) => f);
+  }, [all, query]);
+  if (!all) return <div className="px-3 py-2 text-muted-foreground">파일 목록을 읽는 중…</div>;
+  if (!matches.length) return <div className="px-3 py-2 text-muted-foreground">맞는 파일이 없다</div>;
+  return (
+    <div>
+      {matches.map((f) => {
+        const kind = kindOf(f, false);
+        return (
+          <div
+            key={f}
+            className="flex h-[22px] cursor-pointer items-center gap-1.5 px-3 whitespace-nowrap hover:bg-sidebar-accent"
+            title={f}
+            onClick={() => model.openDoc({ kind: "file", file: f })}
+          >
+            <span className={cn(kind && TONE[kind])}>{base(f)}</span>
+            <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground [direction:rtl] text-left">{dirOf(f)}</span>
+          </div>
+        );
+      })}
+      {(matches.length === 300 || all.truncated) && <div className="px-3 py-1.5 text-2xs text-muted-foreground">더 있다. 더 길게 쳐서 좁힌다</div>}
+    </div>
+  );
+}
+
+function SearchInput({
+  value,
+  onChange,
+  placeholder,
+  autoFocus,
+  children,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  autoFocus?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-7 items-center gap-1.5 rounded-md border bg-background px-2 focus-within:border-ring">
+      <MagnifyingGlassIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <input
+        autoFocus={autoFocus}
+        className="h-full min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+        placeholder={placeholder}
+        value={value}
+        spellCheck={false}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onChange("")}
+      />
+      {value && (
+        <button className="text-muted-foreground hover:text-foreground" title="지우기" onClick={() => onChange("")}>
+          <XIcon className="size-3" />
+        </button>
+      )}
+      {children}
+    </div>
+  );
+}
+
+/** 워크트리 안 파일 내용 찾기. 결과는 파일별로 묶고, 줄을 누르면 그 줄을 연다 */
+function SearchPanel({ worktree }: { worktree: string }) {
+  const model = useModel();
+  const [query, setQuery] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [result, setResult] = useState<{ hits: SearchHit[]; truncated: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const seq = useRef(0);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResult(null);
+      return;
+    }
+    // 치는 동안은 기다렸다가 멈추면 찾는다
+    const n = ++seq.current;
+    const t = setTimeout(() => {
+      setBusy(true);
+      void model.services.host.files.search(worktree, q, caseSensitive).then(
+        (r) => n === seq.current && setResult(r),
+        (e) => n === seq.current && model.fail(e),
+      ).finally(() => n === seq.current && setBusy(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [model, worktree, query, caseSensitive]);
+
+  const groups = useMemo(() => {
+    const m = new Map<string, SearchHit[]>();
+    for (const h of result?.hits ?? []) m.set(h.path, [...(m.get(h.path) ?? []), h]);
+    return [...m.entries()];
+  }, [result]);
+
+  /** 찾은 글을 칠한다 */
+  const mark = (text: string) => {
+    const q = query.trim();
+    const hay = caseSensitive ? text : text.toLowerCase();
+    const needle = caseSensitive ? q : q.toLowerCase();
+    const i = hay.indexOf(needle);
+    if (i < 0) return text;
+    // 긴 줄은 찾은 자리 앞을 줄인다
+    const from = Math.max(0, i - 24);
+    return (
+      <>
+        {from > 0 && "…"}
+        {text.slice(from, i)}
+        <mark className="rounded-[2px] bg-amber-400/40 text-foreground">{text.slice(i, i + q.length)}</mark>
+        {text.slice(i + q.length)}
+      </>
+    );
+  };
+
+  return (
+    <div className="flex flex-col">
+      <div className="px-2 pt-2.5 pb-1.5">
+        <SearchInput value={query} onChange={setQuery} placeholder="파일 내용에서 찾기" autoFocus>
+          <button
+            className={cn("rounded px-1 font-mono text-[10px] text-muted-foreground hover:text-foreground", caseSensitive && "bg-accent text-foreground")}
+            title="대소문자 구분"
+            onClick={() => setCaseSensitive((v) => !v)}
+          >
+            Aa
+          </button>
+        </SearchInput>
+      </div>
+      {query.trim() && (
+        <div className="px-3 pb-1 text-2xs text-muted-foreground">
+          {busy && !result ? "찾는 중…" : result ? `${groups.length}개 파일 · ${result.hits.length}곳${result.truncated ? " (앞부분만)" : ""}` : ""}
+        </div>
+      )}
+      {groups.map(([path, hits]) => (
+        <div key={path} className="pb-1">
+          <div className="flex h-[22px] items-center gap-1.5 px-3 whitespace-nowrap" title={path}>
+            <span className="font-medium">{base(path)}</span>
+            <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground [direction:rtl] text-left">{dirOf(path)}</span>
+            <span className="rounded bg-foreground/10 px-1 text-[10px] tabular-nums">{hits.length}</span>
+          </div>
+          {hits.map((h) => (
+            <div
+              key={`${h.line}:${h.text}`}
+              className="flex cursor-pointer items-baseline gap-2 py-px pr-2 pl-5 font-mono text-[11px] hover:bg-sidebar-accent"
+              onClick={() => model.openDoc({ kind: "file", file: h.path, line: String(h.line) })}
+            >
+              <span className="w-8 shrink-0 text-right text-muted-foreground/60 tabular-nums">{h.line}</span>
+              <span className="min-w-0 truncate whitespace-pre">{mark(h.text.trim())}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+      {query.trim() && result && result.hits.length === 0 && <div className="px-3 py-2 text-muted-foreground">찾은 것이 없다</div>}
     </div>
   );
 }

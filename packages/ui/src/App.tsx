@@ -1,4 +1,4 @@
-import { FilesIcon, GitDiffIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
+import { SidebarSimpleIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo } from "react";
 
 import { Button } from "./components/ui/button";
@@ -75,6 +75,9 @@ function useShortcuts(model: AppModel) {
       }
       if (e.shiftKey && key === "e") return run(() => model.setPanel("files"));
       if (e.shiftKey && key === "g") return run(() => model.setPanel("changes"));
+      if (e.shiftKey && key === "f") return run(() => model.setPanel("search"));
+      // 브라우저 칸이면 위에서 주소 칸으로 갔다. 그 밖에는 오른쪽 사이드바 (Orca 와 같다)
+      if (key === "l" && !e.shiftKey && !e.altKey) return run(() => model.toggleRight());
       if (e.shiftKey && key === "enter") return run(() => model.zoom());
       if (key === "d") return run(() => void model.split(e.shiftKey ? "down" : "right"));
       if (key === "t" && !e.shiftKey) return run(() => void model.newTab());
@@ -135,15 +138,10 @@ function Shell() {
         <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
           <TabBar ws={active} windowDrag className="h-full flex-1">
             {inWorktree && (
-              <div className="flex items-center gap-0.5">
-                <PanelButton on={panel === "files"} label="파일 (⌘⇧E)" onClick={() => model.setPanel("files")}>
-                  <FilesIcon />
-                </PanelButton>
-                <PanelButton on={panel === "changes"} label="변경 (⌘⇧G)" onClick={() => model.setPanel("changes")}>
-                  <GitDiffIcon />
-                  {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
-                </PanelButton>
-              </div>
+              <PanelButton on={!!panel} label="오른쪽 사이드바 — 파일 · 변경 · 검색 (⌘L)" onClick={() => model.toggleRight()}>
+                {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
+                <SidebarSimpleIcon className="-scale-x-100" />
+              </PanelButton>
             )}
           </TabBar>
         </div>

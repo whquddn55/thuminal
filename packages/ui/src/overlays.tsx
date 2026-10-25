@@ -385,6 +385,9 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
   const [repos, setRepos] = useState<Set<string>>(new Set());
   const [names, setNames] = useState(true);
   const [lineage, setLineage] = useState(true);
+  // 떠 있는 claude 도 가져올지, 가져온다면 복사본(fork)으로 갈지 옮겨 올지(Orca 쪽은 끈다)
+  const [takeRunning, setTakeRunning] = useState(false);
+  const [runningMode, setRunningMode] = useState<"fork" | "move">("fork");
   const [sessions, setSessions] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -412,7 +415,8 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
     else next.delete(v);
     return next;
   };
-  const free = (scan?.sessions ?? []).filter((s) => !s.running);
+  const free = (scan?.sessions ?? []).filter((s) => takeRunning || !s.running);
+  const runningCount = (scan?.sessions ?? []).filter((s) => s.running).length;
   const run = async () => {
     if (!scan) return;
     setBusy(true);
@@ -420,7 +424,8 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
       repos: [...repos],
       names: names ? named.map((w) => ({ path: w.path, name: w.name! })) : [],
       parents: lineage ? children.map((w) => ({ path: w.path, parent: w.parent! })) : [],
-      sessions: scan.sessions.filter((s) => sessions.has(s.session_id)),
+      sessions: scan.sessions.filter((s) => sessions.has(s.session_id) && (takeRunning || !s.running)),
+      running: runningMode,
     });
     setBusy(false);
     onClose();
@@ -487,10 +492,14 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
               </div>
               {scan.sessions.map((x) => {
                 return (
-                  <label key={x.session_id} className={cn(row, x.running && "opacity-60")} title={x.running ? "이 세션으로 claude 가 지금 떠 있다 (Orca 등). 거기서 끈 뒤 가져온다" : undefined}>
+                  <label
+                    key={x.session_id}
+                    className={cn(row, x.running && !takeRunning && "opacity-60")}
+                    title={x.running && !takeRunning ? "이 세션으로 claude 가 지금 떠 있다 (Orca 등). 아래 \"떠 있는 claude 도 가져오기\" 를 켜면 고를 수 있다" : undefined}
+                  >
                     <Checkbox
                       checked={sessions.has(x.session_id)}
-                      disabled={x.running}
+                      disabled={x.running && !takeRunning}
                       onCheckedChange={(v) => setSessions((s) => toggle(s, x.session_id, v === true))}
                     />
                     <span className="min-w-0 flex-1 truncate">{x.title || x.session_id}</span>
@@ -501,11 +510,38 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                 );
               })}
             </div>
-            {scan.sessions.length > free.length && (
-              <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                "지금 떠 있음" 세션은 claude 가 그 세션으로 아직 돌고 있다 (Orca 등). 또 띄우면 두 claude 가 한 세션을 같이 쓰게 되므로 고를 수 없다. 거기서
-                claude 를 끈 뒤 이 창을 다시 연다.
-              </p>
+            {runningCount > 0 && (
+              <div className="flex flex-col gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs">
+                <label className="flex items-center gap-2">
+                  <Checkbox
+                    checked={takeRunning}
+                    onCheckedChange={(v) => {
+                      setTakeRunning(v === true);
+                      if (v !== true) setSessions((s) => new Set([...s].filter((id) => !scan.sessions.find((x) => x.session_id === id)?.running)));
+                    }}
+                  />
+                  <span>
+                    떠 있는 claude 도 가져오기 <span className="text-muted-foreground">("지금 떠 있음" {runningCount}개. 이 대화를 하는 claude 도 들어 있을 수 있다)</span>
+                  </span>
+                </label>
+                {takeRunning && (
+                  <div className="ml-6 flex flex-col gap-1.5">
+                    <label className="flex items-start gap-2">
+                      <input type="radio" className="mt-0.5" checked={runningMode === "fork"} onChange={() => setRunningMode("fork")} />
+                      <span>
+                        복사본으로 이어 가기 <span className="text-muted-foreground">— 대화 기록을 복사한 새 세션으로 연다 (claude --fork-session). Orca 쪽 claude 는 그대로 돌고, 지금부터 두 대화가 따로 간다</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2">
+                      <input type="radio" className="mt-0.5" checked={runningMode === "move"} onChange={() => setRunningMode("move")} />
+                      <span>
+                        옮겨 오기 <span className="text-muted-foreground">— Orca 쪽 claude 를 끝내고(기록은 남는다) 같은 세션을 이어 붙인다. 하던 일이 있으면 멈춘다</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+                {!takeRunning && <span className="text-amber-700 dark:text-amber-300">켜지 않으면 "지금 떠 있음" 세션은 고를 수 없다 (두 claude 가 한 세션을 같이 쓰지 않게)</span>}
+              </div>
             )}
           </div>
         )}

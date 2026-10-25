@@ -108,6 +108,22 @@ export interface DirEntry {
   ignored: boolean;
 }
 
+/** 파일 내용 찾기 결과 한 줄 */
+export interface SearchHit {
+  path: string;
+  /** 1 부터 */
+  line: number;
+  text: string;
+}
+
+/** 파일 하나의 바뀐 줄 수. 바이너리면 null */
+export interface LineCount {
+  path: string;
+  staged: boolean;
+  added: number | null;
+  removed: number | null;
+}
+
 export interface FileContent {
   text: string | null;
   binary: boolean;

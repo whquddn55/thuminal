@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 /// 어댑터가 쓰는 프로토콜 타입 (어댑터가 프로토콜 크레이트에 직접 기대지 않게 다시 내보낸다)
 pub use thuminal_protocol as protocol;
-use thuminal_protocol::{BranchList, DirEntry, FileContent, GitStatus, RepoInfo, WorktreeInfo};
+use thuminal_protocol::{BranchList, DirEntry, FileContent, GitStatus, LineCount, RepoInfo, SearchHit, WorktreeInfo};
 use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +50,12 @@ pub trait Vcs: Send + Sync {
     fn branches(&self, repo: &Path) -> Result<BranchList, VcsError>;
     /// 워크트리 기준 상대 경로들 가운데 git 이 무시하는 것
     fn ignored(&self, worktree: &Path, paths: &[String]) -> Result<Vec<String>, VcsError>;
+    /// 파일 내용에서 글을 찾는다. `max` 개를 넘으면 앞부분과 함께 true(잘렸다)를 돌려준다
+    fn grep(&self, worktree: &Path, query: &str, case_sensitive: bool, max: usize) -> Result<(Vec<SearchHit>, bool), VcsError>;
+    /// 추적하는 파일과 무시하지 않는 새 파일의 경로
+    fn list_files(&self, worktree: &Path, max: usize) -> Result<(Vec<String>, bool), VcsError>;
+    /// 작업 폴더·스테이지 변경의 파일별 줄 수
+    fn line_counts(&self, worktree: &Path) -> Result<Vec<LineCount>, VcsError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,6 +441,21 @@ impl Workspace {
         }
         entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
         Ok(entries)
+    }
+
+    pub fn search(&self, worktree: &str, query: &str, case_sensitive: bool) -> Result<(Vec<SearchHit>, bool), WorkspaceError> {
+        if query.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+        Ok(self.vcs.grep(&self.known_worktree(worktree)?, query, case_sensitive, 500)?)
+    }
+
+    pub fn list_files(&self, worktree: &str) -> Result<(Vec<String>, bool), WorkspaceError> {
+        Ok(self.vcs.list_files(&self.known_worktree(worktree)?, 50_000)?)
+    }
+
+    pub fn line_counts(&self, worktree: &str) -> Result<Vec<LineCount>, WorkspaceError> {
+        Ok(self.vcs.line_counts(&self.known_worktree(worktree)?)?)
     }
 
     pub fn read_file(&self, worktree: &str, file: &str) -> Result<FileContent, WorkspaceError> {
