@@ -88,7 +88,8 @@ impl PtySystem for PortablePty {
 /// macOS PTY 는 read 한 번에 1KB 까지만 준다. 그래서 claude 가 한 번에 쓴 화면(수 KB)이 1KB 조각 여럿으로 나뉘어
 /// 조각마다 메시지가 되었다. 데스크톱 앱은 1KB 넘는 메시지를 Tauri 채널이 웹뷰에서 한 번 더 받아 가는 길로 보내
 /// 화면 하나에 왕복이 여러 번 들고, 조각 사이가 수십 ms 씩 벌어져 스크롤이 굼떴다.
-/// 한 번 읽은 뒤 지금 바로 더 읽을 수 있으면(기다리지 않는 poll) 버퍼가 찰 때까지 마저 읽는다
+/// 한 번 읽은 뒤 더 읽을 수 있으면 버퍼가 찰 때까지 마저 읽는다. 방금 읽은 것이 PTY 한 번 몫(1KB)을 꽉 채웠으면
+/// 쓰는 쪽이 아직 넘기는 중일 수 있어 조금(2ms) 기다려 보고, 덜 찼으면 기다리지 않는다
 #[cfg(unix)]
 mod coalesce {
     use std::io::{self, Read};
@@ -112,20 +113,29 @@ mod coalesce {
         poll_fd: OwnedFd,
     }
 
+    /// macOS PTY 가 read 한 번에 주는 최대 크기
+    const PTY_CHUNK: usize = 1024;
+    /// 꽉 찬 조각 뒤에 다음 조각을 기다리는 시간
+    const FOLLOW_WAIT_MS: i32 = 2;
+
     impl Coalesce {
-        fn readable_now(&self) -> bool {
+        fn readable(&self, wait_ms: i32) -> bool {
             let mut p = libc::pollfd { fd: self.poll_fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-            unsafe { libc::poll(&mut p, 1, 0) > 0 && p.revents & libc::POLLIN != 0 }
+            unsafe { libc::poll(&mut p, 1, wait_ms) > 0 && p.revents & libc::POLLIN != 0 }
         }
     }
 
     impl Read for Coalesce {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             let mut n = self.inner.read(buf)?;
-            while n > 0 && n < buf.len() && self.readable_now() {
+            let mut last = n;
+            while n > 0 && n < buf.len() && self.readable(if last >= PTY_CHUNK { FOLLOW_WAIT_MS } else { 0 }) {
                 match self.inner.read(&mut buf[n..]) {
                     Ok(0) => break,
-                    Ok(m) => n += m,
+                    Ok(m) => {
+                        n += m;
+                        last = m;
+                    }
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                     // 다음 read 가 같은 오류를 다시 낸다. 읽은 것은 먼저 넘긴다
                     Err(_) => break,

@@ -246,13 +246,14 @@ impl Actor {
                 let _ = tx.send(input);
             });
         }
+        // 붙은 화면에 먼저 보낸다. 데몬 엔진이 처리하는 시간만큼 화면이 늦지 않게 한다
+        self.subscribers.retain(|(_, tx)| tx.send(Frame::Output { session: self.id, data: data.clone() }).is_ok());
         self.engine.feed(&data);
         // 터미널 질의(커서 위치 등)는 데몬 엔진이 답한다. 앱 엔진은 답하지 않는다
         let replies = self.engine.take_replies();
         if !replies.is_empty() {
             let _ = self.input.send(replies);
         }
-        self.subscribers.retain(|(_, tx)| tx.send(Frame::Output { session: self.id, data: data.clone() }).is_ok());
 
         let now = now_ms();
         let mut bell = false;

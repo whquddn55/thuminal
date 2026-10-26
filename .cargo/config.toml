@@ -1,0 +1,4 @@
+# 개발 빌드에서도 libghostty(Zig)는 최적화해 빌드한다. cargo dev 프로필이면 libghostty-vt-sys 가 Zig 를 Debug 로 빌드하는데,
+# 그러면 데몬 엔진이 claude 화면 하나(수 KB)를 받는 데 80~100ms 가 걸려 개발 앱에서 휠 스크롤이 굼떴다 (release 는 2~6ms)
+[env]
+LIBGHOSTTY_VT_SYS_OPTIMIZE = "ReleaseFast"
