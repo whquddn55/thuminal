@@ -4,6 +4,13 @@
 //! - 응답은 요청 id 로 기다리는 쪽에
 //! - 이벤트는 [`Client::events`] 구독자에게
 //! - 세션 출력은 [`Client::attach`] 가 돌려준 줄에
+//!
+//! 전송은 둘이다. 같은 컴퓨터 데몬은 유닉스 소켓([`Client::connect`]), 다른 컴퓨터 데몬은 원격 접속 웹소켓
+//! ([`Client::connect_ws`], [`ws`]). 웹소켓은 길이 머리를 뗀 프레임이라 안에서 바이트 줄로 바꿔 같은 읽기 작업을 탄다.
+//! 끊기면 다시 붙는 일은 [`link::Link`] 가 맡는다.
+
+pub mod link;
+pub mod ws;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,15 +24,20 @@ use thuminal_protocol::{
     Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SnapshotFormat, TerminalColors,
     WorkspaceLayout, WorktreeInfo,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::net::unix::OwnedWriteHalf;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("데몬에 붙지 못했다 ({path}): {source}")]
     Connect { path: PathBuf, source: std::io::Error },
+    #[error("원격 데몬에 붙지 못했다 ({url}): {reason}")]
+    ConnectRemote { url: String, reason: String },
+    #[error("원격 데몬이 토큰을 받지 않았다. 원격 컴퓨터에서 기기를 다시 등록한다")]
+    Unauthorized,
+    #[error("프로토콜 주 판이 다르다: {0}")]
+    VersionMismatch(String),
     #[error("데몬을 띄우지 못했다: {0}")]
     Spawn(String),
     #[error("데몬이 오류로 답했다: {0:?} {1}")]
@@ -58,16 +70,21 @@ pub struct Attachment {
     pub output: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
+type Writer = Box<dyn AsyncWrite + Send + Unpin>;
+
 pub struct Client {
-    writer: tokio::sync::Mutex<OwnedWriteHalf>,
+    writer: tokio::sync::Mutex<Writer>,
     next_id: AtomicU64,
     pending: Pending,
     outputs: Outputs,
     snapshots: Snapshots,
     events: broadcast::Sender<Event>,
-    closed: Arc<std::sync::atomic::AtomicBool>,
+    /// 연결이 끊기면 true
+    closed: Arc<watch::Sender<bool>>,
     /// `hello` 응답
     pub daemon: Response,
+    /// 데몬 프로토콜 부 판이 이 클라이언트와 다를 때 알릴 글 (주 판이 다르면 붙지 않는다)
+    pub version_warning: Option<String>,
 }
 
 impl Client {
@@ -75,13 +92,22 @@ impl Client {
     pub async fn connect(paths: &Paths, client_name: &str) -> Result<Client> {
         let path = paths.socket();
         let stream = UnixStream::connect(&path).await.map_err(|source| ClientError::Connect { path, source })?;
-        let (mut rd, wr) = stream.into_split();
+        let (rd, wr) = stream.into_split();
+        Client::from_stream(rd, wr, client_name).await
+    }
+
+    /// 프레임(`[길이 u32][종류 u8][내용]`)이 오가는 아무 바이트 줄 위에서 붙는다. hello 로 판을 맞춘다
+    pub async fn from_stream<R, W>(mut rd: R, wr: W, client_name: &str) -> Result<Client>
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
         let pending: Pending = Default::default();
         let outputs: Outputs = Default::default();
         let snapshots: Snapshots = Default::default();
         let events = broadcast::channel(1024).0;
 
-        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let closed = Arc::new(watch::channel(false).0);
         let (p, o, s, e, done) = (pending.clone(), outputs.clone(), snapshots.clone(), events.clone(), closed.clone());
         tokio::spawn(async move {
             while let Ok(Some(frame)) = read_frame(&mut rd).await {
@@ -112,13 +138,13 @@ impl Client {
                 }
             }
             // 연결이 끊기면 기다리던 요청을 모두 깨운다
-            done.store(true, Ordering::SeqCst);
+            done.send_replace(true);
             p.lock().unwrap().clear();
             o.lock().unwrap().clear();
         });
 
         let mut client = Client {
-            writer: tokio::sync::Mutex::new(wr),
+            writer: tokio::sync::Mutex::new(Box::new(wr)),
             next_id: AtomicU64::new(1),
             pending,
             outputs,
@@ -126,11 +152,27 @@ impl Client {
             events,
             closed,
             daemon: Response::Ok,
+            version_warning: None,
         };
-        client.daemon = client
+        let hello = client
             .request(Request::Hello { protocol_major: PROTOCOL_MAJOR, protocol_minor: PROTOCOL_MINOR, client: client_name.into() })
-            .await?;
+            .await
+            .map_err(|e| match e {
+                ClientError::Daemon(thuminal_protocol::ErrorCode::VersionMismatch, m) => ClientError::VersionMismatch(m),
+                e => e,
+            })?;
+        client.version_warning = check_hello(&hello)?;
+        if let Some(w) = &client.version_warning {
+            tracing::warn!(warning = %w, "데몬 프로토콜 부 판이 다르다");
+        }
+        client.daemon = hello;
         Ok(client)
+    }
+
+    /// 다른 컴퓨터 데몬의 원격 접속에 웹소켓으로 붙는다. `base` 는 `http://100.x.y.z:6780` (끝 / 없이)
+    pub async fn connect_ws(base: &str, token: &str, client_name: &str) -> Result<Client> {
+        let (rd, wr) = ws::connect(base, token).await?;
+        Client::from_stream(rd, wr, client_name).await
     }
 
     /// 데몬에 붙고, 없으면 `daemon_bin` 을 떼어 띄운 뒤 붙는다.
@@ -152,7 +194,21 @@ impl Client {
 
     /// 데몬과 연결이 끊겼는지 (데몬이 내려갔거나 다시 떴다)
     pub fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+        *self.closed.borrow()
+    }
+
+    /// 연결이 끊길 때까지 기다린다
+    pub async fn closed(&self) {
+        let mut rx = self.closed.subscribe();
+        let _ = rx.wait_for(|c| *c).await;
+    }
+
+    /// `hello` 응답의 데몬 판 (데몬 판, 프로토콜 주 판, 부 판)
+    pub fn hello(&self) -> Option<(&str, u32, u32)> {
+        match &self.daemon {
+            Response::Hello { daemon_version, protocol_major, protocol_minor, .. } => Some((daemon_version.as_str(), *protocol_major, *protocol_minor)),
+            _ => None,
+        }
     }
 
     pub fn events(&self) -> broadcast::Receiver<Event> {
@@ -330,6 +386,25 @@ impl Client {
     pub async fn shutdown(&self) -> Result<()> {
         self.request(Request::Shutdown).await.map(|_| ())
     }
+}
+
+/// hello 응답을 본다. 주 판이 다르면 거절하고, 부 판이 다르면 알릴 글을 돌려준다
+pub fn check_hello(hello: &Response) -> Result<Option<String>> {
+    let Response::Hello { protocol_major, protocol_minor, daemon_version, .. } = hello else {
+        return Err(ClientError::Unexpected(Box::new(hello.clone())));
+    };
+    if *protocol_major != PROTOCOL_MAJOR {
+        return Err(ClientError::VersionMismatch(format!("데몬은 프로토콜 {protocol_major}, 클라이언트는 {PROTOCOL_MAJOR}")));
+    }
+    Ok(match protocol_minor.cmp(&PROTOCOL_MINOR) {
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Less => Some(format!(
+            "데몬({daemon_version})이 옛 판이다 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 새 기능 일부가 안 될 수 있다. 그 컴퓨터의 thuminal 을 업데이트한다"
+        )),
+        std::cmp::Ordering::Greater => Some(format!(
+            "데몬({daemon_version})이 더 새 판이다 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 이 앱을 업데이트한다"
+        )),
+    })
 }
 
 async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<Option<Frame>> {

@@ -1,6 +1,6 @@
 [package]
 name = "thuminal-client"
-description = "thuminal 데몬 클라이언트. CLI 와 앱이 같이 쓴다. 데몬이 없으면 떼어서 띄운다."
+description = "thuminal 데몬 클라이언트. CLI 와 앱이 같이 쓴다. 데몬이 없으면 떼어서 띄운다. 원격 데몬에는 웹소켓으로 붙는다."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 libc.workspace = true
 tracing.workspace = true
+# 원격 데몬 웹소켓 (ws:// 만. Tailscale 이 암호화하므로 TLS 는 넣지 않는다)
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 thuminal-daemon.workspace = true
@@ -21,5 +24,3 @@ thuminal-pty-portable.workspace = true
 thuminal-vcs-git.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
