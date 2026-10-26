@@ -3,6 +3,7 @@
 //! 엔진과 PTY 는 [`DaemonConfig`] 로 받는다. 어떤 어댑터를 끼울지는 실행 파일
 //! (`thuminald`) 이 정한다.
 
+pub mod interrupt;
 pub mod layout;
 pub mod lock;
 pub mod manager;
@@ -123,6 +124,7 @@ async fn save_loop(manager: Arc<manager::Manager>, layouts: Arc<layout::Layouts>
             },
             _ = tick.tick() => {
                 n += 1;
+                manager.check_interrupted();
                 layouts.save_if_dirty();
                 if dirty {
                     persist.save_records(&manager.list());

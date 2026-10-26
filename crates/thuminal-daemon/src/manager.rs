@@ -356,6 +356,38 @@ impl Manager {
         Ok(info)
     }
 
+    /// 일하는 중인 에이전트가 Esc 로 멈췄는지 대화 기록에서 본다. 멈췄으면 기다림으로 바꾼다 (멈추면 Stop 훅이 오지 않는다)
+    pub fn check_interrupted(&self) {
+        let working: Vec<(SessionId, String, u64)> = self
+            .list()
+            .into_iter()
+            .filter_map(|i| {
+                let a = i.agent?;
+                let busy = matches!(a.state, AgentState::Working | AgentState::NeedsAttention);
+                busy.then_some((i.id, a.transcript?, a.updated_at))
+            })
+            .collect();
+        for (id, transcript, since) in working {
+            // 훅이 알린 뒤에 남은 멈춤 표시만 본다 (새 프롬프트를 보낸 직후 아직 기록에 앞 멈춤이 끝줄로 남아 있을 수 있다)
+            let Some(at) = crate::interrupt::interrupted_at(Path::new(&transcript)).filter(|&at| at >= since) else { continue };
+            let Ok(h) = self.handle(id) else { continue };
+            let info = {
+                let mut i = h.info.lock().unwrap();
+                let Some(a) = i.agent.as_mut() else { continue };
+                if a.updated_at > at {
+                    continue;
+                }
+                a.state = AgentState::Idle;
+                a.tool_name = None;
+                a.turn_ended_at = Some(at);
+                a.updated_at = now_ms();
+                i.clone()
+            };
+            info!(event = "agent_interrupted", session = id.0);
+            let _ = self.events.send(Event::SessionUpdated { session: info });
+        }
+    }
+
     pub fn kill(&self, id: SessionId) -> Result<(), ErrorBody> {
         info!(event = "session_kill", session = id.0);
         self.send(id, Cmd::Kill)

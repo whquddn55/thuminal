@@ -622,7 +622,8 @@ function WorkspaceCard({
             <TooltipContent side="right">{unread ? "새 출력이 있다" : STATUS_LABEL[status]}</TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5 overflow-hidden">
+        {/* overflow-hidden 을 두지 않는다: 에이전트 줄은 왼쪽으로 내밀어 그려 상태 아이콘이 반쪽으로 잘린다. 줄임은 줄마다 truncate 가 한다 */}
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             {renaming ? (
               <input
