@@ -134,7 +134,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 
 - `term …`: 세션 만들기, 보내기, 읽기, 기다리기, 붙기. 세션 자리에는 `12`, `s12`, 칸 `p7`(그 칸의 세션), `.` 을 쓴다
   - `term read --tail N` 은 빈 줄을 뺀 마지막 N 줄, `--json` 은 `{"session":12,"lines":[…]}` 이다
-  - `term wait --agent idle|working|attention` 은 에이전트가 그 상태가 될 때까지 이벤트로 기다린다. idle 은 이미 idle 이면 막 보낸 입력의 훅이 닿을 틈(1.5초)을 지켜보고, 그 사이 일을 시작하면 턴이 끝날 때까지 기다린다. 그래서 `term send p7 "…" --enter` 뒤에 바로 불러도 된다. `--enter` 는 글을 보내고 300ms 뒤 Enter 를 따로 보낸다 (한 번에 닿으면 claude 가 붙여넣기로 받아 Enter 를 줄바꿈으로 삼킨다). 기다리는 동안 세션이 끝나면 종료 코드 1, 시간이 넘으면 124
+  - `term wait --agent idle|working|attention` 은 에이전트가 그 상태가 될 때까지 이벤트로 기다린다. idle 은 이미 idle 이면 막 보낸 입력의 훅이 닿을 틈(1.5초)을 지켜보고, 그 사이 일을 시작하면 턴이 끝날 때까지 기다린다. 그래서 `term send p7 "…" --enter` 뒤에 바로 불러도 된다. `--enter` 는 글을 보내고 300ms 뒤, 화면에 글이 찍히기를 기다렸다가(최대 3초) Enter 를 따로 보낸다 (글과 Enter 가 한 번에 읽히면 claude 가 붙여넣기로 받아 Enter 를 줄바꿈으로 넣는다. 막 뜬 claude 는 바빠 두 번 보낸 것도 한 번에 읽는다). 기다리는 동안 세션이 끝나면 종료 코드 1, 시간이 넘으면 124
 - `pane …`: `split`, `resize`, `focus`, `move`, `swap`, `zoom`, `equalize`, `break`, `close`, `ls`. 칸은 `p7`, 생략하거나 `.` 이면 이 셸이 든 칸(`THUMINAL_SESSION_ID`)이다
 - `tab …`: `new`, `select`, `close`, `rename`, `move`, `join`, `ls`. 탭은 `t3`. `tab new --title T` 는 탭 이름을 붙여 만든다
 - 터미널을 만드는 명령은 세션 번호도 찍어 바로 `term send/read/wait` 에 넣을 수 있다: `tab new` → `t3 p7 s12`, `pane split` → `p8 s13`, `layout apply` → 칸마다 `p7 s12` 한 줄(문서 칸은 `p7 -`). `--json` 에는 `panes: [{pane, tab, session}]` 가 더 붙는다

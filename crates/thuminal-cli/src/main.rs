@@ -471,13 +471,21 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
         }
         TermCmd::Send { id, text, enter } => {
             let id = session_id(&c, &id).await?;
-            if !text.is_empty() {
+            let typed = !text.is_empty();
+            let before = if typed && enter { Some(c.read_screen(id, ScreenFormat::Plain, false).await?) } else { None };
+            if typed {
                 c.send_text(id, text).await?;
             }
             if enter {
-                // 글과 Enter 가 한 번에 닿으면 claude 같은 TUI 는 붙여넣기로 받아 Enter 를 줄바꿈으로 삼킨다.
-                // 따로 친 키로 보이게 틈을 두고 보낸다
+                // 글과 Enter 가 한 번에 읽히면 claude 같은 TUI 는 붙여넣기로 받아 Enter 를 줄바꿈으로 넣는다.
+                // 막 뜬 claude 는 바빠서 300ms 틈으로도 모자랄 수 있어, 화면에 글이 찍혀(프로그램이 읽어) 갈 때까지 기다린다
                 tokio::time::sleep(ENTER_AFTER_TEXT).await;
+                if let Some(before) = before {
+                    let deadline = Instant::now() + ENTER_ECHO_TIMEOUT;
+                    while Instant::now() < deadline && c.read_screen(id, ScreenFormat::Plain, false).await? == before {
+                        tokio::time::sleep(ENTER_ECHO_POLL).await;
+                    }
+                }
                 c.send_text(id, "\r").await?;
             }
         }
@@ -508,6 +516,9 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
 
 /// `term send --enter` 가 글을 보낸 뒤 Enter 를 치기 전에 두는 틈
 const ENTER_AFTER_TEXT: Duration = Duration::from_millis(300);
+/// 그 틈 뒤에도 화면에 글이 찍히지 않았으면 이만큼까지 더 기다린다 (글을 찍지 않는 프로그램이면 이 뒤 그냥 친다)
+const ENTER_ECHO_TIMEOUT: Duration = Duration::from_secs(3);
+const ENTER_ECHO_POLL: Duration = Duration::from_millis(100);
 
 /// `--agent idle` 이 이미 idle 인 에이전트를 받아들이기 전에 지켜보는 틈 (막 보낸 프롬프트의 훅이 닿을 시간)
 const AGENT_IDLE_GRACE: Duration = Duration::from_millis(1500);
