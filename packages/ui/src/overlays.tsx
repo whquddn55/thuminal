@@ -363,7 +363,7 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
             className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
             value={q}
-            placeholder="이름, 브랜치, 프로젝트"
+            placeholder={items.some((x) => x.host) ? "이름, 브랜치, 프로젝트, 컴퓨터" : "이름, 브랜치, 프로젝트"}
             onChange={(e) => {
               setQ(e.target.value);
               setSel(0);
