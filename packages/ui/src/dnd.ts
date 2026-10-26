@@ -3,8 +3,10 @@
 // - 탭을 칸 가장자리에 놓으면 그 탭이 칸으로 들어간다 (join_tab). 칸을 탭 줄에 놓으면 새 탭으로 떨어진다 (break_pane).
 // - 칸을 다른 칸 가장자리에 놓으면 옮기고 (move_pane), 가운데에 놓으면 맞바꾼다 (swap).
 // - 탭 줄 안에서는 순서를 바꾸고, 사이드바 워크트리 카드에 놓으면 그 워크트리로 보낸다.
+// - 사이드바 프로젝트 머리를 끌어 다른 프로젝트 머리 위아래에 놓으면 그 자리로, 워크스페이스(묶음) 안 아무 데나 놓으면 그 끝으로 옮긴다.
 //
-// 놓을 곳은 DOM 의 data 속성으로 찾는다: data-drop-pane, data-drop-tabbar (안의 탭은 data-tab-index), data-drop-workspace.
+// 놓을 곳은 DOM 의 data 속성으로 찾는다: data-drop-pane, data-drop-tabbar (안의 탭은 data-tab-index), data-drop-workspace,
+// 프로젝트는 data-drop-project(+data-group, data-index) 와 data-drop-group.
 // 터미널 그림판(canvas)은 마우스를 통과시키므로 그 아래 칸 자리가 잡힌다.
 
 import { useStore } from "zustand";
@@ -17,12 +19,16 @@ import type { AppModel } from "./store";
 
 export type DragSource =
   | { kind: "tab"; tab: TabId; workspace: WorkspaceId; title: string; panes: PaneId[] }
-  | { kind: "pane"; pane: PaneId; tab: TabId; workspace: WorkspaceId; title: string };
+  | { kind: "pane"; pane: PaneId; tab: TabId; workspace: WorkspaceId; title: string }
+  /** 사이드바 프로젝트 (워크스페이스 사이를 옮긴다) */
+  | { kind: "project"; repo: string; title: string };
 
 export type DropTarget =
   | { kind: "pane"; pane: PaneId; side: Side | "center" }
   | { kind: "tabbar"; workspace: WorkspaceId; index: number }
-  | { kind: "workspace"; workspace: WorkspaceId };
+  | { kind: "workspace"; workspace: WorkspaceId }
+  /** 워크스페이스 `group` 의 `index` 자리 (옮기기 전 목록 기준). `line` 은 줄을 그을 프로젝트 머리와 그 위/아래 */
+  | { kind: "group"; group: string; index: number; line?: { repo: string; after: boolean } };
 
 interface DragState {
   source: DragSource | null;
@@ -40,7 +46,26 @@ export function useDrag<T>(selector: (s: DragState) => T): T {
 /** 이만큼 움직여야 끌기로 본다 (누르기와 구분) */
 const THRESHOLD = 5;
 
+/** 프로젝트를 놓을 자리: 다른 프로젝트 머리면 그 위나 아래, 워크스페이스 안이면 그 끝 */
+function hitProject(source: DragSource & { kind: "project" }, x: number, y: number): DropTarget | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    if (!(el instanceof HTMLElement)) continue;
+    const head = el.closest<HTMLElement>("[data-drop-project]");
+    if (head) {
+      const repo = head.dataset.dropProject!;
+      if (repo === source.repo) return null;
+      const r = head.getBoundingClientRect();
+      const after = y > r.top + r.height / 2;
+      return { kind: "group", group: head.dataset.group!, index: Number(head.dataset.index) + (after ? 1 : 0), line: { repo, after } };
+    }
+    const group = el.closest<HTMLElement>("[data-drop-group]");
+    if (group) return { kind: "group", group: group.dataset.dropGroup!, index: Number(group.dataset.count ?? 0) };
+  }
+  return null;
+}
+
 function hitTest(source: DragSource, x: number, y: number): DropTarget | null {
+  if (source.kind === "project") return hitProject(source, x, y);
   for (const el of document.elementsFromPoint(x, y)) {
     if (!(el instanceof HTMLElement)) continue;
     const bar = el.closest<HTMLElement>("[data-drop-tabbar]");
@@ -78,6 +103,11 @@ function hitTest(source: DragSource, x: number, y: number): DropTarget | null {
 /** 놓은 자리에 맞는 배치 요청을 보낸다 */
 function commit(model: AppModel, source: DragSource, target: DropTarget) {
   const id = (value: number) => ({ by: "id" as const, value });
+  if (source.kind === "project") {
+    if (target.kind === "group") model.moveProject(source.repo, target.group, target.index);
+    return;
+  }
+  if (target.kind === "group") return;
   if (source.kind === "tab") {
     const tab = id(source.tab);
     if (target.kind === "pane") return model.op({ op: "join_tab", tab, to: id(target.pane), side: target.side as Side });

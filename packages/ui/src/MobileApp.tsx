@@ -30,6 +30,7 @@ import type { Renderer, SessionId, SessionInfo, WorkspaceId, WorktreeInfo } from
 import { AgentIcon } from "./agent-icons";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import { groupKey, normalizeGroups } from "./groups";
 import { panesOf } from "./layout";
 import { RepoMark } from "./repo-icon";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
@@ -196,6 +197,9 @@ function sessionLabel(s: SessionInfo | undefined): string {
 
 function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) {
   const repos = useApp((s) => s.repos);
+  const savedGroups = useApp((s) => s.groups);
+  // 워크스페이스(프로젝트 묶음). 고치기는 데스크톱에서만 하고, 여기서는 머리 아래 프로젝트를 묶어 보이기만 한다
+  const groups = useMemo(() => normalizeGroups(savedGroups, repos), [savedGroups, repos]);
   const worktrees = useApp((s) => s.worktrees);
   const layouts = useApp((s) => s.layouts);
   const sessions = useApp((s) => s.sessions);
@@ -233,16 +237,33 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
             ))}
           </Section>
         )}
-        {repos.map((r) => {
-          const list = worktrees.filter((w) => w.repo === r.id);
-          if (!list.length) return null;
-          const { roots, kids } = worktreeForest(list);
+        {groups.map((g) => {
+          const projects = g.repos.flatMap((id) => {
+            const r = repos.find((x) => x.id === id);
+            const list = worktrees.filter((w) => w.repo === id);
+            if (!r || !list.length) return [];
+            const { roots, kids } = worktreeForest(list);
+            return [
+              <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-3.5" />}>
+                {roots.map((w) => (
+                  <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
+                ))}
+              </Section>,
+            ];
+          });
+          // 기본 하나뿐이면 머리 없이 프로젝트만 (데스크톱 사이드바와 같다)
+          if (groups.length === 1) return projects;
+          const key = groupKey(g.id);
+          const open = !collapsed.has(key);
           return (
-            <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-3.5" />}>
-              {roots.map((w) => (
-                <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
-              ))}
-            </Section>
+            <div key={g.id} className="border-t first:border-t-0">
+              <button className="flex min-h-11 w-full items-center gap-2 px-4 pt-2 text-left active:bg-accent" aria-expanded={open} onClick={() => toggle(key)}>
+                <CaretDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{g.name}</span>
+                <span className="text-[11px] tabular-nums text-muted-foreground">{g.repos.length}</span>
+              </button>
+              {open && (projects.length ? projects : <p className="px-4 pb-2 text-[12px] text-muted-foreground">워크트리가 있는 프로젝트가 없다</p>)}
+            </div>
           );
         })}
         {extra.length > 0 && (

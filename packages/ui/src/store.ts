@@ -15,6 +15,7 @@ import {
   type LayoutOp,
   OTHER_WORKSPACE,
   type PaneRef,
+  type RepoGroup,
   type RepoInfo,
   type SessionId,
   type SessionInfo,
@@ -28,6 +29,7 @@ import {
 
 import { AGENTS } from "./agents";
 import { setPage } from "./browser-state";
+import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
@@ -97,6 +99,8 @@ export interface FloatingState {
 
 export interface AppState {
   repos: RepoInfo[];
+  /** 사이드바 워크스페이스(프로젝트 묶음), 데몬이 준 그대로. 그릴 때는 `normalizeGroups` 로 저장소 목록에 맞춘다 */
+  groups: RepoGroup[];
   worktrees: WorktreeInfo[];
   sessions: Record<SessionId, SessionInfo>;
   status: Record<string, GitStatus>;
@@ -198,6 +202,7 @@ export class AppModel {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     this.store = createStore<AppState>(() => ({
       repos: [],
+      groups: [],
       worktrees: [],
       sessions: {},
       status: {},
@@ -287,18 +292,30 @@ export class AppModel {
 
   private async reloadAll() {
     const host = this.services.host;
-    const [sessions, repos, worktrees, layouts] = await Promise.all([host.listSessions(), host.listRepos(), host.listWorktrees(), host.getLayout()]);
+    const [sessions, repos, groups, worktrees, layouts] = await Promise.all([
+      host.listSessions(),
+      host.listRepos(),
+      this.loadGroups(),
+      host.listWorktrees(),
+      host.getLayout(),
+    ]);
     this.set({
       sessions: Object.fromEntries(sessions.map((s) => [s.id, s])),
       repos,
+      groups,
       worktrees,
       layouts: Object.fromEntries(layouts.map((l) => [l.workspace, l])),
     });
   }
 
   private async refreshWorkspace() {
-    const [repos, worktrees] = await Promise.all([this.services.host.listRepos(), this.services.host.listWorktrees()]);
-    this.set({ repos, worktrees });
+    const [repos, groups, worktrees] = await Promise.all([this.services.host.listRepos(), this.loadGroups(), this.services.host.listWorktrees()]);
+    this.set({ repos, groups, worktrees });
+  }
+
+  /** 워크스페이스 목록. 옛 데몬이라 모르면 빈 목록(모두 기본)으로 본다 */
+  private loadGroups(): Promise<RepoGroup[]> {
+    return this.services.host.listGroups().catch(() => []);
   }
 
   /** git 상태를 다시 읽는다. `only` 를 주면 그 워크트리만 */
@@ -1053,6 +1070,47 @@ export class AppModel {
   removeProject = async (repo: string) => {
     await this.services.host.removeRepo(repo).catch(this.fail);
   };
+
+  /** 그릴 워크스페이스 목록 (저장소 목록에 맞춘 것) */
+  groupsOf = (s: AppState = this.get()): RepoGroup[] => normalizeGroups(s.groups, s.repos);
+
+  /** 워크스페이스 목록을 통째로 데몬에 보낸다. 화면은 바로 바꾸고, 데몬이 거절하면 되돌린다. 데몬이 맞춘 목록을 돌려준다 */
+  private saveGroups = async (next: RepoGroup[] | null): Promise<RepoGroup[] | null> => {
+    if (!next) return null;
+    const prev = this.get().groups;
+    this.set({ groups: next });
+    try {
+      const groups = await this.services.host.setGroups(next);
+      this.set({ groups });
+      return groups;
+    } catch (e) {
+      this.set({ groups: prev });
+      this.fail(`워크스페이스를 바꾸지 못했다: ${e}`);
+      return null;
+    }
+  };
+
+  /** 새 워크스페이스를 끝에 만들고(프로젝트 `repos` 를 옮겨 넣고) 새 id 를 돌려준다 */
+  createGroup = async (name = NEW_GROUP_NAME, repos: string[] = []): Promise<string | null> => {
+    const cur = this.groupsOf().map((g) => ({ ...g, repos: g.repos.filter((r) => !repos.includes(r)) }));
+    const got = await this.saveGroups([...cur, { id: "", name, repos }]);
+    return got?.find((g) => !cur.some((c) => c.id === g.id))?.id ?? null;
+  };
+
+  renameGroup = (id: string, name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    void this.saveGroups(this.groupsOf().map((g) => (g.id === id ? { ...g, name: n } : g)));
+  };
+
+  /** 워크스페이스를 지운다. 든 프로젝트는 기본으로 간다 */
+  deleteGroup = (id: string) => void this.saveGroups(removeGroup(this.groupsOf(), id));
+
+  /** 워크스페이스 차례를 `delta` 칸 옮긴다 */
+  shiftGroup = (id: string, delta: number) => void this.saveGroups(shiftGroup(this.groupsOf(), id, delta));
+
+  /** 프로젝트를 워크스페이스 `group` 의 `index` 자리(없으면 끝)로 옮긴다 */
+  moveProject = (repo: string, group: string, index?: number) => void this.saveGroups(moveRepo(this.groupsOf(), repo, group, index));
 
   /** 워크트리를 만든다. 창은 바로 닫히고, 만드는 동안 사이드바에 진행 줄이 보인다 */
   newWorktree = async (req: NewWorktree) => {

@@ -1,4 +1,6 @@
-// 왼쪽 사이드바: 프로젝트(저장소)마다 워크트리 카드. 카드 모양은 Orca 를 따른다.
+// 왼쪽 사이드바: 워크스페이스(프로젝트 묶음) → 프로젝트(저장소) → 워크트리 카드. 카드 모양은 Orca 를 따른다.
+//
+// 워크스페이스가 기본 하나뿐이면 머리를 감춰 프로젝트만 늘어놓는다 (묶음을 쓰지 않는 사람에게는 전과 같다).
 //
 // 카드 = 왼쪽 상태 칸(16px) + 제목 줄(13px) + 브랜치 줄(11px) + 에이전트 줄(터미널마다 하나).
 // 고른 카드는 전경색을 옅게 덮고 1px 테두리를 둔다 (styles.css 의 [data-card-active]).
@@ -16,13 +18,14 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   PushPinIcon,
+  StackPlusIcon,
   TerminalWindowIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import type { AgentInfo, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
+import { type AgentInfo, DEFAULT_GROUP, type RepoGroup, type RepoInfo, type SessionInfo, type WorkspaceId, type WorktreeInfo } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import { AgentIcon } from "./agent-icons";
@@ -37,9 +40,20 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "./components/ui/context-menu";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
-import { useDrag } from "./dnd";
+import { beginDrag, useDrag } from "./dnd";
+import { GroupSection } from "./GroupSection";
+import { groupKey, NEW_GROUP_NAME, normalizeGroups } from "./groups";
 import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
@@ -140,15 +154,33 @@ export function Sidebar() {
   const model = useModel();
   const repos = useApp((s) => s.repos);
   const worktrees = useApp((s) => s.worktrees);
-  const creating = useApp((s) => s.creating);
+  const savedGroups = useApp((s) => s.groups);
+  const groups = useMemo(() => normalizeGroups(savedGroups, repos), [savedGroups, repos]);
   const width = useApp((s) => s.sidebarWidth);
   const hasOther = useApp((s) => (s.layouts[OTHER_WORKSPACE]?.tabs.length ?? 0) > 0);
   // 접은 묶음(저장소, 고정, 기타)과 접은 하위 워크트리(`lineage:<경로>`). 다시 켜도 남는다
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
   const pinned = worktrees.filter((w) => w.pinned);
-  const order = (list: WorktreeInfo[]) => [...list].sort((a, b) => Number(b.is_main) - Number(a.is_main));
 
   const toggle = (key: string) => setCollapsed(toggleCollapsed(collapsed, key));
+  // 이름을 고치는 워크스페이스 (막 만든 것 포함)
+  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
+  const showGroups = groups.length > 1;
+  const repoById = new Map(repos.map((r) => [r.id, r]));
+
+  /** 새 워크스페이스를 만들고(프로젝트 `move` 를 옮겨 넣고) 바로 이름을 고치게 한다 */
+  const newGroup = async (move: string[] = []) => {
+    const id = await model.createGroup(NEW_GROUP_NAME, move);
+    if (!id) return;
+    if (collapsed.has(groupKey(id))) toggle(groupKey(id));
+    setRenamingGroup(id);
+  };
+
+  const projects = (g: RepoGroup) =>
+    g.repos.flatMap((id, index) => {
+      const r = repoById.get(id);
+      return r ? [<ProjectGroup key={r.id} r={r} group={g.id} index={index} groups={groups} collapsed={collapsed} onToggle={toggle} onNewGroup={newGroup} />] : [];
+    });
 
   return (
     <aside className="relative flex min-h-0 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }}>
@@ -164,7 +196,15 @@ export function Sidebar() {
         </Tooltip>
       </div>
       <div className="flex h-7 shrink-0 items-center gap-1 pr-2 pl-3">
-        <span className="flex-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">프로젝트</span>
+        <span className="flex-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{showGroups ? "워크스페이스" : "프로젝트"}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="워크스페이스 만들기" onClick={() => void newGroup()}>
+              <StackPlusIcon className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>워크스페이스 만들기</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" className="text-muted-foreground" onClick={() => void model.addProject()}>
@@ -191,44 +231,41 @@ export function Sidebar() {
             ))}
           </Group>
         )}
-        {repos.map((r) => (
-          <Group
-            key={r.id}
-            label={r.name}
-            title={r.path}
-            icon={<RepoMark repo={r.id} name={r.name} />}
-            count={worktrees.filter((w) => w.repo === r.id).length}
-            collapsed={collapsed.has(r.id)}
-            onToggle={() => toggle(r.id)}
-            onNew={() => model.setDialog({ kind: "new-worktree", repo: r.id })}
-            menu={
-              <>
-                <DropdownMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: r.id })}>새 워크트리…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder에서 보기</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => copy(r.path)}>경로 복사</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => void model.removeProject(r.id)}>
-                  프로젝트 목록에서 빼기
-                </DropdownMenuItem>
-              </>
-            }
-          >
-            <WorktreeTree list={order(worktrees.filter((w) => w.repo === r.id && !w.pinned))} collapsed={collapsed} onToggle={toggle} />
-            {creating
-              .filter((c) => c.repo === r.id)
-              .map((c) => (
-                <div key={c.branch} className="ml-1 flex gap-0.5 rounded-lg border border-transparent py-1.5 pr-1.5 opacity-70">
-                  <span className="flex size-4 items-center justify-center">
-                    <StatusIndicator status="working" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] leading-5">{c.branch}</div>
-                    <div className="text-[11px] text-muted-foreground">만드는 중…</div>
-                  </div>
-                </div>
-              ))}
-          </Group>
-        ))}
+        {showGroups
+          ? groups.map((g, gi) => (
+              <GroupSection
+                key={g.id}
+                id={g.id}
+                name={g.name}
+                count={g.repos.filter((id) => repoById.has(id)).length}
+                collapsed={collapsed.has(groupKey(g.id))}
+                onToggle={() => toggle(groupKey(g.id))}
+                renaming={renamingGroup === g.id}
+                onStartRename={() => setRenamingGroup(g.id)}
+                onRename={(name) => {
+                  setRenamingGroup(null);
+                  if (name !== null && name.trim() && name.trim() !== g.name) model.renameGroup(g.id, name);
+                }}
+                menu={
+                  <>
+                    <DropdownMenuItem onSelect={() => setRenamingGroup(g.id)}>이름 바꾸기</DropdownMenuItem>
+                    <DropdownMenuItem disabled={gi === 0} onSelect={() => model.shiftGroup(g.id, -1)}>
+                      위로 옮기기
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={gi === groups.length - 1} onSelect={() => model.shiftGroup(g.id, 1)}>
+                      아래로 옮기기
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" disabled={g.id === DEFAULT_GROUP} onSelect={() => model.deleteGroup(g.id)}>
+                      {g.id === DEFAULT_GROUP ? "기본 워크스페이스는 지우지 못한다" : "지우기 (프로젝트는 기본으로)"}
+                    </DropdownMenuItem>
+                  </>
+                }
+              >
+                {projects(g)}
+              </GroupSection>
+            ))
+          : groups.map(projects)}
         {(hasOther || repos.length === 0) && (
           <Group label="기타" icon={<TerminalWindowIcon className="size-3.5" />} collapsed={collapsed.has("@other")} onToggle={() => toggle("@other")}>
             <WorkspaceCard ws={OTHER_WORKSPACE} title="워크트리 밖 터미널" subtitle="홈 폴더 등" />
@@ -263,6 +300,85 @@ export function Sidebar() {
       </div>
       <SidebarResizer />
     </aside>
+  );
+}
+
+/** 메인 워크트리를 맨 위로 */
+const mainFirst = (list: WorktreeInfo[]) => [...list].sort((a, b) => Number(b.is_main) - Number(a.is_main));
+
+/**
+ * 프로젝트(저장소) 하나: 머리 줄 + 워크트리 카드. 머리를 끌어 다른 워크스페이스나 다른 프로젝트 위아래로 옮긴다.
+ * `group`·`index` 는 든 워크스페이스와 그 안 자리 (끌어 놓기 자리로 쓴다)
+ */
+function ProjectGroup({
+  r,
+  group,
+  index,
+  groups,
+  collapsed,
+  onToggle,
+  onNewGroup,
+}: {
+  r: RepoInfo;
+  group: string;
+  index: number;
+  groups: RepoGroup[];
+  collapsed: Set<string>;
+  onToggle: (key: string) => void;
+  onNewGroup: (move: string[]) => void;
+}) {
+  const model = useModel();
+  const worktrees = useApp(useShallow((s: AppState) => s.worktrees.filter((w) => w.repo === r.id)));
+  const creating = useApp(useShallow((s: AppState) => s.creating.filter((c) => c.repo === r.id)));
+  const others = groups.filter((g) => g.id !== group);
+  return (
+    <Group
+      label={r.name}
+      title={r.path}
+      icon={<RepoMark repo={r.id} name={r.name} />}
+      count={worktrees.length}
+      collapsed={collapsed.has(r.id)}
+      onToggle={() => onToggle(r.id)}
+      onNew={() => model.setDialog({ kind: "new-worktree", repo: r.id })}
+      drag={{ repo: r.id, group, index }}
+      menu={
+        <>
+          <DropdownMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: r.id })}>새 워크트리…</DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>워크스페이스로 옮기기</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-80 w-52 overflow-y-auto">
+              {others.map((g) => (
+                <DropdownMenuItem key={g.id} onSelect={() => model.moveProject(r.id, g.id)}>
+                  <span className="truncate">{g.name}</span>
+                </DropdownMenuItem>
+              ))}
+              {others.length > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem onSelect={() => onNewGroup([r.id])}>새 워크스페이스로…</DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder에서 보기</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => copy(r.path)}>경로 복사</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onSelect={() => void model.removeProject(r.id)}>
+            프로젝트 목록에서 빼기
+          </DropdownMenuItem>
+        </>
+      }
+    >
+      <WorktreeTree list={mainFirst(worktrees.filter((w) => !w.pinned))} collapsed={collapsed} onToggle={onToggle} />
+      {creating.map((c) => (
+        <div key={c.branch} className="ml-1 flex gap-0.5 rounded-lg border border-transparent py-1.5 pr-1.5 opacity-70">
+          <span className="flex size-4 items-center justify-center">
+            <StatusIndicator status="working" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] leading-5">{c.branch}</div>
+            <div className="text-[11px] text-muted-foreground">만드는 중…</div>
+          </div>
+        </div>
+      ))}
+    </Group>
   );
 }
 
@@ -302,6 +418,7 @@ function Group({
   onToggle,
   onNew,
   menu,
+  drag,
   children,
 }: {
   label: string;
@@ -313,17 +430,32 @@ function Group({
   onToggle: () => void;
   onNew?: () => void;
   menu?: React.ReactNode;
+  /** 프로젝트 머리면 끌어 옮길 수 있다: 저장소 id, 든 워크스페이스, 그 안 자리 */
+  drag?: { repo: string; group: string; index: number };
   children: React.ReactNode;
 }) {
+  const model = useModel();
   const [menuOpen, setMenuOpen] = useState(false);
+  // 다른 프로젝트를 이 머리 위나 아래에 놓으려 하면 그쪽에 줄을 긋는다
+  const line = useDrag((d) => (drag && d.target?.kind === "group" && d.target.line?.repo === drag.repo ? (d.target.line.after ? "after" : "before") : null));
+  const dragging = useDrag((d) => !!drag && d.source?.kind === "project" && d.source.repo === drag.repo);
   return (
-    <div className="border-t border-sidebar-border/70 pt-1.5 pb-1 first:border-t-0 first:pt-1">
+    <div className={cn("border-t border-sidebar-border/70 pt-1.5 pb-1 first:border-t-0 first:pt-1", dragging && "opacity-50")}>
       <div
         role="button"
         tabIndex={0}
         title={title}
-        className="group sticky top-0 z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2"
-        onClick={onToggle}
+        data-drop-project={drag?.repo}
+        data-group={drag?.group}
+        data-index={drag?.index}
+        className={cn(
+          "group sticky top-0 z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2",
+          line === "before" && "shadow-[inset_0_2px_0_var(--color-drop)]",
+          line === "after" && "shadow-[inset_0_-2px_0_var(--color-drop)]",
+        )}
+        // 끌 수 있는 머리는 움직이지 않고 뗐을 때만 접고 편다 (beginDrag 가 부른다)
+        onClick={drag ? undefined : onToggle}
+        onPointerDown={drag ? (e) => beginDrag(e, model, { kind: "project", repo: drag.repo, title: label }, onToggle) : undefined}
       >
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-4">{label}</span>
@@ -334,6 +466,7 @@ function Group({
         <span
           className={cn("hidden items-center gap-0.5 group-hover:flex", menuOpen && "flex")}
           onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {menu && (
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

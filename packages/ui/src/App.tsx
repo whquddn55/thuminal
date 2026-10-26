@@ -218,7 +218,7 @@ function DragGhost() {
       )}
       style={{ left: x + 12, top: y + 12 }}
     >
-      {source.kind === "tab" ? "탭: " : "칸: "}
+      {{ tab: "탭: ", pane: "칸: ", project: "프로젝트: " }[source.kind]}
       {source.title}
     </div>
   );

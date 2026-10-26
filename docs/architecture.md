@@ -60,6 +60,7 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 
 - **워크트리**: 저장소 목록(`workspace.json`)과 워크트리 만들기/지우기도 데몬이 맡는다. 그래야 CLI 로 만든 워크트리가 앱에도 바로 나타난다 (`workspace_changed` 이벤트). 새 워크트리는 저장소 옆 `<저장소>-thm-wt-<브랜치>` 에 만든다. 세션을 만들 때 시작 폴더가 워크트리 안이면 `worktree` 꼬리표를 단다.
   - **하위 워크트리**: 워크트리마다 부모 워크트리를 기억한다 (`workspace.json` 의 워크트리 `parent`, `WorktreeInfo.parent`). `create_worktree { parent }` 나 `update_worktree { parent }`(빈 글이면 뗀다)로 정하고, 자기나 자기 밑의 워크트리를 부모로 삼으면 거절한다. 부모를 지우면 그 자식은 할아버지 밑으로 옮긴다. 사이드바는 자식을 부모 카드 밑에 들여 그리고 "N개 하위" 단추로 접는다. Orca 의 `worktreeLineageById` 도 가져온다. CLI 는 `thuminal wt new <브랜치> --parent <워크트리>`.
+  - **워크스페이스**(사이드바 프로젝트 묶음, 코드·프로토콜에서는 `group`. `WorkspaceId` 와 다르다): `workspace.json` 의 `groups`(id, 이름, 든 저장소 id 차례)다. `list_groups` 로 읽고 `set_groups` 로 통째로 바꾸며, 바뀌면 `workspace_changed` 를 낸다. 데몬은 읽고 쓸 때마다 저장소 목록에 맞춘다: 기본 워크스페이스(`default`)는 늘 있고 지우지 못하며, 프로젝트는 꼭 한 워크스페이스에 들고, 어디에도 없는 프로젝트(새로 등록한 것, 지운 워크스페이스에 들었던 것)는 기본 끝에 붙는다. 프로젝트를 빼면 워크스페이스에서도 뺀다. 옛 파일에는 `groups` 가 없고 그때는 기본 하나에 모든 프로젝트다.
   - 지울 때 `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도 `git branch -D`) 쓴다. `force_branch` 없이는 `git branch -d` 로 지우고, git 이 거절하면 브랜치를 남긴 채 워크트리만 지우고 성공으로 답한다. 답 `text` 에 "브랜치 X 는 합치지 않은 커밋이 있어 남겼다" 같은 까닭을 싣는다 (알릴 것이 없으면 빈 글).
 - **셸 통합**: 데몬이 기본 셸을 띄울 때 zsh 는 `ZDOTDIR`, bash 는 `--rcfile` 로 thuminal 파일(`shell/`)을 먼저 읽힌다. 그 파일은 사용자 설정을 그대로 다 읽은 뒤 `claude` 함수를 더한다. 함수는 실행기 `shell/claude-launch` 를 부르고, 실행기가 `--plugin-dir` 로 thuminal claude 플러그인을 그 실행에만 얹는다. 실행기는 에이전트 설정(`agent-settings.json`, 설정 창 · 에이전트)이 바뀔 때마다 다시 쓴다: 권한 확인 없이(`--dangerously-skip-permissions`, 기본 켬), 에이전트 팀(기본 켬). `term new -- claude …` 도 실행기로 띄운다.
 - **에이전트 팀**: 실행기가 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 과 함께 `TMUX`·`TMUX_PANE=%<세션>` 을 넣고 가짜 `tmux`(`shell/teams-bin/tmux` → `thuminal tmux`)를 claude 의 PATH 앞에 둔다 (진짜 tmux 안이면 그대로 둔다). claude 는 tmux 안이라고 믿고 팀원마다 `split-window … -- cat` → `set-option window-style fg=<색>` → `select-pane -T <이름>` → `respawn-pane -k -- <팀원 claude>` 를, 끝나면 `kill-pane` 을 부른다. 데몬(`teams.rs`)은 이것을 팀원 세션으로 흉내 낸다. 팀원은 칸 트리에 넣지 않고(`layout=none`) 꼬리표 `team.leader`·`team.pane`(claude 가 아는 칸 번호, 다시 띄워도 그대로)·`team.name`·`team.color` 로 리더에 묶는다. 리더 세션을 지우면 팀원도 지우고, 팀원이 코드 0 으로 끝나면 지운다. 팀원은 되살리지 않는다. 화면은 리더 터미널 폭을 그대로 두고, [팀원 N] 단추로 리더 칸 위에 팝업을 띄운다: 팀원 이름 목록 → 이름을 누르면 그 팀원 터미널 → [← 목록] (`ui/src/TeamPanel.tsx`). 팝업 안 터미널은 렌더러의 위층(`RenderTarget.layer`)이라, 아래층 리더가 다시 그린 프레임에는 겹치는 위층을 이어 다시 그린다.
@@ -105,7 +106,7 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 daemon-v1.sock      데몬 소켓
 daemon-v1.lock      한 개만 뜨게 하는 잠금 + pid
 logs/daemon.log     JSON 한 줄 로그
-workspace.json      등록한 저장소
+workspace.json      등록한 저장소, 워크트리 이름·고정·부모, 사이드바 워크스페이스(groups)
 sessions-v1.json    되살릴 세션 정보
 sessions/<번호>.vt  되살릴 화면 저장본
 layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 안에 쓴다. daemon stop 이면 지운다)
@@ -136,6 +137,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 - **스택**: React + Tailwind v4 + shadcn(new-york, Radix) + phosphor 아이콘. shadcn 컴포넌트는 `components/ui/` 에 두고 아이콘만 phosphor 로 바꿔 쓴다. 상태는 zustand 하나(`store.ts` 의 `AppModel`)에 둔다.
 - **상태의 주인**: 저장소, 워크트리, 세션, 배치는 데몬 것을 받아 들고만 있다. 배치는 데몬에 `layout` 요청을 보내고, 돌아온 배치(와 `layout_changed` 이벤트)로 바꿔 끼운다. 고른 워크트리, 열린 창, 플로팅 패널 자리, 테마 설정처럼 화면에만 있는 것은 앱이 정한다.
 - **그림판**: 터미널 그림판(WebGL 렌더러)은 화면 면마다 하나다. 메인 면과 플로팅 패널이 각자 하나를 가진다. 칸 자리는 DOM 이 잡고 글자는 그 위 canvas 가 그린다.
+- **사이드바 워크스페이스**: 워크스페이스 → 프로젝트 → 워크트리 세 단계다 (`Sidebar.tsx`, 묶음 칸은 `GroupSection.tsx`, 계산은 `groups.ts`). 기본 하나뿐이면 머리를 감춰 프로젝트만 늘어놓는다. "+ 워크스페이스" 로 만들고, 머리 메뉴로 이름·차례·지우기, 프로젝트 머리를 끌거나 프로젝트 메뉴 "워크스페이스로 옮기기" 로 옮긴다. 접은 상태는 다른 묶음처럼 localStorage 에 남는다. 폰 화면은 머리 아래 묶어 보이기만 한다. `GroupSection` 의 `remote` 를 주면 원격 컴퓨터 워크스페이스(컴퓨터 표시·연결 상태 배지, 끌어 넣기·이름 고치기 막음)로 그린다.
 - **끌어 놓기**: 탭을 칸 가장자리에 놓으면 `join_tab`, 칸을 탭 줄에 놓으면 `break_pane`, 칸을 칸에 놓으면 `move_pane`(가운데면 `swap`), 사이드바 카드에 놓으면 그 워크트리로 보낸다. 놓을 곳은 `data-drop-*` 속성으로 찾는다 (`dnd.ts`).
 - **플로팅 워크스페이스**: 워크스페이스 `floating` 의 탭과 칸을 메인 창 위 패널에 그린다. 자리와 크기는 localStorage 에 남는다. 닫아도 세션은 데몬에서 계속 돈다.
 - **브라우저 칸**: 문서 칸 종류 `{"kind":"browser","url":…}` 이다. 칸 자리는 DOM 이 잡고, 껍데기(Tauri, `unstable` 자식 웹뷰)가 그 자리에 진짜 WKWebView 를 얹는다 (`apps/desktop/src-tauri/src/browser.rs`). 웹뷰는 HTML 위에 그려지므로 메뉴·창이 열려 있거나 끄는 중이거나 플로팅 패널이 덮으면 잠깐 숨긴다. 페이지를 옮겨 다니면 `update_doc` 으로 주소를 배치에 남겨 다시 켜도 그 페이지로 연다. 페이지가 키보드를 잡고 있으면 앱 단축키가 메인 웹뷰로 오지 않으므로, 페이지마다 넣은 스크립트가 ⌘ 조합을 `thuminal-key://` 이동으로 바꾸고 껍데기가 그 이동을 가로채 메인 웹뷰에 넘긴다. 페이지에는 Tauri 명령 권한을 주지 않는다 (capabilities 는 메인 웹뷰만).

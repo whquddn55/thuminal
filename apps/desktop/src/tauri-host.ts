@@ -27,6 +27,7 @@ import type {
   RemoteApi,
   RemoteDevice,
   RemoteStatus,
+  RepoGroup,
   RepoIcon,
   RepoInfo,
   SearchHit,
@@ -180,6 +181,14 @@ export class TauriHostApi implements HostApi {
 
   repoIcon(repo: string): Promise<RepoIcon | null> {
     return req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
+  }
+
+  listGroups(): Promise<RepoGroup[]> {
+    return req<RepoGroup[]>({ type: "list_groups" }, (r) => r.groups);
+  }
+
+  setGroups(groups: RepoGroup[]): Promise<RepoGroup[]> {
+    return req<RepoGroup[]>({ type: "set_groups", groups }, (r) => r.groups);
   }
 
   listWorktrees(): Promise<WorktreeInfo[]> {

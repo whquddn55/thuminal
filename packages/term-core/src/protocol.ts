@@ -68,6 +68,21 @@ export interface RepoInfo {
   path: string;
 }
 
+/** 기본 워크스페이스의 id. 지울 수 없고, 다른 워크스페이스에 넣지 않은 프로젝트가 여기 든다 */
+export const DEFAULT_GROUP = "default";
+
+/**
+ * 사이드바 워크스페이스: 프로젝트(저장소) 묶음. 목록 차례가 사이드바 차례다.
+ * (`WorkspaceId` 는 워크트리 경로·floating·other 를 뜻하므로 묶음은 코드에서 `group` 이라 부른다)
+ */
+export interface RepoGroup {
+  /** 기본은 `DEFAULT_GROUP`. `set_groups` 에 빈 글로 주면 데몬이 새 id 를 붙인다 */
+  id: string;
+  name: string;
+  /** 든 프로젝트(저장소 id), 사이드바 차례 */
+  repos: string[];
+}
+
 /** 저장소 안에서 찾은 아이콘 그림 (`repo_icon` 요청) */
 export interface RepoIcon {
   /** `image/png` 또는 `image/webp` */

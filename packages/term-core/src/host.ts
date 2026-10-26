@@ -16,6 +16,7 @@ import type {
   OrcaScan,
   RemoteDevice,
   RemoteStatus,
+  RepoGroup,
   RepoIcon,
   RepoInfo,
   SearchHit,
@@ -131,6 +132,10 @@ export interface HostApi {
   removeRepo(repo: string): Promise<void>;
   /** 저장소(id) 안의 흔한 자리(favicon, logo, Tauri 아이콘 …)에서 찾은 아이콘. 없으면 null */
   repoIcon(repo: string): Promise<RepoIcon | null>;
+  /** 사이드바 워크스페이스. 기본이 늘 들어 있고, 프로젝트는 저마다 꼭 한 워크스페이스에 든다 */
+  listGroups(): Promise<RepoGroup[]>;
+  /** 워크스페이스 목록을 통째로 바꾸고 데몬이 맞춘 목록을 돌려받는다 (빈 id 는 새로 붙는다. 빠진 워크스페이스의 프로젝트는 기본으로) */
+  setGroups(groups: RepoGroup[]): Promise<RepoGroup[]>;
   listWorktrees(): Promise<WorktreeInfo[]>;
   createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo>;
   /** 이름·고정·부모를 바꾼다. 준 것만 바꾼다. parent 를 null 로 주면 부모에서 뗀다 */

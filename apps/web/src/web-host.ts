@@ -22,6 +22,7 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  RepoGroup,
   RepoIcon,
   RepoInfo,
   SearchHit,
@@ -286,6 +287,14 @@ export class WebHostApi implements HostApi {
 
   repoIcon(repo: string): Promise<RepoIcon | null> {
     return this.req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
+  }
+
+  listGroups(): Promise<RepoGroup[]> {
+    return this.req({ type: "list_groups" }, (r) => r.groups);
+  }
+
+  setGroups(groups: RepoGroup[]): Promise<RepoGroup[]> {
+    return this.req({ type: "set_groups", groups }, (r) => r.groups);
   }
 
   listWorktrees(): Promise<WorktreeInfo[]> {
