@@ -138,6 +138,8 @@ export interface AppState {
   notify: NotifySettings;
   /** 에이전트 팀 패널을 펼쳤는지, 어느 팀원이 키보드를 받는지 (리더 세션마다) */
   teams: Record<SessionId, TeamView>;
+  /** 붙인 그림 팝업을 펼친 세션. 팀 팝업과 한 칸에 하나만 열린다 */
+  gallery: Record<SessionId, boolean>;
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
   generation: number;
   error: string | null;
@@ -226,6 +228,7 @@ export class AppModel {
       creating: [],
       notify: loadNotifySettings(),
       teams: {},
+      gallery: {},
       generation: 0,
       error: null,
       notice: null,
@@ -648,7 +651,17 @@ export class AppModel {
     this.set((s) => {
       const v = teamView(s, leader);
       const next = f(v);
-      return next.open === v.open && next.mate === v.mate && next.keys === v.keys ? {} : { teams: { ...s.teams, [leader]: next } };
+      if (next.open === v.open && next.mate === v.mate && next.keys === v.keys) return {};
+      // 팀 팝업을 열면 그림 팝업은 닫는다
+      return { teams: { ...s.teams, [leader]: next }, ...(next.open && s.gallery[leader] ? { gallery: { ...s.gallery, [leader]: false } } : {}) };
+    });
+
+  /** 붙인 그림 팝업을 열고 닫는다. 열면 팀 팝업은 닫는다 */
+  toggleGallery = (session: SessionId, open?: boolean) =>
+    this.set((s) => {
+      const o = open ?? !s.gallery[session];
+      if (o === !!s.gallery[session]) return {};
+      return { gallery: { ...s.gallery, [session]: o }, ...(o && s.teams[session]?.open ? { teams: { ...s.teams, [session]: DEFAULT_TEAM_VIEW } } : {}) };
     });
 
   /** 팀원 팝업을 열고 닫는다. 열면 목록부터 */

@@ -32,6 +32,7 @@ import { NewTabMenu } from "./NewTabMenu";
 import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
 import { rendererOptions } from "./terminal-font";
 import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
+import { GalleryButton } from "./ImagePanel";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
 
@@ -393,6 +394,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             </>
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
+          {pane.type === "terminal" && <GalleryButton session={pane.session} />}
           {mates.length > 0 && pane.type === "terminal" && (
             <button
               className="flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
