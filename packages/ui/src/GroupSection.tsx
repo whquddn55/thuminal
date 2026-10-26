@@ -7,13 +7,16 @@
 import { CaretDownIcon, DesktopIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
+import type { RemoteHostState } from "@thuminal/term-core";
+
 import { Button } from "./components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { useDrag } from "./dnd";
 import { cn } from "./lib/utils";
+import { HOST_STATE_LABEL, hostStateIsError } from "./store";
 
-/** 원격 컴퓨터 연결 상태 */
-export type RemoteState = "connected" | "connecting" | "offline";
+/** 원격 컴퓨터 연결 상태 (껍데기 `RemoteHost.state` 그대로) */
+export type RemoteState = RemoteHostState;
 
 export interface GroupSectionProps {
   /** 워크스페이스 id. 끌어 넣기 자리(`data-drop-group`)에 쓴다 */
@@ -159,26 +162,30 @@ export function GroupSection({
   );
 }
 
-const REMOTE_LABEL: Record<RemoteState, string> = { connected: "연결됨", connecting: "연결 중", offline: "끊김" };
-
-/** 원격 컴퓨터 연결 상태 배지 (워크스페이스 머리 이름 옆) */
+/**
+ * 원격 컴퓨터 연결 상태 배지 (워크스페이스 머리 이름 옆). 연결됨·연결 중·끊김(다시 붙는 중)은 흐리게,
+ * 토큰 거절·판이 다름은 다시 붙어도 풀리지 않는 오류라 붉게 그린다
+ */
 export function RemoteBadge({ state, className }: { state: RemoteState; className?: string }) {
+  const error = hostStateIsError(state);
   return (
     <span
+      data-state={state}
       className={cn(
         "inline-flex h-4 shrink-0 items-center gap-1 rounded border px-1 text-[10px] leading-none",
         state === "connected" && "border-agent-done/40 text-foreground/70",
         state === "connecting" && "border-sidebar-border text-muted-foreground",
-        state === "offline" && "border-sidebar-border text-muted-foreground/70",
+        state === "disconnected" && "border-sidebar-border text-muted-foreground/70",
+        error && "border-destructive/50 text-destructive",
         className,
       )}
     >
       {state === "connecting" ? (
         <span className="thm-spinner block size-1.5 rounded-full border border-muted-foreground border-t-transparent" />
       ) : (
-        <span className={cn("block size-1.5 rounded-full", state === "connected" ? "bg-agent-done" : "bg-muted-foreground/50")} />
+        <span className={cn("block size-1.5 rounded-full", state === "connected" ? "bg-agent-done" : error ? "bg-destructive" : "bg-muted-foreground/50")} />
       )}
-      {REMOTE_LABEL[state]}
+      {HOST_STATE_LABEL[state]}
     </span>
   );
 }

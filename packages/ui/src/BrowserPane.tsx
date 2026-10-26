@@ -10,7 +10,7 @@ import { useStore } from "zustand";
 
 import type { Bounds } from "@thuminal/term-core";
 
-import { pageStore, setPage } from "./browser-state";
+import { pageKey, pageStore, setPage } from "./browser-state";
 import { useDrag } from "./dnd";
 import { cn } from "./lib/utils";
 import { useApp, useModel } from "./store";
@@ -54,7 +54,8 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
   const browser = model.services.host.browser;
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const page = useStore(pageStore, (s) => s[paneId]);
+  const key = pageKey(model.hostKey, paneId);
+  const page = useStore(pageStore, (s) => s[key]);
   const [editing, setEditing] = useState<string | null>(null);
   const overlay = useOverlayOpen();
   const dragging = useDrag((d) => d.source !== null);
@@ -122,7 +123,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
   const go = (text: string) => {
     const next = toUrl(text);
     setEditing(null);
-    setPage(paneId, { url: next, loading: true });
+    setPage(key, { url: next, loading: true });
     void browser.navigate(paneId, next).catch(model.fail);
     void browser.focus(paneId).catch(() => undefined);
   };

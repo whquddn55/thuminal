@@ -3,6 +3,10 @@
 // - 저장소, 워크트리, git 상태, 세션, 배치는 데몬 것을 받아 들고 있기만 한다. 배치는 데몬이 바꾸고 이벤트로 알린다.
 // - 고른 워크트리, 열린 창, 플로팅 패널 자리, 테마 설정처럼 화면에만 있는 것은 여기서 정한다.
 // - 터미널 컨트롤러(엔진, 붙기)는 상태가 아니라서 zustand 밖에 둔다.
+// - 호스트(데몬)마다 AppModel 이 하나다. 로컬이 root 이고, 원격 컴퓨터마다 자식 모델을 root 가 만든다.
+//   세션·칸·탭 번호와 워크트리 경로는 호스트마다 따로라 모델이 갈라 든다. 창 전체 상태(`WINDOW_KEYS`: 테마, 글꼴, 플로팅,
+//   창, 알림 설정, 사이드바, 읽은 때, 최근 목록, 고른 호스트 …)는 root 가 들고 자식 store 에 그대로 비춘다.
+//   자식이 그 키를 바꾸면 root 로 보낸다. 고른 곳은 (activeHost, 그 모델의 active) 다.
 
 import { createContext, useContext } from "react";
 import { useStore } from "zustand";
@@ -15,6 +19,8 @@ import {
   type LayoutOp,
   OTHER_WORKSPACE,
   type PaneRef,
+  type RemoteHost,
+  type RemoteHostState,
   type RepoGroup,
   type RepoInfo,
   type SessionId,
@@ -28,7 +34,7 @@ import {
 } from "@thuminal/term-core";
 
 import { AGENTS } from "./agents";
-import { setPage } from "./browser-state";
+import { pageKey, setPage } from "./browser-state";
 import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
@@ -67,8 +73,8 @@ export interface NewWorktree {
   parent?: string;
 }
 
-/** 설정창의 칸 */
-export type SettingsSection = "theme" | "font" | "agent" | "notify" | "remote";
+/** 설정창의 칸. remote 는 이 컴퓨터 원격 접속, hosts 는 내가 붙는 원격 컴퓨터 */
+export type SettingsSection = "theme" | "font" | "agent" | "notify" | "remote" | "hosts";
 
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }
@@ -128,10 +134,10 @@ export interface AppState {
   sidebarOpen: boolean;
   /** 로그인 셸 PATH 에서 찾은 에이전트 명령 (새 탭 메뉴에 보인다) */
   agents: string[];
-  /** 워크스페이스마다 마지막으로 본 때 (ms). 다시 켜도 남는다 */
-  seen: Record<WorkspaceId, number>;
-  /** 최근에 고른 워크스페이스 (앞이 가장 최근). ⌘J 빈 검색이 이 순서로 보인다 */
-  recent: WorkspaceId[];
+  /** 워크스페이스마다 마지막으로 본 때 (ms). 키는 `placeKey` (원격은 `<호스트>|<워크스페이스>`). 다시 켜도 남는다 */
+  seen: Record<string, number>;
+  /** 최근에 고른 곳의 `placeKey` (앞이 가장 최근). ⌘J 빈 검색이 이 순서로 보인다 */
+  recent: string[];
   /** 만드는 중인 워크트리 */
   creating: { repo: string; branch: string }[];
   /** 알림 설정 */
@@ -140,6 +146,12 @@ export interface AppState {
   teams: Record<SessionId, TeamView>;
   /** 붙인 그림 팝업을 펼친 세션. 팀 팝업과 한 칸에 하나만 열린다 */
   gallery: Record<SessionId, boolean>;
+  /** 메인 면에 보이는 호스트 (""는 로컬, 아니면 원격 호스트 id). 창 전체 상태 */
+  activeHost: string;
+  /** 열린 창(dialog)이 다룰 호스트. 창 전체 상태 */
+  dialogHost: string;
+  /** 등록한 원격 컴퓨터와 연결 상태 (껍데기가 알려 준 그대로). 창 전체 상태 */
+  remoteHosts: RemoteHost[];
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
   generation: number;
   error: string | null;
@@ -194,13 +206,75 @@ function loadJson<T>(key: string, fallback: T): T {
 
 const byId = (id: number): PaneRef => ({ by: "id", value: id });
 
+/** 창 하나에 하나만 있는 상태. 자식(원격 호스트) 모델은 root 것을 비춰 들고, 바꾸면 root 로 보낸다 */
+export const WINDOW_KEYS = [
+  "panel",
+  "rightWidth",
+  "floating",
+  "focusArea",
+  "dialog",
+  "dialogHost",
+  "theme",
+  "terminalFont",
+  "zoom",
+  "systemDark",
+  "sidebarWidth",
+  "sidebarOpen",
+  "seen",
+  "recent",
+  "notify",
+  "activeHost",
+  "remoteHosts",
+  "error",
+  "notice",
+] as const satisfies readonly (keyof AppState)[];
+const WINDOW_KEY_SET = new Set<string>(WINDOW_KEYS);
+
+/** 호스트 안 워크스페이스를 창 전체에서 가르는 키. 로컬은 워크스페이스 그대로, 원격은 `<호스트 id>|<워크스페이스>` */
+export function placeKey(host: string, ws: WorkspaceId): string {
+  return host ? `${host}|${ws}` : ws;
+}
+
+/** `placeKey` 를 되돌린다. 원격 호스트 id 는 16진수라 로컬 경로(`/…`)·floating·other 와 겹치지 않는다 */
+export function parsePlace(key: string): { host: string; ws: WorkspaceId } {
+  const m = /^([0-9a-zA-Z]+)\|(.*)$/s.exec(key);
+  return m && !key.startsWith("/") ? { host: m[1], ws: m[2] } : { host: "", ws: key };
+}
+
+/** 원격 호스트 연결 상태 이름 (사이드바 배지, 메인 면 띠) */
+export const HOST_STATE_LABEL: Record<RemoteHostState, string> = {
+  connected: "연결됨",
+  connecting: "연결 중",
+  disconnected: "끊김",
+  unauthorized: "토큰 거절",
+  version_mismatch: "판이 다름",
+};
+
+/** 다시 등록해야 풀리는 상태 (다시 붙어도 그대로다) */
+export const hostStateIsError = (s: RemoteHostState) => s === "unauthorized" || s === "version_mismatch";
+
+/** 원격 호스트 알림을 누르면 돌아올 번호를 이 수부터 센다 (로컬 세션 번호와 겹치지 않게) */
+const REMOTE_NOTICE_BASE = 1_000_000_000;
+
 export class AppModel {
   readonly store: StoreApi<AppState>;
+  /** 로컬 모델 (창 전체 상태의 주인). root 면 자기 자신 */
+  readonly root: AppModel;
+  /** 이 모델의 호스트. 로컬은 "", 원격은 호스트 id */
+  readonly hostKey: string;
   private readonly controllers = new Map<SessionId, TerminalController>();
   private timers: number[] = [];
   private unsubscribe: (() => void) | null = null;
+  /** 원격 호스트 모델 (root 만 든다) */
+  private readonly children = new Map<string, AppModel>();
 
-  constructor(readonly services: Services) {
+  /** parent 를 주면 그 root 아래 원격 호스트 모델이 된다 (`services.host` 는 그 호스트 HostApi) */
+  constructor(
+    readonly services: Services,
+    parent?: AppModel,
+  ) {
+    this.root = parent?.root ?? this;
+    this.hostKey = parent ? (services.host.hostId ?? "") : "";
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     this.store = createStore<AppState>(() => ({
       repos: [],
@@ -229,68 +303,229 @@ export class AppModel {
       notify: loadNotifySettings(),
       teams: {},
       gallery: {},
+      activeHost: "",
+      dialogHost: "",
+      remoteHosts: [],
       generation: 0,
       error: null,
       notice: null,
+      ...(parent ? pickWindow(this.root.get()) : {}),
     }));
+    if (parent) {
+      // 창 전체 상태를 root 에서 비춰 받는다 (root 가 바뀌면 같은 차례 안에 바로 따라 바뀐다)
+      this.unmirror = this.root.store.subscribe((st, prev) => {
+        const patch: Partial<AppState> = {};
+        let changed = false;
+        for (const k of WINDOW_KEYS)
+          if (st[k] !== prev[k]) {
+            (patch as Record<string, unknown>)[k] = st[k];
+            changed = true;
+          }
+        if (changed) this.store.setState(patch);
+      });
+      return;
+    }
     media.addEventListener("change", (e) => {
       this.set({ systemDark: e.matches });
       this.applyTheme();
     });
   }
 
+  private unmirror: (() => void) | null = null;
+
+  get isRoot(): boolean {
+    return this.root === this;
+  }
+
   get = () => this.store.getState();
-  private set = (p: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => this.store.setState(p);
+
+  /** 창 전체 키는 root 로, 나머지는 이 모델 store 로 */
+  private set = (p: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => {
+    if (this.isRoot) return this.store.setState(p);
+    const patch = typeof p === "function" ? p(this.get()) : p;
+    const mine: Record<string, unknown> = {};
+    const win: Record<string, unknown> = {};
+    let m = false;
+    let w = false;
+    for (const [k, v] of Object.entries(patch)) {
+      if (WINDOW_KEY_SET.has(k)) {
+        win[k] = v;
+        w = true;
+      } else {
+        mine[k] = v;
+        m = true;
+      }
+    }
+    if (w) this.root.store.setState(win as Partial<AppState>);
+    if (m) this.store.setState(mine as Partial<AppState>);
+  };
+
+  // ---- 호스트 ----
+
+  /** 이 모델 안 워크스페이스의 창 전체 키 (`placeKey`) */
+  placeKey = (ws: WorkspaceId): string => placeKey(this.hostKey, ws);
+
+  /** 호스트 모델. "" 는 root(로컬). 없는 원격 호스트면 undefined */
+  hostModel(host: string): AppModel | undefined {
+    return host ? this.root.children.get(host) : this.root;
+  }
+
+  /** 로컬과 원격 호스트 모델 모두 (로컬이 앞) */
+  models(): AppModel[] {
+    return [this.root, ...this.root.children.values()];
+  }
+
+  /** 메인 면에 보이는 호스트 모델 */
+  activeModel(): AppModel {
+    return this.hostModel(this.root.get().activeHost) ?? this.root;
+  }
+
+  /** 키보드 단축키가 다룰 모델: 플로팅 패널에 키보드가 있으면 로컬, 아니면 메인 면 호스트 */
+  focusedModel(): AppModel {
+    const s = this.root.get();
+    return s.floating.open && s.focusArea === "floating" ? this.root : this.activeModel();
+  }
+
+  /** 이 모델 호스트의 연결 상태 (로컬은 늘 connected 로 본다) */
+  hostState(s: AppState = this.get()): RemoteHostState {
+    if (this.isRoot) return "connected";
+    return s.remoteHosts.find((h) => h.id === this.hostKey)?.state ?? "disconnected";
+  }
+
+  /** 원격 호스트 이름 (로컬은 "") */
+  hostName(s: AppState = this.get()): string {
+    if (this.isRoot) return "";
+    return s.remoteHosts.find((h) => h.id === this.hostKey)?.name ?? this.hostKey;
+  }
+
+  /** 껍데기가 알려 준 원격 호스트 목록에 맞춰 호스트 모델을 만들고 없앤다 (root 만) */
+  private syncHosts(list: RemoteHost[]) {
+    const hosts = this.services.host.hosts;
+    if (!hosts) return;
+    for (const h of list) {
+      let child = this.children.get(h.id);
+      if (!child) {
+        child = new AppModel({ ...this.services, host: hosts.forHost(h.id) }, this);
+        this.children.set(h.id, child);
+        void child.start(this.startOpts);
+      }
+    }
+    for (const [id, child] of [...this.children])
+      if (!list.some((h) => h.id === id)) {
+        child.stop();
+        this.children.delete(id);
+      }
+    const gone = this.get().activeHost && !list.some((h) => h.id === this.get().activeHost);
+    this.set({ remoteHosts: list, ...(gone ? { activeHost: "", focusArea: "main" as const } : {}) });
+    for (const h of list) this.children.get(h.id)?.hostStateChanged(h.state);
+  }
+
+  /** 처음 붙었는데 아직 읽지 못했으면 읽는다. 다시 붙은 것은 `daemon_reconnected` 가 알린다 */
+  private hostStateChanged(state: RemoteHostState) {
+    if (state === "connected" && !this.loaded && !this.loading) void this.reload();
+  }
+
+  /** 데몬 것을 한 번이라도 읽었는지, 읽는 중인지 */
+  private loaded = false;
+  private loading = false;
+  private startOpts: { gitStatus?: boolean } = {};
 
   /** gitStatus 를 끄면 git 상태를 주기적으로 읽지 않는다 (폰 화면은 쓰지 않는다) */
   async start(opts: { gitStatus?: boolean } = {}): Promise<void> {
     const host = this.services.host;
+    this.startOpts = opts;
     const offDaemon = host.onEvent((e) => this.onEvent(e));
     const offBrowser = host.browser?.onEvent((e) => this.onBrowserEvent(e));
-    const offClick = host.onNotificationClick?.((session) => this.revealSession(session));
-    // Dock 배지: 안 읽은 워크스페이스 수
-    let badge = -1;
-    const offBadge = this.store.subscribe((st) => {
-      const n = Object.keys(st.layouts).filter((ws) => this.unread(ws, st)).length;
-      if (n !== badge) {
-        badge = n;
-        void host.setBadge?.(n).catch(() => undefined);
-      }
-    });
+    // 알림 누르기·Dock 배지·원격 호스트 목록은 창 하나의 일이라 root 만 맡는다
+    const offClick = this.isRoot ? host.onNotificationClick?.((n) => this.onNoticeClick(n)) : undefined;
+    const offBadge = this.store.subscribe(() => this.root.updateBadge());
+    const offHosts = this.isRoot ? host.hosts?.onChange((list) => this.syncHosts(list)) : undefined;
     this.unsubscribe = () => {
       offDaemon();
       offBrowser?.();
       offClick?.();
       offBadge();
+      offHosts?.();
     };
-    try {
-      await this.reloadAll();
-      // 처음에는 마지막에 보던 워크트리를 고른다. 없으면 터미널이 있는 첫 워크트리
-      const { worktrees, layouts, recent } = this.get();
-      const last = recent.find((ws) => ws === OTHER_WORKSPACE || worktrees.some((w) => w.path === ws));
-      const first = worktrees.find((w) => (layouts[w.path]?.tabs.length ?? 0) > 0) ?? worktrees[0];
-      if (last) this.set({ active: last });
-      else if (first) this.set({ active: first.path });
-    } catch (e) {
-      this.fail(e);
+    // 원격이 아직 붙지 않았으면 읽지 않는다. 붙으면 hostStateChanged 가 읽는다
+    if (this.isRoot || this.hostState() === "connected") {
+      this.loading = true;
+      try {
+        await this.reloadAll();
+        this.loaded = true;
+        this.pickInitial();
+      } catch (e) {
+        this.failQuiet(e);
+      } finally {
+        this.loading = false;
+      }
     }
-    this.markSeen();
+    if (this.isRoot) {
+      this.markSeen();
+      if (this.get().zoom.ui !== 1) void host.setUiZoom?.(this.get().zoom.ui).catch(() => undefined);
+    }
     void this.applyTheme();
-    if (this.get().zoom.ui !== 1) void host.setUiZoom?.(this.get().zoom.ui).catch(() => undefined);
+    if (this.loaded) this.findAgents();
+    if (opts.gitStatus === false) return;
+    void this.refreshStatus();
+    // git 상태: 지금 워크트리는 2초, 모두는 10초마다 (워크트리가 수십 개면 한 바퀴에 몇 초 걸린다). 원격은 붙어 있을 때만
+    this.timers.push(window.setInterval(() => this.shown() && void this.refreshStatus(this.get().active), 2000));
+    this.timers.push(window.setInterval(() => this.hostState() === "connected" && void this.refreshStatus(), 10000));
+  }
+
+  /** 이 모델이 메인 면에 보이고 붙어 있는지 */
+  private shown(s: AppState = this.get()): boolean {
+    return s.activeHost === this.hostKey && this.hostState(s) === "connected";
+  }
+
+  /** 처음 고를 워크스페이스: 이 호스트에서 마지막에 보던 곳, 없으면 터미널이 있는 첫 워크트리 */
+  private pickInitial() {
+    const { worktrees, layouts, recent } = this.get();
+    const last = recent
+      .map(parsePlace)
+      .find((p) => p.host === this.hostKey && (p.ws === OTHER_WORKSPACE || worktrees.some((w) => w.path === p.ws)))?.ws;
+    const first = worktrees.find((w) => (layouts[w.path]?.tabs.length ?? 0) > 0) ?? worktrees[0];
+    if (last) this.set({ active: last });
+    else if (first) this.set({ active: first.path });
+  }
+
+  private findAgents() {
     void this.services.host.findCommands(AGENTS.map((a) => a.cmd)).then(
       (agents) => this.set({ agents }),
       () => undefined,
     );
-    if (opts.gitStatus === false) return;
-    void this.refreshStatus();
-    // git 상태: 지금 워크트리는 2초, 모두는 10초마다 (워크트리가 수십 개면 한 바퀴에 몇 초 걸린다)
-    this.timers.push(window.setInterval(() => void this.refreshStatus(this.get().active), 2000));
-    this.timers.push(window.setInterval(() => void this.refreshStatus(), 10000));
   }
 
   stop() {
     for (const t of this.timers) window.clearInterval(t);
+    this.timers = [];
     this.unsubscribe?.();
+    this.unsubscribe = null;
+    for (const child of this.children.values()) child.stop();
+    if (!this.isRoot) {
+      // 원격 호스트를 지웠다: 붙기를 놓고 그 호스트 브라우저 칸을 닫는다
+      this.unmirror?.();
+      this.unmirror = null;
+      for (const c of this.controllers.values()) void c.dispose();
+      this.controllers.clear();
+      for (const id of this.browsers) void this.services.host.browser?.close(id).catch(() => undefined);
+      this.browsers.clear();
+    }
+  }
+
+  /** Dock 배지: 모든 호스트의 안 읽은 워크스페이스 수 (root 만) */
+  private badge = -1;
+  private updateBadge() {
+    if (!this.isRoot) return;
+    let n = 0;
+    for (const m of this.models()) {
+      const st = m.get();
+      n += Object.keys(st.layouts).filter((ws) => m.unread(ws, st)).length;
+    }
+    if (n !== this.badge) {
+      this.badge = n;
+      void this.services.host.setBadge?.(n).catch(() => undefined);
+    }
   }
 
   private async reloadAll() {
@@ -416,23 +651,40 @@ export class AppModel {
     }
   }
 
-  /** 데몬이 다시 떴다: 붙어 있던 터미널을 모두 놓고 처음부터 다시 읽는다 */
+  /** 데몬이 다시 떴다(원격은 다시 붙었다): 붙어 있던 터미널을 모두 놓고 처음부터 다시 읽는다. 터미널은 저장본으로 다시 그린다 */
   private async reload() {
     for (const c of this.controllers.values()) void c.dispose();
     this.controllers.clear();
     this.set((s) => ({ generation: s.generation + 1, sessions: {} }));
+    const first = !this.loaded;
+    this.loading = true;
     try {
       await this.reloadAll();
+      this.loaded = true;
+      if (first) {
+        this.pickInitial();
+        this.findAgents();
+        void this.refreshStatus();
+      }
       void this.applyTheme();
     } catch (e) {
-      this.fail(e);
+      this.failQuiet(e);
+    } finally {
+      this.loading = false;
     }
   }
 
   fail = (e: unknown) => {
-    console.error("[thuminal]", e);
-    this.set({ error: String(e) });
+    console.error("[thuminal]", this.hostKey || "로컬", e);
+    const name = this.hostName();
+    this.set({ error: name ? `${name}: ${e}` : String(e) });
   };
+
+  /** 원격이 끊겨 있어 실패한 것은 띠에 띄우지 않는다 (사이드바 연결 배지가 알린다) */
+  private failQuiet(e: unknown) {
+    if (!this.isRoot && this.hostState() !== "connected") console.warn("[thuminal]", this.hostKey, e);
+    else this.fail(e);
+  }
 
   clearError = () => this.set({ error: null, notice: null });
 
@@ -463,6 +715,11 @@ export class AppModel {
 
   private engineColors: Parameters<TerminalController["setColors"]>[0] = null;
 
+  private setEngineColors(colors: Parameters<TerminalController["setColors"]>[0]) {
+    this.engineColors = colors;
+    for (const c of this.controllers.values()) c.setColors(colors);
+  }
+
   // ---- 터미널 링크 ----
 
   /** 터미널 글자 속 상대 경로를 풀 기준 폴더: 셸 폴더, claude 폴더, 그 칸의 워크트리 */
@@ -483,14 +740,17 @@ export class AppModel {
       else window.open(link.url, "_blank", "noopener");
       return;
     }
-    if (mode === "system" && host.openPath) return void host.openPath(link.path).catch(fail);
+    // 원격 경로는 이 컴퓨터 앱·Finder·file:// 로 열 수 없다. 워크트리 안 파일만 파일 칸으로 연다 (내려받아 열기는 다음 단계)
+    const remote = !!host.isRemote;
+    if (mode === "system" && host.openPath && !remote) return void host.openPath(link.path).catch(fail);
     // thuminal 안: 폴더는 Finder, HTML 은 브라우저 칸, 워크트리 안 파일은 파일 칸 (줄까지)
-    if (link.isDir) return void host.reveal(link.path).catch(fail);
-    if (/\.html?$/i.test(link.path) && host.browser) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
+    if (link.isDir) return remote ? this.notice("원격 컴퓨터 폴더는 아직 열 수 없다") : void host.reveal(link.path).catch(fail);
+    if (/\.html?$/i.test(link.path) && host.browser && !remote) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
     const wt = this.get()
       .worktrees.filter((w) => link.path.startsWith(`${w.path}/`))
       .sort((a, b) => b.path.length - a.path.length)[0];
     if (!wt) {
+      if (remote) return this.notice("원격 컴퓨터의 워크트리 밖 파일은 아직 열 수 없다");
       // 파일 칸은 워크트리 안 파일만 연다. 밖이면 기본 앱으로
       if (host.openPath) {
         this.notice("워크트리 밖 파일이라 기본 앱으로 열었다");
@@ -513,8 +773,8 @@ export class AppModel {
    * Orca 와 같이 에이전트가 턴을 끝냈거나, 사용자를 부르거나, 벨이 울렸을 때만 친다. 출력만 나온 것은 치지 않는다
    */
   unread(ws: WorkspaceId, s: AppState = this.get()): boolean {
-    if (ws === s.active) return false;
-    const seen = s.seen[ws] ?? 0;
+    if (ws === s.active && s.activeHost === this.hostKey) return false;
+    const seen = s.seen[this.placeKey(ws)] ?? 0;
     return sessionsOf(s.layouts[ws]).some((id) => {
       const x = s.sessions[id];
       if (!x) return false;
@@ -524,56 +784,79 @@ export class AppModel {
   }
 
   private markSeen(ws: WorkspaceId = this.get().active) {
-    this.set((s) => ({ seen: { ...s.seen, [ws]: Date.now() } }));
+    this.set((s) => ({ seen: { ...s.seen, [this.placeKey(ws)]: Date.now() } }));
     localStorage.setItem(SEEN_KEY, JSON.stringify(this.get().seen));
   }
 
   /** 상태 칸을 눌러 읽음으로 돌린다 */
   markRead = (ws: WorkspaceId) => this.markSeen(ws);
 
-  /** 워크트리 방문 기록 (⌘⌥← → 로 오간다). 기록 안에서 옮겨 다닐 때는 쌓지 않는다 */
-  private history: WorkspaceId[] = [];
+  /** 워크트리 방문 기록의 `placeKey` (⌘⌥← → 로 오간다. root 가 든다). 기록 안에서 옮겨 다닐 때는 쌓지 않는다 */
+  private history: string[] = [];
   private historyAt = -1;
 
+  /** 지금 메인 면에 보이는 곳의 `placeKey` */
+  currentPlace(): string {
+    const m = this.activeModel();
+    return m.placeKey(m.get().active);
+  }
+
+  /** 이 호스트의 워크스페이스를 메인 면에 고른다 (호스트도 바뀐다) */
   select = (ws: WorkspaceId, fromHistory = false) => {
-    if (!fromHistory && ws !== this.get().active) {
-      this.history = [...this.history.slice(0, this.historyAt + 1), ws].slice(-50);
-      this.historyAt = this.history.length - 1;
+    const root = this.root;
+    const key = this.placeKey(ws);
+    const before = this.activeModel();
+    if (!fromHistory && key !== root.currentPlace()) {
+      root.history = [...root.history.slice(0, root.historyAt + 1), key].slice(-50);
+      root.historyAt = root.history.length - 1;
     }
-    this.markSeen();
-    const recent = [ws, ...this.get().recent.filter((x) => x !== ws)].slice(0, 30);
+    // 떠나는 곳을 읽음으로 (다른 호스트에서 올 수도 있다)
+    before.markSeen();
+    const recent = [key, ...this.get().recent.filter((x) => x !== key)].slice(0, 30);
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-    this.set({ active: ws, focusArea: "main", recent });
+    this.set({ active: ws, activeHost: this.hostKey, focusArea: "main", recent });
     this.markSeen();
     void this.refreshStatus(ws);
   };
 
-  goHistory = (delta: number) => {
-    if (this.historyAt < 0) this.history = [this.get().active];
-    const at = Math.max(0, Math.min(this.history.length - 1, (this.historyAt < 0 ? 0 : this.historyAt) + delta));
-    this.historyAt = at;
-    const ws = this.history[at];
-    if (ws && ws !== this.get().active) this.select(ws, true);
+  /** `placeKey` 로 고른다. 그 호스트가 없으면(지운 원격) false */
+  selectPlace = (key: string, fromHistory = false): boolean => {
+    const p = parsePlace(key);
+    const m = this.hostModel(p.host);
+    if (!m) return false;
+    m.select(p.ws, fromHistory);
+    return true;
   };
 
-  /** 사이드바에 보이는 순서의 워크트리 (DOM 에서 읽는다. 접힌 그룹은 빠진다) */
-  private sidebarOrder(): WorkspaceId[] {
-    const order = [...document.querySelectorAll<HTMLElement>("[data-drop-workspace]")].map((e) => e.dataset.dropWorkspace!);
+  goHistory = (delta: number) => {
+    const root = this.root;
+    if (root.historyAt < 0) root.history = [root.currentPlace()];
+    const at = Math.max(0, Math.min(root.history.length - 1, (root.historyAt < 0 ? 0 : root.historyAt) + delta));
+    root.historyAt = at;
+    const key = root.history[at];
+    if (key && key !== root.currentPlace()) root.selectPlace(key, true);
+  };
+
+  /** 사이드바에 보이는 순서의 `placeKey` (DOM 에서 읽는다. 접힌 그룹은 빠진다. 호스트는 가장 가까운 `data-host`) */
+  private sidebarOrder(): string[] {
+    const order = [...document.querySelectorAll<HTMLElement>("[data-drop-workspace]")].map((e) =>
+      placeKey(e.closest<HTMLElement>("[data-host]")?.dataset.host ?? "", e.dataset.dropWorkspace!),
+    );
     return order.filter((ws, i) => order.indexOf(ws) === i);
   }
 
   /** ⌘1~9 */
   selectWorktreeIndex = (i: number) => {
-    const ws = this.sidebarOrder()[i];
-    if (ws) this.select(ws);
+    const key = this.root.sidebarOrder()[i];
+    if (key) this.root.selectPlace(key);
   };
 
   /** ⌘⇧↑ ↓: 사이드바 순서로 이전·다음 워크트리 */
   selectNearWorktree = (delta: number) => {
-    const list = this.sidebarOrder();
+    const list = this.root.sidebarOrder();
     if (!list.length) return;
-    const i = list.indexOf(this.get().active);
-    this.select(list[(i + delta + list.length) % list.length]);
+    const i = list.indexOf(this.root.currentPlace());
+    this.root.selectPlace(list[(i + delta + list.length) % list.length]);
   };
 
   /** 그 탭을 연다. 이미 그 탭이 열려 있으면 오른쪽 사이드바를 닫는다 */
@@ -593,7 +876,8 @@ export class AppModel {
   };
 
   setCommitDraft = (ws: string, text: string) => this.set((s) => ({ commitDrafts: { ...s.commitDrafts, [ws]: text } }));
-  setDialog = (d: Dialog) => this.set({ dialog: d });
+  /** 창을 연다. 창 안 동작은 이 모델(호스트)이 맡는다 */
+  setDialog = (d: Dialog) => this.set({ dialog: d, dialogHost: this.hostKey });
   setFocusArea = (a: AppState["focusArea"]) => this.set({ focusArea: a });
 
   // ---- 알림 ----
@@ -604,35 +888,61 @@ export class AppModel {
     this.set({ notify });
   };
 
-  /** 세션이 든 워크스페이스 이름 (알림 제목) */
+  /** 세션이 든 워크스페이스 이름 (알림 제목). 원격이면 컴퓨터 이름을 앞에 붙인다 */
   private workspaceTitle(ws: WorkspaceId): string {
+    const name = this.hostName();
+    const prefix = name ? `${name} · ` : "";
     if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
-    if (ws === OTHER_WORKSPACE) return "워크트리 밖 터미널";
+    if (ws === OTHER_WORKSPACE) return `${prefix}워크트리 밖 터미널`;
     const w = this.get().worktrees.find((x) => x.path === ws);
-    return w ? worktreeTitle(w) : (ws.split("/").pop() ?? ws);
+    return prefix + (w ? worktreeTitle(w) : (ws.split("/").pop() ?? ws));
   }
 
-  /** 지금 그 칸을 보고 있는지: 앱이 앞에 있고, 그 워크스페이스·탭이 화면에 있다 */
+  /** 지금 그 칸을 보고 있는지: 앱이 앞에 있고, 그 호스트·워크스페이스·탭이 화면에 있다 */
   private watching(session: SessionId): boolean {
     if (!document.hasFocus()) return false;
     const s = this.get();
     const at = paneOfSession(Object.values(s.layouts), session);
     if (!at) return false;
     const ws = at.layout.workspace;
-    const shown = ws === FLOATING_WORKSPACE ? s.floating.open : ws === s.active;
+    const shown = ws === FLOATING_WORKSPACE ? this.isRoot && s.floating.open : ws === s.active && s.activeHost === this.hostKey;
     return shown && activeTab(at.layout)?.id === at.tab.id;
   }
 
   private notifySession(session: SessionId, n: Notice) {
     const s = this.get();
-    const notify = this.services.host.notify;
+    // 알림은 창 하나의 일이라 로컬 껍데기로 띄운다
+    const notify = this.root.services.host.notify;
     if (!notify || !allowed(s.notify, n.kind) || this.watching(session)) return;
     const at = paneOfSession(Object.values(s.layouts), session);
     if (!at) return;
-    void notify({ title: this.workspaceTitle(at.layout.workspace), subtitle: n.subtitle, body: n.body, session, sound: s.notify.sound }).catch(() => undefined);
+    const id = this.root.noticeId(this.hostKey, session);
+    void notify({ title: this.workspaceTitle(at.layout.workspace), subtitle: n.subtitle, body: n.body, session: id, sound: s.notify.sound }).catch(() => undefined);
   }
 
-  /** 알림을 눌렀다: 그 세션이 든 워크스페이스·탭·칸으로 간다 */
+  /** 원격 호스트 알림 번호 → (호스트, 세션). 로컬 세션은 세션 번호를 그대로 쓴다 (root 만 든다) */
+  private readonly notices = new Map<number, { host: string; session: SessionId }>();
+  private nextNotice = REMOTE_NOTICE_BASE;
+
+  /** 알림에 실을 번호. 누르면 이 번호가 돌아온다 */
+  private noticeId(host: string, session: SessionId): number {
+    if (!host) return session;
+    for (const [id, v] of this.notices) if (v.host === host && v.session === session) return id;
+    const id = this.nextNotice++;
+    this.notices.set(id, { host, session });
+    // 오래된 것부터 버린다
+    if (this.notices.size > 500) this.notices.delete(this.notices.keys().next().value!);
+    return id;
+  }
+
+  /** 알림을 눌렀다 (root) */
+  private onNoticeClick(id: number) {
+    const hit = this.notices.get(id);
+    if (!hit) return this.revealSession(id);
+    this.hostModel(hit.host)?.revealSession(hit.session);
+  }
+
+  /** 알림을 눌렀다: 그 세션이 든 호스트·워크스페이스·탭·칸으로 간다 */
   revealSession = (session: SessionId) => {
     const s = this.get();
     const at = paneOfSession(Object.values(s.layouts), session);
@@ -640,7 +950,7 @@ export class AppModel {
     const ws = at.layout.workspace;
     if (ws === FLOATING_WORKSPACE) {
       if (!s.floating.open) void this.toggleFloating();
-    } else if (ws !== s.active) this.select(ws);
+    } else if (ws !== s.active || s.activeHost !== this.hostKey) this.select(ws);
     if (activeTab(at.layout)?.id !== at.tab.id) this.selectTab(at.tab.id);
     this.focusPane(at.pane.id);
   };
@@ -703,10 +1013,10 @@ export class AppModel {
     }
   }
 
-  /** 키보드 단축키가 다룰 워크스페이스 */
+  /** 키보드 단축키가 다룰 워크스페이스 (플로팅은 로컬 모델에만 있다) */
   currentWorkspace(): WorkspaceId {
     const s = this.get();
-    return s.floating.open && s.focusArea === "floating" ? FLOATING_WORKSPACE : s.active;
+    return this.isRoot && s.floating.open && s.focusArea === "floating" ? FLOATING_WORKSPACE : s.active;
   }
 
   /** 지금 워크스페이스에서 포커스된 칸 */
@@ -839,7 +1149,8 @@ export class AppModel {
   }
 
   /** ⌘⌥A, Ctrl+`: 플로팅 패널을 열고 닫는다. 처음 열 때 탭이 없으면 홈 폴더에서 셸을 띄운다 */
-  toggleFloating = async (maximized?: boolean) => {
+  toggleFloating = async (maximized?: boolean): Promise<void> => {
+    if (!this.isRoot) return this.root.toggleFloating(maximized);
     const s = this.get();
     if (s.floating.open) {
       this.set({ floating: { ...s.floating, open: false }, focusArea: "main" });
@@ -900,12 +1211,16 @@ export class AppModel {
     return true;
   };
 
-  /** 화면 토큰, 앱 엔진 색, 데몬 엔진 색을 지금 테마로 맞춘다 */
+  /**
+   * 화면 토큰, 앱 엔진 색, 데몬 엔진 색을 지금 테마로 맞춘다. 원격 호스트 모델은 앱 엔진 색만 root 것을 따른다
+   * (원격 데몬 터미널 색은 그 컴퓨터 설정 그대로 둔다)
+   */
   private async applyTheme() {
+    if (!this.isRoot) return this.setEngineColors(this.root.engineColors);
     const { theme, systemDark } = this.get();
     const r = applyTheme(theme, systemDark);
-    this.engineColors = r.engine;
-    for (const c of this.controllers.values()) c.setColors(r.engine);
+    this.setEngineColors(r.engine);
+    for (const child of this.children.values()) child.setEngineColors(r.engine);
     this.services.engines.setDefaultColors?.(r.engine);
     try {
       await this.services.host.setTerminalColors(r.daemon);
@@ -941,10 +1256,10 @@ export class AppModel {
   private onBrowserEvent(e: import("@thuminal/term-core").BrowserEvent) {
     switch (e.type) {
       case "title":
-        setPage(e.id, { title: e.title });
+        setPage(pageKey(this.hostKey, e.id), { title: e.title });
         return;
       case "load": {
-        setPage(e.id, { url: e.url, loading: e.loading });
+        setPage(pageKey(this.hostKey, e.id), { url: e.url, loading: e.loading });
         // 옮겨 간 주소를 배치에 남겨 다시 켜도 그 페이지로 연다
         const hit = Object.values(this.get().layouts).flatMap((l) => l.tabs.flatMap((t) => panesOf(t.root))).find((p) => p.id === e.id);
         if (!e.loading && hit?.type === "doc" && hit.doc.url !== e.url && !e.url.startsWith("about:"))
@@ -972,7 +1287,7 @@ export class AppModel {
     const s = this.get();
     const hit = Object.values(s.layouts).find((l) => l.tabs.some((t) => panesOf(t.root).some((p) => p.id === id)));
     if (!hit) return;
-    const area = hit.workspace === FLOATING_WORKSPACE ? "floating" : "main";
+    const area = this.isRoot && hit.workspace === FLOATING_WORKSPACE ? "floating" : "main";
     if (s.focusArea !== area) this.setFocusArea(area);
     if (focusedPane(activeTab(hit))?.id !== id) this.focusPane(id);
   }
@@ -1175,6 +1490,14 @@ export class AppModel {
   };
 }
 
+/** 창 전체 키만 고른다 */
+function pickWindow(s: AppState): Partial<AppState> {
+  const out: Record<string, unknown> = {};
+  for (const k of WINDOW_KEYS) out[k] = s[k];
+  return out as Partial<AppState>;
+}
+
+/** 화면 조각이 다룰 모델. 사이드바 원격 칸은 그 호스트 모델, 메인 면은 고른 호스트 모델로 감싼다 */
 export const ModelContext = createContext<AppModel | null>(null);
 
 export function useModel(): AppModel {

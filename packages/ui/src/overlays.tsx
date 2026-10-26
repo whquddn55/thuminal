@@ -13,7 +13,7 @@ import { Label } from "./components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
 import { baseName, dirName, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
-import { type NewWorktree, useApp, useModel, worktreeTitle } from "./store";
+import { type AppModel, ModelContext, type NewWorktree, useApp, useModel, worktreeTitle } from "./store";
 
 /** 이름에서 브랜치 이름을 만든다: 공백은 -, git 이 받지 않는 글자는 뺀다 */
 export function branchFromName(name: string): string {
@@ -27,8 +27,19 @@ export function branchFromName(name: string): string {
     .replace(/\/{2,}/g, "/");
 }
 
-/** 지금 열린 창 하나를 그린다 */
+/** 지금 열린 창 하나를 그린다. 창을 연 호스트(`dialogHost`)의 모델 안에서 그린다 */
 export function Dialogs() {
+  const root = useModel().root;
+  const host = useApp((s) => s.dialogHost);
+  const model = root.hostModel(host) ?? root;
+  return (
+    <ModelContext.Provider value={model}>
+      <HostDialogs />
+    </ModelContext.Provider>
+  );
+}
+
+function HostDialogs() {
   const dialog = useApp((s) => s.dialog);
   const model = useModel();
   const close = () => model.setDialog(null);
@@ -293,35 +304,53 @@ function DeleteWorktreeDialog({ worktree, onClose }: { worktree: WorktreeInfo; o
   );
 }
 
-/** ⌘J: 워크트리 이름, 브랜치, 프로젝트로 찾아 간다 */
+/** ⌘J 한 줄: 어느 호스트의 어느 워크트리인지 */
+interface JumpItem {
+  model: AppModel;
+  w: WorktreeInfo;
+  key: string;
+  repo: string;
+  /** 원격 컴퓨터 이름 (로컬은 "") */
+  host: string;
+}
+
+/** 모든 호스트의 워크트리 (로컬 먼저). 창을 여는 동안은 그때 목록으로 둔다 */
+export function jumpItems(root: AppModel): JumpItem[] {
+  return root.models().flatMap((m) => {
+    const s = m.get();
+    const host = m.hostName(s);
+    return s.worktrees.map((w) => ({ model: m, w, key: m.placeKey(w.path), repo: s.repos.find((r) => r.id === w.repo)?.name ?? "", host }));
+  });
+}
+
+/** ⌘J 목록: 빈 검색이면 지금 곳을 빼고 최근 순서, 아니면 이름·브랜치·프로젝트·컴퓨터 이름으로 거른다 */
+export function jumpList(items: JumpItem[], q: string, recent: string[], current: string): JumpItem[] {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) {
+    const rank = (x: JumpItem) => {
+      const i = recent.indexOf(x.key);
+      return i < 0 ? recent.length : i;
+    };
+    return items.filter((x) => x.key !== current).sort((a, b) => rank(a) - rank(b));
+  }
+  return items.filter((x) => {
+    const hay = `${worktreeTitle(x.w)} ${x.w.branch ?? ""} ${x.repo} ${x.host}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** ⌘J: 워크트리 이름, 브랜치, 프로젝트로 찾아 간다 (원격 컴퓨터 것도) */
 function JumpPalette({ onClose }: { onClose: () => void }) {
-  const model = useModel();
-  const worktrees = useApp((s) => s.worktrees);
-  const repos = useApp((s) => s.repos);
+  const root = useModel().root;
+  const [items] = useState(() => jumpItems(root));
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
-  const repoName = (id: string) => repos.find((r) => r.id === id)?.name ?? "";
   const recent = useApp((s) => s.recent);
-  const active = useApp((s) => s.active);
-  const list = useMemo(() => {
-    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!words.length) {
-      // 빈 검색: 지금 워크트리를 빼고 최근에 고른 순서. Enter 한 번이면 바로 전 워크트리로 돌아간다
-      const rank = (w: WorktreeInfo) => {
-        const i = recent.indexOf(w.path);
-        return i < 0 ? recent.length : i;
-      };
-      return worktrees.filter((w) => w.path !== active).sort((a, b) => rank(a) - rank(b));
-    }
-    return worktrees.filter((w) => {
-      const hay = `${worktreeTitle(w)} ${w.branch ?? ""} ${repoName(w.repo)}`.toLowerCase();
-      return words.every((x) => hay.includes(x));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, worktrees, recent, active]);
-  const pick = (w?: WorktreeInfo) => {
-    if (!w) return;
-    model.select(w.path);
+  // 빈 검색: 지금 워크트리를 빼고 최근에 고른 순서. Enter 한 번이면 바로 전 워크트리로 돌아간다
+  const list = useMemo(() => jumpList(items, q, recent, root.currentPlace()), [items, q, recent, root]);
+  const pick = (x?: JumpItem) => {
+    if (!x) return;
+    x.model.select(x.w.path);
     onClose();
   };
   return (
@@ -349,16 +378,17 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
           />
         </div>
         <div className="max-h-80 overflow-y-auto p-1 thm-scroll">
-          {list.map((w, i) => (
+          {list.map((x, i) => (
             <div
-              key={w.path}
+              key={x.key}
               className={cn("flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-3 py-2", i === sel && "bg-accent")}
               onMouseEnter={() => setSel(i)}
-              onClick={() => pick(w)}
+              onClick={() => pick(x)}
             >
-              <span className="truncate">{worktreeTitle(w)}</span>
+              <span className="truncate">{worktreeTitle(x.w)}</span>
               <span className="shrink-0 text-xs text-muted-foreground">
-                {repoName(w.repo)} · {w.branch ?? "(detached)"}
+                {x.host && <span className="mr-1 rounded border px-1 text-[10px]">{x.host}</span>}
+                {x.repo} · {x.w.branch ?? "(detached)"}
               </span>
             </div>
           ))}

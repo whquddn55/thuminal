@@ -20,7 +20,7 @@ import { useStore } from "zustand";
 
 import type { Pane, PaneNode, Renderer, SessionInfo, Tab, WorkspaceId } from "@thuminal/term-core";
 
-import { type PageState, pageStore } from "./browser-state";
+import { type PageState, pageKey, pageStore } from "./browser-state";
 import { BrowserPane } from "./BrowserPane";
 import { AgentIcon } from "./agent-icons";
 import { Button } from "./components/ui/button";
@@ -42,7 +42,8 @@ export const RendererContext = createContext<{ renderer: Renderer | null; surfac
 
 /** 터미널 그림판 하나를 띄우고 그 안에 children 을 그린다. children 의 칸 자리는 모두 이 면 안에 있어야 한다 */
 export function TerminalSurface({ surface, className, children }: { surface: Surface; className?: string; children: React.ReactNode }) {
-  const model = useModel();
+  // 그림판은 창 하나의 것이다. 메인 면이 다른 호스트로 바뀌어도 그대로 둔다
+  const model = useModel().root;
   const ref = useRef<HTMLDivElement>(null);
   const [renderer, setRenderer] = useState<Renderer | null>(null);
   // 글꼴이 바뀌면 렌더러를 새로 만든다 (칸 크기를 새 글꼴로 다시 잰다. 터미널 칸은 새 렌더러에 다시 붙는다)
@@ -71,15 +72,16 @@ export function TerminalSurface({ surface, className, children }: { surface: Sur
 }
 
 /** 탭 제목: 사용자가 붙인 이름 > 포커스 칸 내용 */
-function tabTitle(tab: Tab, sessions: Record<number, SessionInfo>, pages: Record<number, PageState>): string {
+function tabTitle(tab: Tab, sessions: Record<number, SessionInfo>, pages: Record<string, PageState>, host: string): string {
   if (tab.title) return tab.title;
   const p = panesOf(tab.root).find((x) => x.id === tab.focused) ?? panesOf(tab.root)[0];
-  return p ? paneTitle(p, sessions, pages) : "";
+  return p ? paneTitle(p, sessions, pages, host) : "";
 }
 
-function paneTitle(p: Pane, sessions: Record<number, SessionInfo>, pages: Record<number, PageState> = pageStore.getState()): string {
+/** 칸 제목. host 는 칸이 든 호스트 (브라우저 칸 페이지를 찾을 때 쓴다) */
+function paneTitle(p: Pane, sessions: Record<number, SessionInfo>, pages: Record<string, PageState>, host: string): string {
   if (p.type === "doc" && p.doc.kind === "browser") {
-    const page = pages[p.id];
+    const page = pages[pageKey(host, p.id)];
     if (page?.title) return page.title;
     const url = page?.url || p.doc.url || "";
     try {
@@ -117,7 +119,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
         const panes = panesOf(t.root);
         const exited = panes.every((p) => p.type === "terminal" && sessions[p.session]?.state.state === "exited");
         const isActive = t.id === active?.id;
-        const title = tabTitle(t, sessions, pages);
+        const title = tabTitle(t, sessions, pages, model.hostKey);
         return (
           <ContextMenu key={t.id}>
             <ContextMenuTrigger asChild>
@@ -364,7 +366,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
   const focused = tab.focused === pane.id;
   // 브라우저 칸 제목은 페이지 제목을 따라간다
   const pages = useStore(pageStore);
-  const title = useApp((s) => paneTitle(pane, s.sessions, pages));
+  const title = useApp((s) => paneTitle(pane, s.sessions, pages, model.hostKey));
   const session = useApp((s) => (pane.type === "terminal" ? s.sessions[pane.session] : undefined));
   const drop = useDrag((d) => (d.target?.kind === "pane" && d.target.pane === pane.id ? d.target.side : null));
   const dragging = useDrag((d) => d.source?.kind === "pane" && d.source.pane === pane.id);

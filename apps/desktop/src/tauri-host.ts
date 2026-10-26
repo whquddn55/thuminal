@@ -1,8 +1,9 @@
 // term-core HostApi 의 Tauri 구현. src-tauri/src/lib.rs 의 명령을 부른다.
 //
 // 한 클래스로 로컬과 원격 호스트를 같이 맡는다. `new TauriHostApi()` 는 로컬 데몬, `hosts.forHost(id)` 는 그 원격 호스트 데몬으로
-// 보낸다 (데몬에 닿는 명령마다 `host` 인자를 싣는다. 없으면 로컬). 알림·배지·글꼴·배율·파일 끌어 놓기·브라우저 칸은 창 하나의
-// 기능이라 원격 HostApi 에서도 로컬 것과 같다. Finder·기본 앱·폴더 고르기처럼 로컬 경로를 쓰는 것은 원격이면 오류다.
+// 보낸다 (데몬에 닿는 명령마다 `host` 인자를 싣는다. 없으면 로컬). 알림·배지·글꼴·배율·파일 끌어 놓기는 창 하나의
+// 기능이라 원격 HostApi 에서도 로컬 것과 같다. 브라우저 칸은 칸 번호가 호스트마다 따로라 호스트를 실어 가른다.
+// Finder·기본 앱·폴더 고르기처럼 로컬 경로를 쓰는 것은 원격이면 오류다.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -45,6 +46,9 @@ import type {
   WorkspaceLayout,
   WorktreeInfo,
 } from "@thuminal/term-core";
+
+/** 앱 화면 배율. 창 하나의 것이라 로컬·원격 HostApi 가 같이 본다 */
+let uiZoom = 1;
 
 const remoteOnly = (what: string) => Promise.reject(new Error(`원격 컴퓨터에서는 아직 ${what}을(를) 할 수 없다`));
 
@@ -130,10 +134,9 @@ export class TauriHostApi implements HostApi {
     return pick(r) as T;
   }
 
-  /** 앱 화면 배율. 브라우저 칸(네이티브 웹뷰)은 창 좌표로 놓으므로 DOM 좌표에 곱한다 */
-  private uiZoom = 1;
+  /** 브라우저 칸(네이티브 웹뷰)은 창 좌표로 놓으므로 DOM 좌표에 앱 화면 배율을 곱한다 */
   private readonly at = (r: { x: number; y: number; width: number; height: number }) => {
-    const z = this.uiZoom;
+    const z = uiZoom;
     return { x: r.x * z, y: r.y * z, w: r.width * z, h: r.height * z };
   };
 
@@ -157,27 +160,31 @@ export class TauriHostApi implements HostApi {
     all: (worktree) => this.req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
   };
 
+  /**
+   * 브라우저 칸. 칸 번호는 호스트마다 따로라 웹뷰 이름·이벤트에 호스트를 싣는다 (src-tauri browser.rs).
+   * 웹뷰 자체는 이 컴퓨터에 뜨므로 원격 칸에서 연 localhost 는 원격이 아니라 이 컴퓨터를 가리킨다
+   */
   readonly browser: BrowserHost = {
-    open: (id, url, at) => invoke("browser_open", { id, url, ...this.at(at) }),
-    setBounds: (id, at) => invoke("browser_bounds", { id, ...this.at(at) }),
-    setVisible: (id, visible) => invoke("browser_visible", { id, visible }),
-    navigate: (id, url) => invoke("browser_navigate", { id, url }),
-    go: (id, delta) => invoke("browser_go", { id, delta }),
-    reload: (id) => invoke("browser_reload", { id }),
-    focus: (id) => invoke("browser_focus", { id }),
-    devtools: (id) => invoke("browser_devtools", { id }),
-    close: (id) => invoke("browser_close", { id }),
+    open: (id, url, at) => this.call("browser_open", { id, url, ...this.at(at) }),
+    setBounds: (id, at) => this.call("browser_bounds", { id, ...this.at(at) }),
+    setVisible: (id, visible) => this.call("browser_visible", { id, visible }),
+    navigate: (id, url) => this.call("browser_navigate", { id, url }),
+    go: (id, delta) => this.call("browser_go", { id, delta }),
+    reload: (id) => this.call("browser_reload", { id }),
+    focus: (id) => this.call("browser_focus", { id }),
+    devtools: (id) => this.call("browser_devtools", { id }),
+    close: (id) => this.call("browser_close", { id }),
     onEvent: (cb) => {
       let stop: (() => void) | null = null;
       let cancelled = false;
-      void listen<BrowserEvent>("thuminal://browser", (e) => cb(e.payload)).then((un) => (cancelled ? un() : (stop = un)));
+      const name = this.hostId ? `thuminal://browser/${this.hostId}` : "thuminal://browser";
+      void listen<BrowserEvent>(name, (e) => cb(e.payload)).then((un) => (cancelled ? un() : (stop = un)));
       return () => {
         cancelled = true;
         stop?.();
       };
     },
   };
-
 
   openUrl(url: string): Promise<void> {
     return openUrl(url);
@@ -377,7 +384,7 @@ export class TauriHostApi implements HostApi {
   }
 
   async setUiZoom(scale: number): Promise<void> {
-    this.uiZoom = scale;
+    uiZoom = scale;
     await invoke("set_ui_zoom", { scale });
   }
 

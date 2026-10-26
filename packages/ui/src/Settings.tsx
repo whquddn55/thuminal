@@ -543,7 +543,7 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
 }
 
 /** 설정 창의 칸. "원격 컴퓨터" 는 데스크톱 껍데기에만 있다 */
-type Section = SettingsSection | "hosts";
+type Section = SettingsSection;
 
 export function SettingsDialog() {
   const model = useModel();

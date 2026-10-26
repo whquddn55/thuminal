@@ -8,6 +8,7 @@
 // 놓을 곳은 DOM 의 data 속성으로 찾는다: data-drop-pane, data-drop-tabbar (안의 탭은 data-tab-index), data-drop-workspace,
 // 프로젝트는 data-drop-project(+data-group, data-index) 와 data-drop-group.
 // 터미널 그림판(canvas)은 마우스를 통과시키므로 그 아래 칸 자리가 잡힌다.
+// 칸·탭·워크트리 번호는 호스트마다 따로라, 놓을 곳의 호스트(가장 가까운 `data-host`, 없으면 로컬)가 끄는 것과 다르면 놓지 못한다.
 
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
@@ -32,12 +33,19 @@ export type DropTarget =
 
 interface DragState {
   source: DragSource | null;
+  /** 끄는 것의 호스트 ("" 는 로컬) */
+  host: string;
   x: number;
   y: number;
   target: DropTarget | null;
 }
 
-export const dragStore = createStore<DragState>(() => ({ source: null, x: 0, y: 0, target: null }));
+export const dragStore = createStore<DragState>(() => ({ source: null, host: "", x: 0, y: 0, target: null }));
+
+/** 요소가 든 호스트: 가장 가까운 `data-host` ("" 는 로컬) */
+export function hostAt(el: Element | null | undefined): string {
+  return el?.closest<HTMLElement>("[data-host]")?.dataset.host ?? "";
+}
 
 export function useDrag<T>(selector: (s: DragState) => T): T {
   return useStore(dragStore, selector);
@@ -47,9 +55,10 @@ export function useDrag<T>(selector: (s: DragState) => T): T {
 const THRESHOLD = 5;
 
 /** 프로젝트를 놓을 자리: 다른 프로젝트 머리면 그 위나 아래, 워크스페이스 안이면 그 끝 */
-function hitProject(source: DragSource & { kind: "project" }, x: number, y: number): DropTarget | null {
+function hitProject(source: DragSource & { kind: "project" }, host: string, x: number, y: number): DropTarget | null {
   for (const el of document.elementsFromPoint(x, y)) {
     if (!(el instanceof HTMLElement)) continue;
+    if (hostAt(el) !== host) return null;
     const head = el.closest<HTMLElement>("[data-drop-project]");
     if (head) {
       const repo = head.dataset.dropProject!;
@@ -64,10 +73,12 @@ function hitProject(source: DragSource & { kind: "project" }, x: number, y: numb
   return null;
 }
 
-function hitTest(source: DragSource, x: number, y: number): DropTarget | null {
-  if (source.kind === "project") return hitProject(source, x, y);
+function hitTest(source: DragSource, host: string, x: number, y: number): DropTarget | null {
+  if (source.kind === "project") return hitProject(source, host, x, y);
   for (const el of document.elementsFromPoint(x, y)) {
     if (!(el instanceof HTMLElement)) continue;
+    // 다른 호스트의 칸·탭 줄·워크트리에는 놓지 못한다 (세션은 호스트를 옮길 수 없다)
+    if (hostAt(el) !== host) return null;
     const bar = el.closest<HTMLElement>("[data-drop-tabbar]");
     if (bar) {
       const tabs = [...bar.querySelectorAll<HTMLElement>("[data-tab-index]")];
@@ -143,7 +154,7 @@ export function beginDrag(e: React.PointerEvent, model: AppModel, source: DragSo
       started = true;
       document.body.style.cursor = "grabbing";
     }
-    dragStore.setState({ source, x: ev.clientX, y: ev.clientY, target: hitTest(source, ev.clientX, ev.clientY) });
+    dragStore.setState({ source, host: model.hostKey, x: ev.clientX, y: ev.clientY, target: hitTest(source, model.hostKey, ev.clientX, ev.clientY) });
   };
   const end = (ev: PointerEvent | KeyboardEvent) => {
     window.removeEventListener("pointermove", move, true);

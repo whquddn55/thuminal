@@ -9,9 +9,15 @@ export interface PageState {
   loading: boolean;
 }
 
-export const pageStore = createStore<Record<number, PageState>>(() => ({}));
+/** 칸 번호는 호스트마다 따로라 원격 칸은 `<호스트>|<칸>` 으로 가른다 (로컬은 칸 번호 그대로) */
+export function pageKey(host: string, pane: number): string {
+  return host ? `${host}|${pane}` : String(pane);
+}
 
-export function setPage(id: number, patch: Partial<PageState>) {
+/** 키는 `pageKey` */
+export const pageStore = createStore<Record<string, PageState>>(() => ({}));
+
+export function setPage(key: string, patch: Partial<PageState>) {
   const empty: PageState = { url: "", title: "", loading: false };
-  pageStore.setState((s) => ({ [id]: { ...empty, ...s[id], ...patch } }));
+  pageStore.setState((s) => ({ [key]: { ...empty, ...s[key], ...patch } }));
 }

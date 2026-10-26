@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
-import { useDrag } from "./dnd";
+import { hostAt, useDrag } from "./dnd";
 import { panesOf } from "./layout";
 import { FloatingPanel, FloatingTrigger } from "./FloatingPanel";
 import { cn } from "./lib/utils";
@@ -12,7 +12,7 @@ import { RightPanel } from "./RightPanel";
 import type { Services } from "./services";
 import { SettingsDialog } from "./Settings";
 import { Sidebar } from "./Sidebar";
-import { AppModel, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./store";
+import { AppModel, HOST_STATE_LABEL, hostStateIsError, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./store";
 import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import "./styles.css";
 
@@ -33,10 +33,14 @@ export function App({ services }: { services: Services }) {
 
 const ARROWS: Record<string, "left" | "right" | "up" | "down"> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
 
-/** 앱 단축키. 터미널 입력보다 먼저 받는다 (Cmd 조합은 터미널로 가지 않는다) */
-function useShortcuts(model: AppModel) {
+/**
+ * 앱 단축키. 터미널 입력보다 먼저 받는다 (Cmd 조합은 터미널로 가지 않는다).
+ * `model` 은 root 다. 칸·탭을 다루는 것은 키보드가 가 있는 호스트 모델(`focusedModel`)로, 창 전체 일은 root 로 보낸다
+ */
+function useShortcuts(root: AppModel) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const model = root.focusedModel();
       const run = (f: () => void) => {
         e.preventDefault();
         e.stopPropagation();
@@ -44,16 +48,16 @@ function useShortcuts(model: AppModel) {
       };
       // 단축키는 Orca 와 같다. thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 칸 크기는 ⌃⌘⇧방향키
       // ⌃` 와 ⌘⌥A : 플로팅 워크스페이스 (⌘⌥⇧A 는 최대화한 채로)
-      if (e.ctrlKey && !e.metaKey && (e.code === "Backquote" || e.key === "`")) return run(() => void model.toggleFloating());
-      if (e.metaKey && e.altKey && e.code === "KeyA") return run(() => void model.toggleFloating(e.shiftKey));
+      if (e.ctrlKey && !e.metaKey && (e.code === "Backquote" || e.key === "`")) return run(() => void root.toggleFloating());
+      if (e.metaKey && e.altKey && e.code === "KeyA") return run(() => void root.toggleFloating(e.shiftKey));
       // ⌃1~9 : 지금 워크스페이스의 탭
       if (e.ctrlKey && !e.metaKey && !e.altKey && /^Digit[1-9]$/.test(e.code)) return run(() => model.selectTabIndex(Number(e.code.slice(5)) - 1));
       if (!e.metaKey) return;
       // ⌘+ ⌘- ⌘0 : 터미널에 포커스가 있으면 터미널 글자 크기, 아니면 앱 화면 배율 (웹은 브라우저 확대에 맡긴다)
       if (!e.altKey && !e.ctrlKey && (e.code === "Equal" || e.code === "Minus" || e.code === "Digit0")) {
         const dir = e.code === "Minus" ? -1 : e.code === "Digit0" ? 0 : 1;
-        if (document.activeElement?.classList.contains("thm-input")) return run(() => model.zoomTerminal(dir));
-        if (model.zoomUi(dir)) {
+        if (document.activeElement?.classList.contains("thm-input")) return run(() => root.zoomTerminal(dir));
+        if (root.zoomUi(dir)) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -69,15 +73,15 @@ function useShortcuts(model: AppModel) {
       }
       if (arrow && e.ctrlKey) return run(() => model.focusDir(arrow));
       // ⌘⌥← → : 워크트리 방문 기록 뒤로·앞으로
-      if (arrow && e.altKey && (arrow === "left" || arrow === "right")) return run(() => model.goHistory(arrow === "left" ? -1 : 1));
+      if (arrow && e.altKey && (arrow === "left" || arrow === "right")) return run(() => root.goHistory(arrow === "left" ? -1 : 1));
       // 브라우저 칸이 포커스면 Orca 와 같이 ⌘[ ] 뒤로·앞으로, ⌘R 새로 고침, ⌘L 주소 칸
       if (!e.shiftKey && !e.altKey && !e.ctrlKey && model.currentBrowser() !== null) {
         const cmd = e.key === "[" ? "back" : e.key === "]" ? "forward" : key === "r" ? "reload" : key === "l" ? "address" : null;
         if (cmd) return run(() => model.browserCommand(cmd));
       }
       if (e.shiftKey && key === "b") return run(() => void model.newBrowserTab());
-      if (key === "j") return run(() => model.setDialog({ kind: "jump" }));
-      if (key === ",") return run(() => model.setDialog({ kind: "settings" }));
+      if (key === "j") return run(() => root.setDialog({ kind: "jump" }));
+      if (key === ",") return run(() => root.setDialog({ kind: "settings" }));
       if (e.shiftKey && key === "n") {
         const repo = s.worktrees.find((w) => w.path === s.active)?.repo ?? s.repos[0]?.id;
         if (repo) run(() => model.setDialog({ kind: "new-worktree", repo }));
@@ -100,26 +104,30 @@ function useShortcuts(model: AppModel) {
       // ⌘⇧[ ] 이전·다음 탭, ⌘[ ] 이전·다음 칸 (⇧ 가 눌리면 key 가 { } 로 오기도 한다)
       if (e.shiftKey && (e.code === "BracketLeft" || e.code === "BracketRight")) return run(() => model.selectNearTab(e.code === "BracketRight" ? 1 : -1));
       if (e.key === "[" || e.key === "]") return run(() => model.focusCycle(e.key === "]" ? 1 : -1));
-      if (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !e.altKey && !e.ctrlKey) return run(() => model.selectNearWorktree(e.key === "ArrowDown" ? 1 : -1));
-      if (key === "b" && !e.shiftKey) return run(() => model.toggleSidebar());
+      if (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !e.altKey && !e.ctrlKey) return run(() => root.selectNearWorktree(e.key === "ArrowDown" ? 1 : -1));
+      if (key === "b" && !e.shiftKey) return run(() => root.toggleSidebar());
       if (e.altKey && key === "=") return run(() => model.equalize());
       // ⌘⌥T : 새 에이전트 탭 (찾은 에이전트 중 첫째, 보통 claude)
       if (e.altKey && e.code === "KeyT") return run(() => void model.newTab(undefined, s.agents[0] ?? "claude"));
-      // ⌘1~9 : 사이드바 순서로 n 번째 워크트리
-      if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey) return run(() => model.selectWorktreeIndex(Number(e.code.slice(5)) - 1));
+      // ⌘1~9 : 사이드바 순서로 n 번째 워크트리 (원격 컴퓨터 것도)
+      if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey) return run(() => root.selectWorktreeIndex(Number(e.code.slice(5)) - 1));
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [model]);
+  }, [root]);
 }
 
-/** 운영체제에서 파일을 터미널 칸에 끌어 놓으면 경로를 셸에 맞게 감싸 붙여 넣는다 */
-function useFileDrop(model: AppModel) {
+/** 운영체제에서 파일을 터미널 칸에 끌어 놓으면 경로를 셸에 맞게 감싸 붙여 넣는다. 원격 칸은 아직 막는다 (올리기는 다음 단계) */
+function useFileDrop(root: AppModel) {
   useEffect(() => {
     const quote = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
-    return model.services.host.onFileDrop?.((paths, x, y) => {
+    return root.services.host.onFileDrop?.((paths, x, y) => {
       const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-pane]");
-      const id = Number(el?.dataset.dropPane);
+      if (!el) return;
+      const model = root.hostModel(hostAt(el));
+      if (!model) return;
+      if (model.services.host.isRemote) return model.notice("원격 컴퓨터 터미널에는 아직 파일을 끌어 놓을 수 없다");
+      const id = Number(el.dataset.dropPane);
       const pane = Object.values(model.get().layouts)
         .flatMap((l) => l.tabs)
         .flatMap((t) => panesOf(t.root))
@@ -130,41 +138,28 @@ function useFileDrop(model: AppModel) {
       model.focusPane(pane.id);
       c.focus();
     });
-  }, [model]);
+  }, [root]);
 }
 
 function Shell() {
   const model = useModel();
   useShortcuts(model);
   useFileDrop(model);
-  const active = useApp((s) => s.active);
-  const panel = useApp((s) => s.panel);
   const floating = useApp((s) => s.floating.open);
-  const changes = useApp((s) => s.status[s.active]?.files.length ?? 0);
   const error = useApp((s) => s.error);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const notice = useApp((s) => s.notice);
-  const inWorktree = active !== OTHER_WORKSPACE;
+  // 메인 면과 오른쪽 사이드바는 고른 호스트 모델로 그린다 (지운 원격이면 로컬)
+  const activeHost = useApp((s) => s.activeHost);
+  useApp((s) => s.remoteHosts);
+  const main = model.hostModel(activeHost) ?? model;
 
   return (
     <div className="flex h-full">
       {sidebarOpen && <Sidebar />}
-      <main className="flex min-w-0 flex-1 flex-col bg-background" onPointerDownCapture={() => model.get().focusArea !== "main" && model.setFocusArea("main")}>
-        <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
-          <TabBar ws={active} windowDrag className="h-full flex-1">
-            {inWorktree && (
-              <PanelButton on={!!panel} label="오른쪽 사이드바: 파일, 변경, 검색 (⌘L)" onClick={() => model.toggleRight()}>
-                {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
-                <SidebarSimpleIcon className="-scale-x-100" />
-              </PanelButton>
-            )}
-          </TabBar>
-        </div>
-        <TerminalSurface surface="main" className="flex-1">
-          <WorkspaceView ws={active} empty={<EmptyWorkspace ws={active} />} />
-        </TerminalSurface>
-      </main>
-      {panel && inWorktree && <RightPanel />}
+      <ModelContext.Provider value={main}>
+        <MainArea />
+      </ModelContext.Provider>
       {floating && <FloatingPanel />}
       <FloatingTrigger />
       <Dialogs />
@@ -185,6 +180,66 @@ function Shell() {
             <XIcon className="size-3.5" />
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 메인 면(탭 줄 + 칸) 과 오른쪽 사이드바. 고른 호스트 모델 안에서 그린다 */
+function MainArea() {
+  const model = useModel();
+  const active = useApp((s) => s.active);
+  const panel = useApp((s) => s.panel);
+  const changes = useApp((s) => s.status[s.active]?.files.length ?? 0);
+  const inWorktree = active !== OTHER_WORKSPACE;
+  return (
+    <>
+      <main
+        className="flex min-w-0 flex-1 flex-col bg-background"
+        data-host={model.hostKey}
+        onPointerDownCapture={() => model.get().focusArea !== "main" && model.setFocusArea("main")}
+      >
+        <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
+          <TabBar ws={active} windowDrag className="h-full flex-1">
+            {inWorktree && (
+              <PanelButton on={!!panel} label="오른쪽 사이드바: 파일, 변경, 검색 (⌘L)" onClick={() => model.toggleRight()}>
+                {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
+                <SidebarSimpleIcon className="-scale-x-100" />
+              </PanelButton>
+            )}
+          </TabBar>
+        </div>
+        {!model.isRoot && <HostBand />}
+        <TerminalSurface surface="main" className="flex-1">
+          <WorkspaceView ws={active} empty={<EmptyWorkspace ws={active} />} />
+        </TerminalSurface>
+      </main>
+      {panel && inWorktree && <RightPanel />}
+    </>
+  );
+}
+
+/** 메인 면이 원격 컴퓨터인데 붙어 있지 않으면 위에 띠를 띄운다. 다시 붙으면 터미널은 저장본으로 다시 그린다 */
+function HostBand() {
+  const model = useModel();
+  const host = useApp((s) => s.remoteHosts.find((h) => h.id === model.hostKey));
+  if (!host || host.state === "connected") return null;
+  const error = hostStateIsError(host.state);
+  return (
+    <div className={cn("flex h-8 shrink-0 items-center gap-2 border-b px-3 text-xs", error ? "bg-destructive/10 text-destructive" : "bg-muted/60 text-muted-foreground")}>
+      <span className="min-w-0 flex-1 truncate">
+        {host.name}: {HOST_STATE_LABEL[host.state]}
+        {host.error && ` (${host.error})`}
+        {host.state === "disconnected" && host.retryInMs !== null && ` · ${Math.ceil(host.retryInMs / 1000)}초 뒤 다시 붙는다`}
+      </span>
+      {error ? (
+        <Button size="xs" variant="outline" onClick={() => model.setDialog({ kind: "settings", section: "hosts" })}>
+          설정에서 다시 등록
+        </Button>
+      ) : (
+        <Button size="xs" variant="outline" onClick={() => void model.root.services.host.hosts?.reconnect(model.hostKey).catch(model.fail)}>
+          다시 붙기
+        </Button>
       )}
     </div>
   );

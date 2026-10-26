@@ -45,6 +45,7 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - **세션 하나 = PTY 하나 + 엔진 하나**, 세션 전용 스레드(actor)가 엔진을 혼자 든다 (`daemon/src/session.rs`). 터미널 질의(커서 위치, OSC 10/11 색 등)는 데몬 엔진만 답한다. 앱 엔진은 답하지 않는다.
 - **에이전트 상태**는 claude 훅이 알려 준다. 훅 이벤트 → 상태 규칙은 `daemon/src/manager.rs` 의 `next_agent` 에 있고, 세션 환경의 `THUMINAL_HOME`·`THUMINAL_SESSION_ID`·`THUMINAL_CLI` 로 그 데몬에 닿는다. claude 는 셸 함수가 부르는 실행기 `shell/claude-launch` 가 `--plugin-dir` 로 이 플러그인을 그 실행에만 얹고, 에이전트 설정(권한 옵션·팀)을 붙인다 (`daemon/src/shell.rs`).
 - **원격 접속**: 데몬이 Tailscale 주소(기본 6780)에서 웹 화면과 웹소켓 `/ws` 를 낸다 (`daemon/src/remote.rs`). 웹소켓 메시지 하나가 길이 머리를 뗀 프레임 하나라 유닉스 소켓과 같은 처리(`Server::serve_stream`)를 탄다. 기기마다 토큰(`remote.json`). 웹 껍데기는 `apps/web`(HostApi = `web-host.ts`), 좁은 화면은 `ui/src/MobileApp.tsx`, 안드로이드 앱(`apps/android`)은 그 웹 화면을 띄우는 WebView 껍데기다. 세션 크기는 마지막으로 입력한 화면을 따른다 (`TerminalController.claimSize`).
+- **원격 호스트**: 데스크톱 앱이 다른 컴퓨터 데몬에도 붙는다 (`hosts.json`, Tauri 명령마다 `host`). 화면은 호스트마다 `AppModel` 하나(로컬이 root)이고, 창 전체 상태(`WINDOW_KEYS`)는 root 가 들고 자식이 비춘다. 고른 곳은 (`activeHost`, 그 모델 `active`), 읽은 때·최근 키는 `placeKey`(`<호스트>|<ws>`). 끌어 놓기는 같은 `data-host` 안에서만.
 - **에이전트 팀**: claude 에게 가짜 tmux 를 보여 팀원 칸 명령(`split-window`, `respawn-pane`, `kill-pane` …)을 데몬이 받는다 (`daemon/src/teams.rs`). 팀원은 칸 트리에 없는 세션이고(`layout=none`, 꼬리표 `team.*`), 화면은 리더 칸 위 팝업(목록 → 팀원 터미널)으로 그린다 (`ui/src/TeamPanel.tsx`). 터미널끼리 겹치면 `RenderTarget.layer` 가 큰 것을 위에 그린다.
 
 ### 화면 (`packages/ui`)

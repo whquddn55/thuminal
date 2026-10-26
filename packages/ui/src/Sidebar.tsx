@@ -1,6 +1,8 @@
 // 왼쪽 사이드바: 워크스페이스(프로젝트 묶음) → 프로젝트(저장소) → 워크트리 카드. 카드 모양은 Orca 를 따른다.
 //
-// 워크스페이스가 기본 하나뿐이면 머리를 감춰 프로젝트만 늘어놓는다 (묶음을 쓰지 않는 사람에게는 전과 같다).
+// 워크스페이스가 기본 하나뿐이고 원격 컴퓨터도 없으면 머리를 감춰 프로젝트만 늘어놓는다 (묶음을 쓰지 않는 사람에게는 전과 같다).
+// 원격 컴퓨터마다 그 이름의 고정 워크스페이스가 내 워크스페이스들 아래에 하나씩 붙고, 그 컴퓨터의 프로젝트는 모두 그 안에만 든다
+// (그 칸은 그 호스트 모델로 감싸 그린다. 옮기기·끌어 넣기·이름 고치기는 막는다).
 //
 // 카드 = 왼쪽 상태 칸(16px) + 제목 줄(13px) + 브랜치 줄(11px) + 에이전트 줄(터미널마다 하나).
 // 고른 카드는 전경색을 옅게 덮고 1px 테두리를 둔다 (styles.css 의 [data-card-active]).
@@ -25,7 +27,16 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { type AgentInfo, DEFAULT_GROUP, type RepoGroup, type RepoInfo, type SessionInfo, type WorkspaceId, type WorktreeInfo } from "@thuminal/term-core";
+import {
+  type AgentInfo,
+  DEFAULT_GROUP,
+  type RemoteHost,
+  type RepoGroup,
+  type RepoInfo,
+  type SessionInfo,
+  type WorkspaceId,
+  type WorktreeInfo,
+} from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import { AgentIcon } from "./agent-icons";
@@ -58,7 +69,7 @@ import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
 import { RepoMark } from "./repo-icon";
-import { type AppState, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
+import { type AppState, FLOATING_WORKSPACE, HOST_STATE_LABEL, ModelContext, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 
 function copy(text: string) {
   void navigator.clipboard.writeText(text).catch(() => undefined);
@@ -151,6 +162,7 @@ export function StatusIndicator({ status, className }: { status: Status; classNa
 }
 
 export function Sidebar() {
+  // 사이드바는 로컬(root) 모델로 그린다. 원격 칸만 그 호스트 모델로 감싼다
   const model = useModel();
   const repos = useApp((s) => s.repos);
   const worktrees = useApp((s) => s.worktrees);
@@ -165,7 +177,8 @@ export function Sidebar() {
   const toggle = (key: string) => setCollapsed(toggleCollapsed(collapsed, key));
   // 이름을 고치는 워크스페이스 (막 만든 것 포함)
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
-  const showGroups = groups.length > 1;
+  const remoteHosts = useApp((s) => s.remoteHosts);
+  const showGroups = groups.length > 1 || remoteHosts.length > 0;
   const repoById = new Map(repos.map((r) => [r.id, r]));
 
   /** 새 워크스페이스를 만들고(프로젝트 `move` 를 옮겨 넣고) 바로 이름을 고치게 한다 */
@@ -223,7 +236,7 @@ export function Sidebar() {
         </Tooltip>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1 pb-2 pl-1 thm-scroll">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1 pb-2 pl-1 thm-scroll" data-host="">
         {pinned.length > 0 && (
           <Group label="고정" icon={<PushPinIcon className="size-3" />} collapsed={collapsed.has("@pinned")} onToggle={() => toggle("@pinned")}>
             {pinned.map((w) => (
@@ -266,6 +279,14 @@ export function Sidebar() {
               </GroupSection>
             ))
           : groups.map(projects)}
+        {remoteHosts.map((h) => {
+          const m = model.hostModel(h.id);
+          return m ? (
+            <ModelContext.Provider key={h.id} value={m}>
+              <RemoteHostSection host={h} collapsed={collapsed} onToggle={toggle} />
+            </ModelContext.Provider>
+          ) : null;
+        })}
         {(hasOther || repos.length === 0) && (
           <Group label="기타" icon={<TerminalWindowIcon className="size-3.5" />} collapsed={collapsed.has("@other")} onToggle={() => toggle("@other")}>
             <WorkspaceCard ws={OTHER_WORKSPACE} title="워크트리 밖 터미널" subtitle="홈 폴더 등" />
@@ -303,6 +324,65 @@ export function Sidebar() {
   );
 }
 
+/**
+ * 원격 컴퓨터 하나의 고정 워크스페이스 (그 호스트 모델 안에서 그린다). 그 컴퓨터의 프로젝트를 그 컴퓨터 워크스페이스 차례대로
+ * 모두 늘어놓는다. 접은 상태 키는 `<호스트>|` 를 붙여 내 컴퓨터 것(같은 저장소 id·경로일 수 있다)과 가른다
+ */
+function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; collapsed: Set<string>; onToggle: (key: string) => void }) {
+  const model = useModel();
+  const repos = useApp((s) => s.repos);
+  const savedGroups = useApp((s) => s.groups);
+  const worktrees = useApp((s) => s.worktrees);
+  const hasOther = useApp((s) => (s.layouts[OTHER_WORKSPACE]?.tabs.length ?? 0) > 0);
+  const order = useMemo(() => normalizeGroups(savedGroups, repos).flatMap((g) => g.repos), [savedGroups, repos]);
+  const prefix = `${host.id}|`;
+  const mine = useMemo(() => new Set([...collapsed].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))), [collapsed, prefix]);
+  const toggle = (k: string) => onToggle(prefix + k);
+  const repoById = new Map(repos.map((r) => [r.id, r]));
+  const pinned = worktrees.filter((w) => w.pinned);
+  const key = groupKey(`host:${host.id}`);
+  const title = [host.address, host.daemonVersion && `thuminal ${host.daemonVersion}`, host.error, host.warning].filter(Boolean).join("\n");
+  return (
+    <div data-host={host.id}>
+      <GroupSection
+        id={`host:${host.id}`}
+        name={host.name}
+        // 워크트리 밖 터미널만 있어도 펼쳐 보이게 기타 칸을 하나로 센다
+        count={order.length + (hasOther ? 1 : 0)}
+        collapsed={collapsed.has(key)}
+        onToggle={() => onToggle(key)}
+        remote={{ state: host.state, title }}
+        empty={host.state === "connected" ? "이 컴퓨터에 등록한 프로젝트가 없다" : `${HOST_STATE_LABEL[host.state]} · 붙으면 프로젝트가 보인다`}
+        menu={
+          <>
+            <DropdownMenuItem onSelect={() => void model.root.services.host.hosts?.reconnect(host.id).catch(model.fail)}>다시 붙기</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => model.root.setDialog({ kind: "settings", section: "hosts" })}>설정에서 다시 등록…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => copy(host.address)}>주소 복사</DropdownMenuItem>
+          </>
+        }
+      >
+        {pinned.length > 0 && (
+          <Group label="고정" icon={<PushPinIcon className="size-3" />} collapsed={mine.has("@pinned")} onToggle={() => toggle("@pinned")}>
+            {pinned.map((w) => (
+              <WorktreeCard key={`pin:${w.path}`} w={w} />
+            ))}
+          </Group>
+        )}
+        {order.map((id, index) => {
+          const r = repoById.get(id);
+          return r ? <ProjectGroup key={r.id} r={r} group="" index={index} groups={[]} collapsed={mine} onToggle={toggle} /> : null;
+        })}
+        {hasOther && (
+          <Group label="기타" icon={<TerminalWindowIcon className="size-3.5" />} collapsed={mine.has("@other")} onToggle={() => toggle("@other")}>
+            <WorkspaceCard ws={OTHER_WORKSPACE} title="워크트리 밖 터미널" subtitle="홈 폴더 등" />
+          </Group>
+        )}
+      </GroupSection>
+    </div>
+  );
+}
+
 /** 메인 워크트리를 맨 위로 */
 const mainFirst = (list: WorktreeInfo[]) => [...list].sort((a, b) => Number(b.is_main) - Number(a.is_main));
 
@@ -325,9 +405,12 @@ function ProjectGroup({
   groups: RepoGroup[];
   collapsed: Set<string>;
   onToggle: (key: string) => void;
-  onNewGroup: (move: string[]) => void;
+  /** 없으면(원격 컴퓨터) 워크스페이스로 옮기기 메뉴를 숨긴다 */
+  onNewGroup?: (move: string[]) => void;
 }) {
   const model = useModel();
+  // 원격 컴퓨터 프로젝트는 그 컴퓨터 워크스페이스에 붙어 있다: 끌어 옮기기·Finder 를 막는다
+  const remote = !!model.services.host.isRemote;
   const worktrees = useApp(useShallow((s: AppState) => s.worktrees.filter((w) => w.repo === r.id)));
   const creating = useApp(useShallow((s: AppState) => s.creating.filter((c) => c.repo === r.id)));
   const others = groups.filter((g) => g.id !== group);
@@ -340,10 +423,11 @@ function ProjectGroup({
       collapsed={collapsed.has(r.id)}
       onToggle={() => onToggle(r.id)}
       onNew={() => model.setDialog({ kind: "new-worktree", repo: r.id })}
-      drag={{ repo: r.id, group, index }}
+      drag={remote ? undefined : { repo: r.id, group, index }}
       menu={
         <>
           <DropdownMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: r.id })}>새 워크트리…</DropdownMenuItem>
+          {onNewGroup && !remote && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>워크스페이스로 옮기기</DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-80 w-52 overflow-y-auto">
@@ -356,8 +440,9 @@ function ProjectGroup({
               <DropdownMenuItem onSelect={() => onNewGroup([r.id])}>새 워크스페이스로…</DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder에서 보기</DropdownMenuItem>
+          {!remote && <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder에서 보기</DropdownMenuItem>}
           <DropdownMenuItem onSelect={() => copy(r.path)}>경로 복사</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => void model.removeProject(r.id)}>
@@ -566,6 +651,7 @@ function LineageToggle({ paths, count, open, onToggle }: { paths: string[]; coun
 
 function WorktreeCard({ w }: { w: WorktreeInfo }) {
   const model = useModel();
+  const remote = !!model.services.host.isRemote;
   const [renaming, setRenaming] = useState(false);
   const title = worktreeTitle(w);
   const siblings = useApp(useShallow((s: AppState) => s.worktrees.filter((x) => x.repo === w.repo && x.path !== w.path)));
@@ -638,7 +724,7 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
         <ContextMenuItem disabled={!w.branch} onSelect={() => copy(w.branch ?? "")}>
           브랜치 이름 복사
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void model.services.host.reveal(w.path).catch(model.fail)}>Finder에서 보기</ContextMenuItem>
+        {!remote && <ContextMenuItem onSelect={() => void model.services.host.reveal(w.path).catch(model.fail)}>Finder에서 보기</ContextMenuItem>}
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" disabled={w.is_main} onSelect={() => model.setDialog({ kind: "delete-worktree", worktree: w })}>
           워크트리 지우기…
@@ -674,7 +760,7 @@ function WorkspaceCard({
 }) {
   const model = useModel();
   const now = useNow();
-  const active = useApp((s) => s.active === ws);
+  const active = useApp((s) => s.active === ws && s.activeHost === model.hostKey);
   const unread = useApp((s) => model.unread(ws, s));
   const sessions = useWorkspaceSessions(ws);
   const dropHere = useDrag((d) => d.target?.kind === "workspace" && d.target.workspace === ws);
