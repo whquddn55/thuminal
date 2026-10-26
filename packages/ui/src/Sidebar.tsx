@@ -66,7 +66,7 @@ function ago(t: number, now: number): string {
   return `${Math.floor(s / 86400)}일`;
 }
 
-export type Status = "attention" | "working" | "error" | "done" | "ready" | "active" | "failed" | "inactive";
+export type Status = "attention" | "working" | "error" | "interrupted" | "done" | "ready" | "active" | "failed" | "inactive";
 
 /** 에이전트 하나의 상태: 부름, 일하는 중, 오류로 끝남, 턴을 끝냄, 막 떠서 기다림 */
 export function agentStatus(a: AgentInfo): Status {
@@ -78,11 +78,12 @@ export function agentStatus(a: AgentInfo): Status {
     case "failed":
       return "error";
     default:
-      return a.turn_ended_at ? "done" : "ready";
+      // 사용자가 멈춘 턴은 "끝남" 이 아니다 (Orca 처럼 흐린 점)
+      return a.interrupted ? "interrupted" : a.turn_ended_at ? "done" : "ready";
   }
 }
 
-const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
+const RANK: Status[] = ["attention", "error", "working", "interrupted", "done", "ready"];
 
 /** 워크스페이스 상태: 부름 > 오류 > 일하는 중 > 끝낸 에이전트 > 막 뜬 에이전트 > 열린 터미널 > 없음 */
 export function statusOf(sessions: SessionInfo[]): Status {
@@ -98,6 +99,7 @@ const STATUS_LABEL: Record<Status, string> = {
   attention: "에이전트가 묻고 있다",
   working: "에이전트가 일하는 중",
   error: "에이전트 턴이 오류로 끝났다",
+  interrupted: "에이전트를 멈췄다",
   done: "에이전트가 일을 마쳤다",
   ready: "에이전트가 첫 입력을 기다린다",
   active: "터미널이 열려 있다",
@@ -124,6 +126,7 @@ export function StatusIndicator({ status, className }: { status: Status; classNa
             s === "failed" ? "size-1.5 bg-muted-foreground" : "size-2",
             (s === "done" || s === "active") && "bg-agent-done",
             s === "inactive" && "bg-neutral-500/40",
+            s === "interrupted" && "bg-muted-foreground/60",
           )}
         />
       )}

@@ -49,6 +49,8 @@ export interface AgentInfo {
   turn_ended_at: number | null;
   /** 에이전트가 도는 폴더 (훅의 cwd). 셸이 알린 폴더와 다를 수 있다 */
   cwd?: string | null;
+  /** 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다). 다음 프롬프트에서 지운다 */
+  interrupted?: boolean;
 }
 
 export interface CreateSession {

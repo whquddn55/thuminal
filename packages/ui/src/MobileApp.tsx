@@ -270,7 +270,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
 }
 
 function statusText(s: Status): string {
-  return { attention: "묻고 있다", error: "오류로 끝났다", working: "일하는 중", done: "끝냈다", ready: "기다리는 중" }[s as string] ?? "";
+  return { attention: "묻고 있다", error: "오류로 끝났다", working: "일하는 중", interrupted: "멈췄다", done: "끝냈다", ready: "기다리는 중" }[s as string] ?? "";
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

@@ -1,13 +1,18 @@
-//! claude 를 Esc · ⌃C 로 멈추면 Stop 훅이 오지 않아 "일하는 중" 으로 남는다. 두 가지로 알아챈다.
+//! claude 를 Esc · ⌃C 로 멈추면 훅이 아무것도 오지 않아 "일하는 중" 으로 남는다. Orca(2026-10, a9d242d1)의 판정을
+//! 따르고, Orca 가 못 잡는 경우를 화면 · 대화 기록으로 보탠다.
 //!
-//! 1. 화면: Orca 처럼 "멈춤 키 + claude 스스로 쉬고 있다는 증거" 를 맞춘다. Orca 는 증거로 claude 의 OSC 7501
-//!    상태 보고(2.1.295 부터)나 터미널 제목 글리프(일할 때 ◐◑◒◓ · 브라유, 쉴 때 ✳)를 본다. 제목 글리프는 주제가
-//!    바뀔 때만 다시 써서 일하는 동안에도 ✳ 로 남는 일이 잦으므로, 여기서는 일하는 동안만 화면에 보이는
-//!    돌아가는 상태 줄(`✻ Thinking… (3s)`)과 아래 줄 "esc to interrupt" 를 증거로 쓴다. 키를 보낼 때 이것이
-//!    보였고, 3초 안에 사라져 잠시 그대로면 멈춘 것이다 (메뉴를 닫는 Esc 처럼 일이 계속되면 남는다).
-//! 2. 대화 기록: 응답 도중 멈추면 claude 는 기록에 `[Request interrupted by user]`(도구 중이면 `… for tool use`)
-//!    사용자 글을 남긴다. 다른 길(웹 · CLI 입력, 권한 창의 Esc)로 멈춘 것도 잡는다.
-//!    보내자마자 멈추면 프롬프트가 입력 칸으로 돌아가고 기록에 아무것도 남지 않아 1 만 잡는다.
+//! - ⌃C: 일하는 중에 오면 0.5초 뒤 멈춘 것으로 본다 (그사이 새 훅이 오면 훅을 믿는다).
+//!   Orca `agent-interrupt-inference.ts` 의 500ms settle 과 같다.
+//! - Esc: claude 에서는 메뉴 · 창을 닫는 데도 쓰여 그 자체로는 증거가 아니다. Orca 는 "키를 보낼 때 일하는 중이 보였고,
+//!   확인 창 안에 claude 스스로 쉬는 모습을 보이면" 멈춘 것으로 본다 (`claude-terminal-interrupt.ts`). 증거는 OSC 7501
+//!   상태 보고(2.1.295 부터, 창 1.5초)나 터미널 제목 글리프(일할 때 브라유 · ◐◑◒◓, 쉴 때 ✳, 창 5초)다.
+//!   여기서는 제목 글리프에 더해 화면을 본다. 제목은 주제가 바뀔 때만 다시 써서 일하는 동안에도 ✳ 로 남는 일이 잦고,
+//!   보내자마자 멈추면 Orca 는 일하는 제목을 한 번도 못 봐 놓친다. 화면의 돌아가는 상태 줄(`✻ Thinking… (3s)`)과
+//!   아래 줄 "esc to interrupt" 는 보낸 즉시 나타나고 쉬면 사라진다. 다시 일하는 모습이 보이면(메뉴를 닫은 Esc) 멈춤이 아니다.
+//! - 묻는 도구(AskUserQuestion)를 Esc 로 닫으면 claude 는 다시 일한다. 0.5초 뒤 "일하는 중" 으로 돌린다 (Orca 와 같다).
+//!   진짜 권한 창은 Esc 로 풀지 않는다.
+//! - 대화 기록: 응답 도중 멈추면 claude 는 기록에 `[Request interrupted by user]`(도구 중이면 `… for tool use`) 를
+//!   남긴다. 웹 · CLI 입력으로 멈춘 것도 잡는다 (Orca 는 기록을 상태에 쓰지 않는다).
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -16,25 +21,41 @@ use std::path::Path;
 const TAIL: u64 = 64 * 1024;
 const MARK: &str = "[Request interrupted by user";
 
-/// claude 가 일하는 동안 아래 상태 줄에 보이는 글
+/// claude 가 일하는 동안 아래 줄에 보이는 글 (statusLine 을 쓰면 빠진다)
 const WORKING_HINT: &str = "esc to interrupt";
-/// 멈춤 키를 보낸 뒤 이 안에 쉬는 화면이 되지 않으면 멈추지 않은 것으로 본다
-const ESC_WINDOW_MS: u64 = 3000;
-/// 글이 사라진 뒤 이만큼 그대로여야 멈춘 것으로 본다 (다시 그리는 중간 화면에 속지 않게)
+/// Esc 뒤 이 안에 쉬는 모습이 되지 않으면 멈추지 않은 것으로 본다 (Orca 제목 확인 창과 같다)
+const ESC_WINDOW_MS: u64 = 5000;
+/// 일하는 모습이 사라진 뒤 이만큼 그대로여야 멈춘 것으로 본다 (다시 그리는 중간 화면에 속지 않게)
 const ESC_SETTLE_MS: u64 = 250;
+/// ⌃C · 묻는 창 Esc 를 받아들이기까지 기다리는 시간 (Orca `AGENT_INTERRUPT_SETTLE_MS`)
+const KEY_SETTLE_MS: u64 = 500;
 /// 지켜보는 동안 출력이 없어도 다시 볼 간격
 pub const ESC_RECHECK: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// 혼자 온 Esc(kitty 키보드 프로토콜의 Esc 누름 포함)나 ⌃C
-pub fn is_interrupt_key(data: &[u8]) -> bool {
-    matches!(data, b"\x1b" | b"\x03" | b"\x1b[27u" | b"\x1b[27;1u" | b"\x1b[27;1:1u" | b"\x1b[99;5u")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Esc,
+    CtrlC,
 }
 
-/// claude 가 일하는 화면이다: 아래 줄의 "esc to interrupt", 또는 `✻ Recombobulating… (14s · ↓ 1.2k tokens)` 같은
-/// 돌아가는 상태 줄. 상태 줄(statusLine)을 따로 쓰면 아래 줄 안내가 빠지므로 상태 줄도 본다.
+/// 혼자 온 Esc(kitty 키보드 프로토콜의 Esc 누름 포함, 반복 · 뗌 제외)나 ⌃C
+pub fn interrupt_key(data: &[u8]) -> Option<Key> {
+    match data {
+        b"\x1b" | b"\x1b[27u" | b"\x1b[27;1u" | b"\x1b[27;1:1u" => Some(Key::Esc),
+        b"\x03" | b"\x1b[99;5u" | b"\x1b[99;5:1u" => Some(Key::CtrlC),
+        _ => None,
+    }
+}
+
+/// claude 가 일하는 모습이다: 화면의 돌아가는 상태 줄이나 "esc to interrupt", 또는 제목의 일하는 글리프.
 /// 끝난 뒤의 `✻ Worked for 12s` 는 말 끝에 … 이 없어 걸리지 않는다
-pub fn shows_working(screen: &str) -> bool {
-    screen.contains(WORKING_HINT) || screen.lines().any(is_spinner_line)
+pub fn shows_working(screen: &str, title: &str) -> bool {
+    screen.contains(WORKING_HINT) || screen.lines().any(is_spinner_line) || title_busy(title)
+}
+
+/// 제목의 일하는 글리프: 브라유(2.1.228 전), 사분원 ◐◑◒◓(2.1.228 부터). Orca `agent-title-glyphs.ts`
+fn title_busy(title: &str) -> bool {
+    title.chars().any(|c| matches!(c as u32, 0x2800..=0x28ff | 0x25d0..=0x25d3))
 }
 
 /// claude 상태 줄 글리프
@@ -49,13 +70,28 @@ fn is_spinner_line(line: &str) -> bool {
     word.strip_suffix('…').is_some_and(|w| !w.is_empty() && w.chars().all(char::is_alphabetic))
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Verdict {
     Wait,
+    /// 턴을 멈췄다
     Interrupted,
+    /// 묻는 창을 닫았다. claude 가 다시 일한다
+    Dismissed,
     GiveUp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchKind {
+    /// 일하던 claude 에 Esc
+    Esc,
+    /// 일하던 claude 에 ⌃C
+    CtrlC,
+    /// 묻는 도구 창에 Esc
+    Question,
+}
+
 pub struct EscWatch {
+    pub kind: WatchKind,
     /// 키를 보낼 때 에이전트 상태의 updated_at. 그 뒤 훅이 오면 훅을 믿는다
     pub updated_at: u64,
     started: u64,
@@ -63,21 +99,27 @@ pub struct EscWatch {
 }
 
 impl EscWatch {
-    pub fn new(updated_at: u64, now: u64) -> Self {
-        Self { updated_at, started: now, idle_since: None }
+    pub fn new(kind: WatchKind, updated_at: u64, now: u64) -> Self {
+        Self { kind, updated_at, started: now, idle_since: None }
     }
 
     pub fn observe(&mut self, working: bool, now: u64) -> Verdict {
+        let age = now.saturating_sub(self.started);
+        match self.kind {
+            WatchKind::CtrlC => return if age >= KEY_SETTLE_MS { Verdict::Interrupted } else { Verdict::Wait },
+            WatchKind::Question => return if age >= KEY_SETTLE_MS { Verdict::Dismissed } else { Verdict::Wait },
+            WatchKind::Esc => {}
+        }
         if working {
             self.idle_since = None;
         } else if let Some(since) = self.idle_since {
-            if now - since >= ESC_SETTLE_MS {
+            if now.saturating_sub(since) >= ESC_SETTLE_MS {
                 return Verdict::Interrupted;
             }
         } else {
             self.idle_since = Some(now);
         }
-        if now - self.started > ESC_WINDOW_MS + ESC_SETTLE_MS { Verdict::GiveUp } else { Verdict::Wait }
+        if age > ESC_WINDOW_MS + ESC_SETTLE_MS { Verdict::GiveUp } else { Verdict::Wait }
     }
 }
 
@@ -141,18 +183,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn esc_watch_needs_hint_to_stay_gone() {
-        let mut w = EscWatch::new(1, 0);
-        assert!(matches!(w.observe(false, 10), Verdict::Wait));
-        assert!(matches!(w.observe(true, 100), Verdict::Wait));
-        assert!(matches!(w.observe(false, 200), Verdict::Wait));
-        assert!(matches!(w.observe(false, 460), Verdict::Interrupted));
-        let mut w = EscWatch::new(1, 0);
-        assert!(matches!(w.observe(true, 3300), Verdict::GiveUp));
-        assert!(shows_working("x\n✻ Recombobulating… (14s · ↓ 1.2k tokens)\n"));
-        assert!(shows_working("✢ Nucleating… "));
-        assert!(!shows_working("✻ Worked for 12s · done 오후 3:05\n⏺ Bash(sleep 20…)\n  Running cd …"));
-        assert!(is_interrupt_key(b"\x1b") && is_interrupt_key(b"\x03") && !is_interrupt_key(b"\x1b[A"));
+    fn esc_watch_needs_working_to_stay_gone() {
+        let mut w = EscWatch::new(WatchKind::Esc, 1, 0);
+        assert_eq!(w.observe(false, 10), Verdict::Wait);
+        // 메뉴를 닫은 Esc: 일하는 모습이 다시 보이면 처음부터
+        assert_eq!(w.observe(true, 100), Verdict::Wait);
+        assert_eq!(w.observe(false, 200), Verdict::Wait);
+        assert_eq!(w.observe(false, 460), Verdict::Interrupted);
+        let mut w = EscWatch::new(WatchKind::Esc, 1, 0);
+        assert_eq!(w.observe(true, 5300), Verdict::GiveUp);
+        let mut w = EscWatch::new(WatchKind::CtrlC, 1, 0);
+        assert_eq!(w.observe(true, 400), Verdict::Wait);
+        assert_eq!(w.observe(true, 500), Verdict::Interrupted);
+        let mut w = EscWatch::new(WatchKind::Question, 1, 0);
+        assert_eq!(w.observe(false, 600), Verdict::Dismissed);
+    }
+
+    #[test]
+    fn working_evidence() {
+        assert!(shows_working("x\n✻ Recombobulating… (14s · ↓ 1.2k tokens)\n", "✳ t"));
+        assert!(shows_working("✢ Nucleating… ", ""));
+        assert!(shows_working("", "◐ Poem about terminals"));
+        assert!(shows_working("", "⠂ old spinner"));
+        assert!(!shows_working("✻ Worked for 12s · done 오후 3:05\n⏺ Bash(sleep 20…)\n  Running cd …", "✳ Poem"));
+        assert_eq!(interrupt_key(b"\x1b"), Some(Key::Esc));
+        assert_eq!(interrupt_key(b"\x1b[27;1:3u"), None);
+        assert_eq!(interrupt_key(b"\x03"), Some(Key::CtrlC));
+        assert_eq!(interrupt_key(b"\x1b[A"), None);
     }
 
     #[test]

@@ -38,10 +38,13 @@ pub struct AgentReport {
 }
 
 /// 묻는 도구: 이 도구의 PreToolUse 는 사용자 답을 기다리는 것이다 (Orca `isAskUserQuestionTool` 과 같다)
-fn is_question_tool(name: &str) -> bool {
+pub(crate) fn is_question_tool(name: &str) -> bool {
     let n: String = name.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_lowercase();
     n == "askuserquestion" || n == "requestuserinput"
 }
+
+/// 멈춘 뒤 이 안에 오는 도구 훅은 지난 턴의 늦은 알림으로 본다 (Orca `INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS`)
+const LATE_TOOL_HOOK_AFTER_INTERRUPT_MS: u64 = 15_000;
 
 /// 훅 알림 하나로 에이전트 정보를 바꾼다. 상태 규칙은 Orca 의 claude 훅 처리를 따른다
 /// (`src/shared/agent-hook-listener/providers/claude-events.ts`, `compatible-lifecycle-events.ts`):
@@ -50,6 +53,7 @@ fn is_question_tool(name: &str) -> bool {
 /// - Notification: `permission_prompt`/`elicitation_dialog` 면 부름, `idle_prompt` 면 기다림, 그 밖은 그대로
 /// - Stop → 기다림, StopFailure → 실패. 둘 다 턴 끝난 때를 남긴다. SessionStart(compact 말고) → 기다림, 지난 턴 글을 비운다
 /// - SessionEnd → 에이전트 없음. 모르는 훅 → 상태는 그대로 두고 세션 id 만 받는다
+/// - 데몬이 멈춤(Esc · ⌃C)을 알아챈 뒤 15초 안에 온 도구 훅은 지난 턴의 늦은 알림으로 보고 버린다 (`interrupt.rs`)
 pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<AgentInfo> {
     use thuminal_protocol::{AGENT_TEXT_MAX, clip_text};
     if r.event == "SessionEnd" {
@@ -67,6 +71,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         model: None,
         turn_ended_at: None,
         cwd: None,
+        interrupted: false,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -79,6 +84,16 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         a.cwd = r.cwd;
     }
     let tool = r.tool_name.filter(|t| !t.is_empty());
+    // 멈춘 뒤 늦게 도착한 도구 훅이 다시 "일하는 중" 으로 돌리지 않게 한다 (Orca 와 같다: 15초)
+    let late_after_interrupt = a.interrupted
+        && a.state == AgentState::Idle
+        && a.turn_ended_at.is_some_and(|t| now.saturating_sub(t) < LATE_TOOL_HOOK_AFTER_INTERRUPT_MS);
+    if late_after_interrupt && matches!(r.event.as_str(), "PreToolUse" | "PostToolUse" | "PostToolUseFailure") {
+        return Some(a);
+    }
+    if matches!(r.event.as_str(), "SessionStart" | "UserPromptSubmit" | "Stop" | "StopFailure") && r.source.as_deref() != Some("compact") {
+        a.interrupted = false;
+    }
     let state = match r.event.as_str() {
         "SessionStart" if r.source.as_deref() == Some("compact") => None,
         "SessionStart" => {
@@ -381,6 +396,7 @@ impl Manager {
                 a.tool_name = None;
                 a.turn_ended_at = Some(at);
                 a.updated_at = now_ms();
+                a.interrupted = true;
                 i.clone()
             };
             info!(event = "agent_interrupted", session = id.0);
@@ -497,6 +513,21 @@ mod tests {
 
     fn step(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> AgentInfo {
         next_agent(prev, r, now).expect("에이전트가 있어야 한다")
+    }
+
+    #[test]
+    fn late_tool_hooks_after_interrupt_are_ignored() {
+        let mut a = step(None, report("UserPromptSubmit"), 1);
+        // 데몬이 Esc 로 멈춘 것을 알아챘다
+        a.state = AgentState::Idle;
+        a.turn_ended_at = Some(100);
+        a.interrupted = true;
+        let late = step(Some(a.clone()), AgentReport { tool_name: Some("Bash".into()), ..report("PostToolUse") }, 5_000);
+        assert_eq!((late.state, late.interrupted), (AgentState::Idle, true));
+        let later = step(Some(a.clone()), report("PreToolUse"), 20_000);
+        assert_eq!(later.state, AgentState::Working);
+        let next = step(Some(a), report("UserPromptSubmit"), 6_000);
+        assert_eq!((next.state, next.interrupted), (AgentState::Working, false));
     }
 
     #[test]

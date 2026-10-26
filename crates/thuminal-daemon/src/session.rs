@@ -223,8 +223,8 @@ impl Actor {
                     self.sync_attached();
                 }
                 Cmd::Input(data) => {
-                    if crate::interrupt::is_interrupt_key(&data) {
-                        self.start_esc_watch();
+                    if let Some(key) = crate::interrupt::interrupt_key(&data) {
+                        self.start_esc_watch(key);
                     }
                     let _ = self.input.send(data);
                 }
@@ -327,47 +327,72 @@ impl Actor {
         }
     }
 
-    /// 일하는 중인 에이전트 화면에 "esc to interrupt" 가 보일 때 Esc · ⌃C 가 오면 지켜보기 시작한다
-    fn start_esc_watch(&mut self) {
-        let Some(updated_at) = self.info.lock().unwrap().agent.as_ref().filter(|a| a.state == AgentState::Working).map(|a| a.updated_at) else {
+    /// 에이전트에 멈춤 키가 왔다. 판정 규칙은 `interrupt.rs` 머리 주석
+    fn start_esc_watch(&mut self, key: crate::interrupt::Key) {
+        use crate::interrupt::{Key, WatchKind};
+        let Some((state, updated_at, asking)) = self.info.lock().unwrap().agent.as_ref().map(|a| {
+            (a.state, a.updated_at, a.tool_name.as_deref().is_some_and(crate::manager::is_question_tool))
+        }) else {
             return;
         };
-        let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
-        let working = crate::interrupt::shows_working(&screen);
-        info!(event = "esc_watch", session = self.id.0, working);
+        let kind = match (state, key) {
+            (AgentState::Working, Key::CtrlC) => WatchKind::CtrlC,
+            (AgentState::Working, Key::Esc) => WatchKind::Esc,
+            (AgentState::NeedsAttention, Key::Esc) if asking => WatchKind::Question,
+            _ => return,
+        };
+        let working = kind != WatchKind::Esc || self.working_now();
+        info!(event = "esc_watch", session = self.id.0, kind = ?kind, working);
+        // Esc 는 일하는 모습이 보일 때만 지켜본다 (쉬는 화면의 Esc 는 메뉴 · 입력 지우기다)
         if working {
-            self.esc_watch = Some(crate::interrupt::EscWatch::new(updated_at, now_ms()));
+            self.esc_watch = Some(crate::interrupt::EscWatch::new(kind, updated_at, now_ms()));
         }
     }
 
-    fn check_esc_watch(&mut self) {
-        let Some(watch) = self.esc_watch.as_mut() else { return };
-        let now = now_ms();
+    fn working_now(&mut self) -> bool {
         let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
-        match watch.observe(crate::interrupt::shows_working(&screen), now) {
-            crate::interrupt::Verdict::Wait => return,
-            crate::interrupt::Verdict::GiveUp => info!(event = "esc_watch_still_working", session = self.id.0),
-            crate::interrupt::Verdict::Interrupted => {
-                let baseline = watch.updated_at;
-                let session = {
-                    let mut i = self.info.lock().unwrap();
-                    // 그사이 훅이 새 상태를 알렸으면 그것을 믿는다
-                    match i.agent.as_mut() {
-                        Some(a) if a.state == AgentState::Working && a.updated_at == baseline => {
-                            a.state = AgentState::Idle;
-                            a.tool_name = None;
-                            a.turn_ended_at = Some(now);
-                            a.updated_at = now;
-                            Some(i.clone())
-                        }
-                        _ => None,
+        crate::interrupt::shows_working(&screen, &self.engine.title())
+    }
+
+    fn check_esc_watch(&mut self) {
+        use crate::interrupt::{Verdict, WatchKind};
+        let Some(kind) = self.esc_watch.as_ref().map(|w| w.kind) else { return };
+        let working = kind == WatchKind::Esc && self.working_now();
+        let now = now_ms();
+        let Some(watch) = self.esc_watch.as_mut() else { return };
+        let verdict = watch.observe(working, now);
+        let baseline = watch.updated_at;
+        let session = match verdict {
+            Verdict::Wait => return,
+            Verdict::GiveUp => {
+                info!(event = "esc_watch_still_working", session = self.id.0);
+                None
+            }
+            Verdict::Interrupted | Verdict::Dismissed => {
+                let mut i = self.info.lock().unwrap();
+                // 그사이 훅이 새 상태를 알렸으면 그것을 믿는다
+                match i.agent.as_mut() {
+                    Some(a) if a.updated_at == baseline && verdict == Verdict::Interrupted && a.state == AgentState::Working => {
+                        a.state = AgentState::Idle;
+                        a.tool_name = None;
+                        a.turn_ended_at = Some(now);
+                        a.updated_at = now;
+                        a.interrupted = true;
+                        Some(i.clone())
                     }
-                };
-                if let Some(session) = session {
-                    info!(event = "agent_interrupted", session = self.id.0, by = "esc");
-                    let _ = self.events.send(Event::SessionUpdated { session });
+                    Some(a) if a.updated_at == baseline && verdict == Verdict::Dismissed && a.state == AgentState::NeedsAttention => {
+                        a.state = AgentState::Working;
+                        a.tool_name = None;
+                        a.updated_at = now;
+                        Some(i.clone())
+                    }
+                    _ => None,
                 }
             }
+        };
+        if let Some(session) = session {
+            info!(event = "agent_interrupted", session = self.id.0, kind = ?kind);
+            let _ = self.events.send(Event::SessionUpdated { session });
         }
         self.esc_watch = None;
     }

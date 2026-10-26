@@ -144,6 +144,9 @@ pub struct AgentInfo {
     /// 에이전트가 도는 폴더 (훅 JSON 의 `cwd`). 되살릴 때 이 폴더에서 `--resume` 한다
     #[serde(default)]
     pub cwd: Option<String>,
+    /// 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다. 훅은 멈춤을 알리지 않는다). 다음 프롬프트에서 지운다
+    #[serde(default)]
+    pub interrupted: bool,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다

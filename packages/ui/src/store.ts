@@ -492,7 +492,7 @@ export class AppModel {
       const x = s.sessions[id];
       if (!x) return false;
       const a = x.agent;
-      return (x.bell_at ?? 0) > seen || (a?.turn_ended_at ?? 0) > seen || (a?.state === "needs_attention" && a.updated_at > seen);
+      return (x.bell_at ?? 0) > seen || (!a?.interrupted && (a?.turn_ended_at ?? 0) > seen) || (a?.state === "needs_attention" && a.updated_at > seen);
     });
   }
 
