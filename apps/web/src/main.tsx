@@ -23,12 +23,10 @@ function takeToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-/** `?ui=mobile|desktop` 로 고르면 그것을 이 브라우저에 남긴다. 아니면 화면 폭으로 정한다 */
+/** 화면 폭으로 정한다. 폰에서 데스크톱 화면을 고르는 길은 두지 않는다 (좁은 화면에서 쓸 수 없고 돌아올 길도 없었다) */
 function mobileUi(): boolean {
-  const q = new URLSearchParams(location.search).get("ui");
-  if (q === "mobile" || q === "desktop") localStorage.setItem(UI_KEY, q);
-  const saved = localStorage.getItem(UI_KEY);
-  if (saved) return saved === "mobile";
+  // 예전에 남긴 선택은 지운다
+  localStorage.removeItem(UI_KEY);
   return window.matchMedia("(max-width: 820px)").matches;
 }
 
@@ -52,15 +50,11 @@ async function boot() {
     if (app) app.forget();
     else location.reload();
   };
-  const switchUi = (ui: "mobile" | "desktop") => {
-    localStorage.setItem(UI_KEY, ui);
-    location.reload();
-  };
   root.render(
     mobile ? (
-      <MobileApp services={services} conn={host} onForget={forget} onDesktopUi={() => switchUi("desktop")} />
+      <MobileApp services={services} conn={host} onForget={forget} />
     ) : (
-      <App services={services} onMobileUi={() => switchUi("mobile")} />
+      <App services={services} />
     ),
   );
 }

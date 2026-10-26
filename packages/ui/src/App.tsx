@@ -16,11 +16,7 @@ import { AppModel, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./sto
 import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import "./styles.css";
 
-/**
- * onMobileUi: 웹에서 폰 화면으로 돌아가는 길 (폰에서 "데스크톱 화면으로" 를 고른 뒤 되돌아갈 수 있게).
- * 좁은 화면에서만 왼쪽 아래에 단추로 보인다
- */
-export function App({ services, onMobileUi }: { services: Services; onMobileUi?: () => void }) {
+export function App({ services }: { services: Services }) {
   const model = useMemo(() => new AppModel(services), [services]);
   useEffect(() => {
     void model.start();
@@ -30,14 +26,6 @@ export function App({ services, onMobileUi }: { services: Services; onMobileUi?:
     <ModelContext.Provider value={model}>
       <TooltipProvider delayDuration={400}>
         <Shell />
-        {onMobileUi && (
-          <button
-            className="fixed bottom-3 left-3 z-[70] hidden rounded-full border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg max-[820px]:block"
-            onClick={onMobileUi}
-          >
-            폰 화면으로
-          </button>
-        )}
       </TooltipProvider>
     </ModelContext.Provider>
   );

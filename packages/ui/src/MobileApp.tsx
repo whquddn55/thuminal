@@ -20,6 +20,7 @@ import {
   PaperPlaneRightIcon,
   PlusIcon,
   TerminalWindowIcon,
+  UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -69,14 +70,11 @@ export function MobileApp({
   services,
   conn,
   onForget,
-  onDesktopUi,
 }: {
   services: Services;
   conn: RemoteConnection;
   /** 이 브라우저에 남긴 토큰을 지운다 */
   onForget: () => void;
-  /** 데스크톱 화면으로 바꾼다 */
-  onDesktopUi: () => void;
 }) {
   const model = useMemo(() => new AppModel(services), [services]);
   useEffect(() => {
@@ -85,7 +83,7 @@ export function MobileApp({
   }, [model]);
   return (
     <ModelContext.Provider value={model}>
-      <Phone conn={conn} onForget={onForget} onDesktopUi={onDesktopUi} />
+      <Phone conn={conn} onForget={onForget} />
     </ModelContext.Provider>
   );
 }
@@ -107,7 +105,7 @@ function useNav(): [Screen, (s: Screen) => void, () => void] {
   return [screen, go, back];
 }
 
-function Phone({ conn, onForget, onDesktopUi }: { conn: RemoteConnection; onForget: () => void; onDesktopUi: () => void }) {
+function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => void }) {
   const [screen, go, back] = useNav();
   const [state, setState] = useState(conn.state);
   useEffect(() => conn.onState(setState), [conn]);
@@ -127,7 +125,6 @@ function Phone({ conn, onForget, onDesktopUi }: { conn: RemoteConnection; onForg
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onSelect={onDesktopUi}>데스크톱 화면으로</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => location.reload()}>새로 고침</DropdownMenuItem>
         {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>다른 데스크톱으로</DropdownMenuItem>}
         <DropdownMenuSeparator />
@@ -483,6 +480,39 @@ function useRenderer(ref: React.RefObject<HTMLDivElement | null>, fontSize: numb
   return renderer;
 }
 
+/**
+ * 에이전트 팀 (데스크톱 칸 머리의 팀 단추와 같다): 리더 터미널이면 팀원 수, 팀원 터미널이면 리더로 가는 단추.
+ * 누르면 리더와 팀원 목록이 뜨고 고르면 그 터미널로 간다
+ */
+function TeamButton({ session, ws, go }: { session: SessionId; ws: WorkspaceId; go: (s: Screen) => void }) {
+  const me = useApp((st) => st.sessions[session]);
+  const leaderId = me?.labels[TEAM_LEADER_LABEL] ? Number(me.labels[TEAM_LEADER_LABEL]) : session;
+  const leader = useApp((st) => st.sessions[leaderId]);
+  const mates = useApp(useShallow((st: AppState) => Object.values(st.sessions).filter((m) => m.labels[TEAM_LEADER_LABEL] === String(leaderId))));
+  if (!mates.length) return null;
+  const row = (x: SessionInfo, name: string) => (
+    <DropdownMenuItem key={x.id} disabled={x.id === session} onSelect={() => go({ kind: "term", ws, session: x.id })} className="gap-2">
+      {x.agent ? <StatusIndicator status={agentStatus(x.agent)} /> : <span className="size-3" />}
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+    </DropdownMenuItem>
+  );
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button className="flex h-9 items-center gap-1 rounded-md px-2 text-[13px] text-muted-foreground active:bg-accent" aria-label="팀원">
+          <UsersThreeIcon className="size-5" />
+          {mates.length}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-52">
+        {leader && row(leader, `리더 · ${sessionLabel(leader)}`)}
+        <DropdownMenuSeparator />
+        {mates.map((m) => row(m, m.labels[TEAM_NAME_LABEL] || sessionLabel(m)))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void }) {
   const model = useModel();
   const s = useApp((st) => st.sessions[session]);
@@ -555,26 +585,29 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
         sub={wsTitle(ws, worktrees)}
         back={back}
         right={
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <button className="flex size-9 items-center justify-center rounded-md text-muted-foreground active:bg-accent" aria-label="터미널 메뉴">
-                <DotsThreeVerticalIcon weight="bold" className="size-5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-44">
-              <DropdownMenuItem onSelect={(e) => (e.preventDefault(), changeFont(1))}>글자 크게 ({fontSize})</DropdownMenuItem>
-              <DropdownMenuItem onSelect={(e) => (e.preventDefault(), changeFont(-1))}>글자 작게</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => c.claimSize()}>폰 크기에 맞추기</DropdownMenuItem>
-              {siblings.length > 1 && <DropdownMenuSeparator />}
-              {siblings
-                .filter((id) => id !== session)
-                .map((id) => (
-                  <DropdownMenuItem key={id} onSelect={() => go({ kind: "term", ws, session: id })}>
-                    {sessionLabel(model.get().sessions[id])}
-                  </DropdownMenuItem>
-                ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <>
+            <TeamButton session={session} ws={ws} go={go} />
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button className="flex size-9 items-center justify-center rounded-md text-muted-foreground active:bg-accent" aria-label="터미널 메뉴">
+                  <DotsThreeVerticalIcon weight="bold" className="size-5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuItem onSelect={(e) => (e.preventDefault(), changeFont(1))}>글자 크게 ({fontSize})</DropdownMenuItem>
+                <DropdownMenuItem onSelect={(e) => (e.preventDefault(), changeFont(-1))}>글자 작게</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => c.claimSize()}>폰 크기에 맞추기</DropdownMenuItem>
+                {siblings.length > 1 && <DropdownMenuSeparator />}
+                {siblings
+                  .filter((id) => id !== session)
+                  .map((id) => (
+                    <DropdownMenuItem key={id} onSelect={() => go({ kind: "term", ws, session: id })}>
+                      {sessionLabel(model.get().sessions[id])}
+                    </DropdownMenuItem>
+                  ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         }
       />
       {taken && (
