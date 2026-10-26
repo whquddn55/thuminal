@@ -174,6 +174,22 @@ pub struct RepoInfo {
     pub path: String,
 }
 
+/// 기본 워크스페이스의 id. 지울 수 없고, 다른 워크스페이스에 넣지 않은 프로젝트가 여기 든다
+pub const DEFAULT_GROUP: &str = "default";
+
+/// 사이드바 워크스페이스: 프로젝트(저장소) 묶음. 목록 차례가 사이드바 차례다.
+/// (코드의 `workspace` 는 워크트리 경로·floating·other 를 뜻하므로 묶음은 `group` 이라 부른다)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoGroup {
+    /// 기본은 [`DEFAULT_GROUP`]. `set_groups` 에 빈 글로 주면 데몬이 새 id 를 붙인다
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    /// 든 프로젝트(저장소 id), 사이드바 차례
+    #[serde(default)]
+    pub repos: Vec<String>,
+}
+
 /// 저장소 안에서 찾은 아이콘 그림 (`RepoIcon` 요청). 사이드바 프로젝트 머리에 그린다
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoIcon {
@@ -377,6 +393,11 @@ pub enum Request {
     /// 모든 세션을 끝내고 데몬을 내린다
     Shutdown,
     ListRepos,
+    /// 사이드바 워크스페이스 목록. 기본 워크스페이스가 늘 들어 있고, 프로젝트마다 꼭 한 워크스페이스에 든다
+    ListGroups,
+    /// 워크스페이스 목록을 통째로 바꾼다 (만들기·이름·차례·지우기·프로젝트 옮기기). 데몬이 고른 뒤 `groups` 로 돌려준다.
+    /// 빠진 기본 워크스페이스는 다시 넣고, 어디에도 없는 프로젝트는 기본으로 보낸다
+    SetGroups { groups: Vec<RepoGroup> },
     /// 경로가 든 git 저장소를 등록한다 (워크트리 안의 경로여도 메인 저장소를 찾는다)
     AddRepo { path: String },
     RemoveRepo { repo: String },
@@ -536,6 +557,7 @@ pub enum Response {
     Screen { text: String },
     Repos { repos: Vec<RepoInfo> },
     Repo { repo: RepoInfo },
+    Groups { groups: Vec<RepoGroup> },
     Text { text: String },
     GitStatus { status: GitStatus },
     Branches { branches: BranchList },
@@ -573,7 +595,7 @@ pub enum Event {
     SessionUpdated { session: SessionInfo },
     SessionExited { session: SessionId, code: Option<i32> },
     SessionRemoved { session: SessionId },
-    /// 저장소나 워크트리 목록이 바뀌었다. 다시 읽는다
+    /// 저장소나 워크트리, 워크스페이스 목록이 바뀌었다. 다시 읽는다
     WorkspaceChanged,
     /// 이 워크트리의 git 상태가 바뀌었다 (스테이지, 커밋, 푸시 등)
     GitChanged { worktree: String },

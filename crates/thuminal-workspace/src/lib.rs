@@ -1,7 +1,7 @@
 //! 저장소 목록과 워크트리 관리.
 //!
 //! 버전 관리 도구는 [`Vcs`] 로만 안다 (지금 구현은 `thuminal-vcs-git`).
-//! 등록한 저장소 목록은 데이터 폴더의 `workspace.json` 에 남긴다.
+//! 등록한 저장소 목록과 사이드바 워크스페이스(프로젝트 묶음, `groups`)는 데이터 폴더의 `workspace.json` 에 남긴다.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 /// 어댑터가 쓰는 프로토콜 타입 (어댑터가 프로토콜 크레이트에 직접 기대지 않게 다시 내보낸다)
 pub use thuminal_protocol as protocol;
-use thuminal_protocol::{BranchList, DirEntry, FileContent, GitStatus, LineCount, RepoInfo, SearchHit, WorktreeInfo};
+use thuminal_protocol::{BranchList, DEFAULT_GROUP, DirEntry, FileContent, GitStatus, LineCount, RepoGroup, RepoInfo, SearchHit, WorktreeInfo};
 use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +83,9 @@ struct Saved {
     /// 워크트리 경로 → 사용자가 붙인 이름, 고정
     #[serde(default)]
     worktrees: std::collections::BTreeMap<PathBuf, WorktreeMeta>,
+    /// 사이드바 워크스페이스 (옛 파일에는 없다. 없으면 기본 하나에 모든 프로젝트)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    groups: Vec<RepoGroup>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -115,6 +118,36 @@ pub struct Workspace {
     file: PathBuf,
     repos: Mutex<Vec<SavedRepo>>,
     meta: Mutex<std::collections::BTreeMap<PathBuf, WorktreeMeta>>,
+    /// 남긴 그대로의 워크스페이스. 읽을 때마다 [`normalize_groups`] 로 지금 저장소 목록에 맞춘다
+    groups: Mutex<Vec<RepoGroup>>,
+}
+
+/// 기본 워크스페이스 이름 (사용자가 바꿀 수 있다)
+const DEFAULT_GROUP_NAME: &str = "기본";
+
+/// 워크스페이스 이름 최대 글자 수
+const MAX_GROUP_NAME: usize = 80;
+
+/// 워크스페이스 목록을 저장소 목록에 맞춘다: 같은 id 는 앞 것만, 없는 저장소와 두 번째로 나온 저장소는 빼고,
+/// 기본 워크스페이스가 없으면 맨 앞에 넣고, 어디에도 없는 저장소는 등록한 차례대로 기본 끝에 붙인다
+fn normalize_groups(groups: &[RepoGroup], repos: &[String]) -> Vec<RepoGroup> {
+    let mut ids = std::collections::HashSet::new();
+    let mut placed = std::collections::HashSet::new();
+    let mut out: Vec<RepoGroup> = groups
+        .iter()
+        .filter(|g| ids.insert(g.id.as_str()))
+        .map(|g| RepoGroup {
+            id: g.id.clone(),
+            name: g.name.clone(),
+            repos: g.repos.iter().filter(|r| repos.contains(r) && placed.insert(r.as_str())).cloned().collect(),
+        })
+        .collect();
+    if !out.iter().any(|g| g.id == DEFAULT_GROUP) {
+        out.insert(0, RepoGroup { id: DEFAULT_GROUP.into(), name: DEFAULT_GROUP_NAME.into(), repos: Vec::new() });
+    }
+    let rest: Vec<String> = repos.iter().filter(|r| !placed.contains(r.as_str())).cloned().collect();
+    out.iter_mut().find(|g| g.id == DEFAULT_GROUP).expect("기본 워크스페이스를 넣었다").repos.extend(rest);
+    out
 }
 
 /// 경로로 만든 짧은 id (FNV-1a 64비트의 앞 8자리)
@@ -136,13 +169,14 @@ impl Workspace {
     pub fn open(vcs: Arc<dyn Vcs>, home: &Path) -> Self {
         let file = home.join("workspace.json");
         let saved: Saved = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { vcs, file, repos: Mutex::new(saved.repos), meta: Mutex::new(saved.worktrees) }
+        Self { vcs, file, repos: Mutex::new(saved.repos), meta: Mutex::new(saved.worktrees), groups: Mutex::new(saved.groups) }
     }
 
     fn save(&self, repos: &[SavedRepo]) -> Result<(), WorkspaceError> {
         let tmp = self.file.with_extension("json.tmp");
         let worktrees = self.meta.lock().unwrap().clone();
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&Saved { repos: repos.to_vec(), worktrees }).unwrap())?;
+        let groups = self.groups.lock().unwrap().clone();
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&Saved { repos: repos.to_vec(), worktrees, groups }).unwrap())?;
         std::fs::rename(tmp, &self.file)?;
         Ok(())
     }
@@ -196,8 +230,64 @@ impl Workspace {
         if repos.len() == before {
             return Err(WorkspaceError::UnknownRepo(id.into()));
         }
+        // 워크스페이스에서도 뺀다 (다시 등록하면 옛 워크스페이스가 아니라 기본에 든다)
+        for g in self.groups.lock().unwrap().iter_mut() {
+            g.repos.retain(|r| r != id);
+        }
         self.save(&repos)?;
         Ok(())
+    }
+
+    fn repo_ids(&self) -> Vec<String> {
+        self.repos.lock().unwrap().iter().map(|r| repo_id(&r.path)).collect()
+    }
+
+    /// 사이드바 워크스페이스. 기본 워크스페이스가 늘 들어 있고, 등록한 프로젝트는 저마다 꼭 한 워크스페이스에 든다
+    pub fn groups(&self) -> Vec<RepoGroup> {
+        let ids = self.repo_ids();
+        normalize_groups(&self.groups.lock().unwrap(), &ids)
+    }
+
+    /// 워크스페이스 목록을 통째로 바꾼다. id 가 빈 것은 새 id 를 붙이고, 빠진 기본 워크스페이스는 다시 넣고,
+    /// 어디에도 없는 프로젝트는 기본으로 보낸다 (그래서 워크스페이스를 지우면 든 프로젝트가 기본으로 간다).
+    /// 이름이 비었거나 id 가 겹치면 거절한다. 맞춘 목록을 돌려준다
+    pub fn set_groups(&self, groups: Vec<RepoGroup>) -> Result<Vec<RepoGroup>, WorkspaceError> {
+        let mut seen = std::collections::HashSet::new();
+        for g in &groups {
+            if g.name.trim().is_empty() {
+                return Err(WorkspaceError::Invalid("워크스페이스 이름이 비었다".into()));
+            }
+            if !g.id.is_empty() && !seen.insert(g.id.as_str()) {
+                return Err(WorkspaceError::Invalid(format!("워크스페이스 id 가 겹친다: {}", g.id)));
+            }
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let mut next = now;
+        let mut used: std::collections::HashSet<String> = groups.iter().map(|g| g.id.clone()).collect();
+        let groups: Vec<RepoGroup> = groups
+            .into_iter()
+            .map(|g| {
+                let id = if g.id.is_empty() {
+                    let mut id = format!("g{next:x}");
+                    while used.contains(&id) {
+                        next += 1;
+                        id = format!("g{next:x}");
+                    }
+                    used.insert(id.clone());
+                    id
+                } else {
+                    g.id
+                };
+                RepoGroup { id, name: g.name.trim().chars().take(MAX_GROUP_NAME).collect(), repos: g.repos }
+            })
+            .collect();
+        let repos = self.repos.lock().unwrap().clone();
+        let ids: Vec<String> = repos.iter().map(|r| repo_id(&r.path)).collect();
+        let normalized = normalize_groups(&groups, &ids);
+        *self.groups.lock().unwrap() = normalized.clone();
+        self.save(&repos)?;
+        info!(event = "groups_set", groups = normalized.len());
+        Ok(normalized)
     }
 
     pub fn worktrees(&self, repo: Option<&str>) -> Result<Vec<WorktreeInfo>, WorkspaceError> {
@@ -548,5 +638,147 @@ mod tests {
         assert!(inside(&root, "src/main.rs").is_ok());
         std::os::unix::fs::symlink("/etc", root.join("escape")).unwrap();
         assert!(inside(&root, "escape/passwd").is_err(), "밖을 가리키는 링크를 막아야 한다");
+    }
+
+    /// 워크스페이스 시험용 Vcs: 경로를 그대로 메인 워크트리로 본다. 다른 것은 부르지 않는다
+    struct PathVcs;
+
+    impl Vcs for PathVcs {
+        fn main_worktree(&self, path: &Path) -> Result<PathBuf, VcsError> {
+            Ok(path.to_path_buf())
+        }
+        fn worktree_root(&self, path: &Path) -> Result<PathBuf, VcsError> {
+            Ok(path.to_path_buf())
+        }
+        fn list_worktrees(&self, _: &Path) -> Result<Vec<VcsWorktree>, VcsError> {
+            Ok(Vec::new())
+        }
+        fn create_worktree(&self, _: &Path, _: &Path, _: &str, _: Option<&str>) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn remove_worktree(&self, _: &Path, _: &Path, _: bool) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn delete_branch(&self, _: &Path, _: &str, _: bool) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn status(&self, _: &Path) -> Result<GitStatus, VcsError> {
+            unimplemented!()
+        }
+        fn diff(&self, _: &Path, _: &str, _: bool) -> Result<String, VcsError> {
+            unimplemented!()
+        }
+        fn stage(&self, _: &Path, _: &[String]) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn unstage(&self, _: &Path, _: &[String]) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn discard(&self, _: &Path, _: &[String]) -> Result<(), VcsError> {
+            unimplemented!()
+        }
+        fn commit(&self, _: &Path, _: &str, _: bool) -> Result<String, VcsError> {
+            unimplemented!()
+        }
+        fn push(&self, _: &Path) -> Result<String, VcsError> {
+            unimplemented!()
+        }
+        fn branches(&self, _: &Path) -> Result<BranchList, VcsError> {
+            unimplemented!()
+        }
+        fn ignored(&self, _: &Path, _: &[String]) -> Result<Vec<String>, VcsError> {
+            unimplemented!()
+        }
+        fn grep(&self, _: &Path, _: &str, _: bool, _: usize) -> Result<(Vec<SearchHit>, bool), VcsError> {
+            unimplemented!()
+        }
+        fn list_files(&self, _: &Path, _: usize) -> Result<(Vec<String>, bool), VcsError> {
+            unimplemented!()
+        }
+        fn line_counts(&self, _: &Path) -> Result<Vec<LineCount>, VcsError> {
+            unimplemented!()
+        }
+    }
+
+    fn open(home: &Path) -> Workspace {
+        Workspace::open(Arc::new(PathVcs), home)
+    }
+
+    fn group(id: &str, name: &str, repos: &[&str]) -> RepoGroup {
+        RepoGroup { id: id.into(), name: name.into(), repos: repos.iter().map(|r| r.to_string()).collect() }
+    }
+
+    /// (id, 이름, 든 저장소 이름들)
+    fn shape(ws: &Workspace) -> Vec<(String, String, Vec<String>)> {
+        let names: std::collections::HashMap<String, String> = ws.repos().into_iter().map(|r| (r.id, r.name)).collect();
+        ws.groups().into_iter().map(|g| (g.id, g.name, g.repos.iter().map(|r| names[r].clone()).collect())).collect()
+    }
+
+    fn row(id: &str, name: &str, repos: &[&str]) -> (String, String, Vec<String>) {
+        (id.into(), name.into(), repos.iter().map(|r| r.to_string()).collect())
+    }
+
+    #[test]
+    fn old_file_without_groups_puts_every_repo_in_default() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("workspace.json"), r#"{"repos":[{"path":"/w/a"},{"path":"/w/b"}],"worktrees":{}}"#).unwrap();
+        let ws = open(d.path());
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["a", "b"])]);
+    }
+
+    #[test]
+    fn set_groups_saves_and_reloads() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = open(d.path());
+        let [a, b, c] = ["/w/a", "/w/b", "/w/c"].map(|p| ws.add_repo(Path::new(p)).unwrap().id);
+        // 새 워크스페이스는 id 를 비워 보낸다. 기본을 뒤로 보내도 된다
+        let got = ws.set_groups(vec![group("", "  일  ", &[&c, &a]), group(DEFAULT_GROUP, "기본", &[&b])]).unwrap();
+        let new_id = got[0].id.clone();
+        assert!(!new_id.is_empty() && new_id != DEFAULT_GROUP);
+        assert_eq!(shape(&ws), [row(&new_id, "일", &["c", "a"]), row(DEFAULT_GROUP, "기본", &["b"])]);
+        // 다시 열어도 같다
+        assert_eq!(shape(&open(d.path())), shape(&ws));
+        // 새로 등록한 프로젝트는 기본 끝에 든다
+        ws.add_repo(Path::new("/w/d")).unwrap();
+        assert_eq!(shape(&ws), [row(&new_id, "일", &["c", "a"]), row(DEFAULT_GROUP, "기본", &["b", "d"])]);
+    }
+
+    #[test]
+    fn deleting_group_moves_its_repos_to_default() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = open(d.path());
+        let [a, b] = ["/w/a", "/w/b"].map(|p| ws.add_repo(Path::new(p)).unwrap().id);
+        ws.set_groups(vec![group(DEFAULT_GROUP, "기본", &[&b]), group("x", "일", &[&a])]).unwrap();
+        // 지울 워크스페이스를 빼고 보내면 든 프로젝트는 기본 끝으로 간다
+        ws.set_groups(vec![group(DEFAULT_GROUP, "기본", &[&b])]).unwrap();
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["b", "a"])]);
+        // 기본을 빼고 보내도 맨 앞에 다시 넣는다
+        ws.set_groups(vec![group("y", "놀이", &[&a])]).unwrap();
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["b"]), row("y", "놀이", &["a"])]);
+    }
+
+    #[test]
+    fn set_groups_rejects_bad_input_and_drops_unknown_repos() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = open(d.path());
+        let [a, b] = ["/w/a", "/w/b"].map(|p| ws.add_repo(Path::new(p)).unwrap().id);
+        assert!(matches!(ws.set_groups(vec![group("x", " ", &[])]), Err(WorkspaceError::Invalid(_))));
+        assert!(matches!(ws.set_groups(vec![group("x", "일", &[]), group("x", "놀이", &[])]), Err(WorkspaceError::Invalid(_))));
+        // 모르는 저장소는 빼고, 두 곳에 든 저장소는 앞 것만 남긴다
+        ws.set_groups(vec![group("x", "일", &["nope", &a, &b]), group("y", "놀이", &[&a])]).unwrap();
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &[]), row("x", "일", &["a", "b"]), row("y", "놀이", &[])]);
+    }
+
+    #[test]
+    fn removing_repo_drops_it_from_its_group() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = open(d.path());
+        let [a, b] = ["/w/a", "/w/b"].map(|p| ws.add_repo(Path::new(p)).unwrap().id);
+        ws.set_groups(vec![group(DEFAULT_GROUP, "기본", &[&a]), group("x", "일", &[&b])]).unwrap();
+        ws.remove_repo(&b).unwrap();
+        assert_eq!(shape(&open(d.path())), [row(DEFAULT_GROUP, "기본", &["a"]), row("x", "일", &[])]);
+        // 다시 등록하면 옛 워크스페이스가 아니라 기본에 든다
+        ws.add_repo(Path::new("/w/b")).unwrap();
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["a", "b"]), row("x", "일", &[])]);
     }
 }

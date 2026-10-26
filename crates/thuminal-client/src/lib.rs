@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use thuminal_protocol::paths::Paths;
 use thuminal_protocol::{
-    ClientMessage, CreateSession, ErrorBody, Event, Frame, LayoutOp, PROTOCOL_MAJOR, PROTOCOL_MINOR, PaneId, RepoInfo, Request,
+    ClientMessage, CreateSession, ErrorBody, Event, Frame, LayoutOp, PROTOCOL_MAJOR, PROTOCOL_MINOR, PaneId, RepoGroup, RepoInfo, Request,
     Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SnapshotFormat, TerminalColors,
     WorkspaceLayout, WorktreeInfo,
 };
@@ -242,6 +242,22 @@ impl Client {
     pub async fn repos(&self) -> Result<Vec<RepoInfo>> {
         match self.request(Request::ListRepos).await? {
             Response::Repos { repos } => Ok(repos),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    /// 사이드바 워크스페이스 (프로젝트 묶음)
+    pub async fn groups(&self) -> Result<Vec<RepoGroup>> {
+        match self.request(Request::ListGroups).await? {
+            Response::Groups { groups } => Ok(groups),
+            other => Err(ClientError::Unexpected(Box::new(other))),
+        }
+    }
+
+    /// 워크스페이스 목록을 통째로 바꾸고 데몬이 맞춘 목록을 돌려받는다
+    pub async fn set_groups(&self, groups: Vec<RepoGroup>) -> Result<Vec<RepoGroup>> {
+        match self.request(Request::SetGroups { groups }).await? {
+            Response::Groups { groups } => Ok(groups),
             other => Err(ClientError::Unexpected(Box::new(other))),
         }
     }

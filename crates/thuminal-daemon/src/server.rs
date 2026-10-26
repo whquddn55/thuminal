@@ -335,6 +335,7 @@ impl Server {
                 }
             }
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
+            Request::ListGroups => Ok(Response::Groups { groups: self.workspace.groups() }),
             Request::RepoIcon { repo } => match self.workspace.repos().into_iter().find(|r| r.id == repo) {
                 None => Err(ErrorBody { code: ErrorCode::NotFound, message: format!("등록하지 않은 저장소다: {repo}") }),
                 Some(r) => match tokio::task::spawn_blocking(move || crate::repo_icon::find(std::path::Path::new(&r.path))).await {
@@ -350,6 +351,7 @@ impl Server {
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
             | Request::RemoveRepo { .. }
+            | Request::SetGroups { .. }
             | Request::ListWorktrees { .. }
             | Request::CreateWorktree { .. }
             | Request::RemoveWorktree { .. }
@@ -395,6 +397,7 @@ impl Server {
             Request::AddRepo { .. }
                 | Request::AddRepos { .. }
                 | Request::RemoveRepo { .. }
+                | Request::SetGroups { .. }
                 | Request::CreateWorktree { .. }
                 | Request::RemoveWorktree { .. }
                 | Request::UpdateWorktree { .. }
@@ -451,6 +454,7 @@ impl Server {
                     ws.remove_repo(&repo)?;
                     Response::Ok
                 }
+                Request::SetGroups { groups } => Response::Groups { groups: ws.set_groups(groups)? },
                 Request::ListWorktrees { repo } => Response::Worktrees { worktrees: ws.worktrees(repo.as_deref())? },
                 Request::CreateWorktree { repo, branch, base, name, parent } => {
                     Response::Worktree { worktree: ws.create_worktree(&repo, &branch, base.as_deref(), name.as_deref(), parent.as_deref())? }
@@ -502,6 +506,8 @@ fn request_kind(r: &Request) -> &'static str {
         Request::Remove { .. } => "remove",
         Request::Shutdown => "shutdown",
         Request::ListRepos => "list_repos",
+        Request::ListGroups => "list_groups",
+        Request::SetGroups { .. } => "set_groups",
         Request::AddRepo { .. } => "add_repo",
         Request::AddRepos { .. } => "add_repos",
         Request::UpdateWorktree { .. } => "update_worktree",
