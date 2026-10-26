@@ -313,9 +313,16 @@ export class AppModel {
     this.set({ repos, groups, worktrees });
   }
 
+  /** 옛 데몬은 모르는 요청을 받으면 연결을 끊는다. 한 번 실패하면 이 앱 실행 동안 다시 묻지 않는다 (안 그러면 붙자마자 끊기길 되풀이한다) */
+  private groupsUnsupported = false;
+
   /** 워크스페이스 목록. 옛 데몬이라 모르면 빈 목록(모두 기본)으로 본다 */
   private loadGroups(): Promise<RepoGroup[]> {
-    return this.services.host.listGroups().catch(() => []);
+    if (this.groupsUnsupported) return Promise.resolve([]);
+    return this.services.host.listGroups().catch(() => {
+      this.groupsUnsupported = true;
+      return [];
+    });
   }
 
   /** git 상태를 다시 읽는다. `only` 를 주면 그 워크트리만 */
