@@ -27,6 +27,7 @@ import type {
   RemoteApi,
   RemoteDevice,
   RemoteStatus,
+  RepoIcon,
   RepoInfo,
   SearchHit,
   SessionId,
@@ -175,6 +176,10 @@ export class TauriHostApi implements HostApi {
 
   removeRepo(repo: string): Promise<void> {
     return invoke("remove_repo", { repo });
+  }
+
+  repoIcon(repo: string): Promise<RepoIcon | null> {
+    return req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
   }
 
   listWorktrees(): Promise<WorktreeInfo[]> {

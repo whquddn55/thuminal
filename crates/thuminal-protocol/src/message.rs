@@ -174,6 +174,17 @@ pub struct RepoInfo {
     pub path: String,
 }
 
+/// 저장소 안에서 찾은 아이콘 그림 (`RepoIcon` 요청). 사이드바 프로젝트 머리에 그린다
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoIcon {
+    /// `image/png` 또는 `image/webp` (파일 머리 바이트로 가른다)
+    pub mime: String,
+    /// 파일 내용 base64
+    pub data: String,
+    /// 저장소 기준 상대 경로
+    pub file: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorktreeInfo {
     pub repo: String,
@@ -420,6 +431,8 @@ pub enum Request {
     },
     GitPush { worktree: String },
     ListBranches { repo: String },
+    /// 저장소(id) 안의 흔한 자리(favicon, logo, Tauri 아이콘 …)에서 아이콘 그림을 찾는다. 없으면 None
+    RepoIcon { repo: String },
     /// 워크트리 안 폴더 목록. `dir` 은 워크트리 기준 상대 경로 (빈 글이면 맨 위)
     ListDir {
         worktree: String,
@@ -526,6 +539,7 @@ pub enum Response {
     Text { text: String },
     GitStatus { status: GitStatus },
     Branches { branches: BranchList },
+    RepoIcon { icon: Option<RepoIcon> },
     Dir { entries: Vec<DirEntry> },
     File { file: FileContent },
     SearchHits { hits: Vec<SearchHit>, truncated: bool },

@@ -22,6 +22,7 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  RepoIcon,
   RepoInfo,
   SearchHit,
   SessionId,
@@ -281,6 +282,10 @@ export class WebHostApi implements HostApi {
 
   removeRepo(repo: string): Promise<void> {
     return this.req({ type: "remove_repo", repo });
+  }
+
+  repoIcon(repo: string): Promise<RepoIcon | null> {
+    return this.req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
   }
 
   listWorktrees(): Promise<WorktreeInfo[]> {

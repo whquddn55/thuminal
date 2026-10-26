@@ -43,6 +43,7 @@ import { useDrag } from "./dnd";
 import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
+import { RepoMark } from "./repo-icon";
 import { type AppState, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 
 function copy(text: string) {
@@ -195,7 +196,7 @@ export function Sidebar() {
             key={r.id}
             label={r.name}
             title={r.path}
-            icon={<RepoMark name={r.name} />}
+            icon={<RepoMark repo={r.id} name={r.name} />}
             count={worktrees.filter((w) => w.repo === r.id).length}
             collapsed={collapsed.has(r.id)}
             onToggle={() => toggle(r.id)}
@@ -285,17 +286,6 @@ function SidebarResizer() {
     >
       <div className="h-full w-px transition-colors group-hover:bg-ring/50 group-active:bg-ring" />
     </div>
-  );
-}
-
-/** 저장소 표시: 이름 첫 글자를 이름에서 뽑은 색 사각형에 (Orca 의 저장소 배지처럼) */
-function RepoMark({ name }: { name: string }) {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return (
-    <span className="flex size-4 items-center justify-center rounded-[4px] text-[9px] leading-none font-bold text-white uppercase" style={{ background: `hsl(${h} 45% 45%)` }}>
-      {[...name][0] ?? "?"}
-    </span>
   );
 }
 

@@ -11,6 +11,7 @@ pub mod orca;
 pub mod persist;
 pub mod procs;
 pub mod remote;
+pub mod repo_icon;
 pub mod server;
 pub mod session;
 pub mod shell;

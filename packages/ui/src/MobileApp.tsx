@@ -30,6 +30,7 @@ import { AgentIcon } from "./agent-icons";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { panesOf } from "./layout";
+import { RepoMark } from "./repo-icon";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
 import type { Services } from "./services";
@@ -240,7 +241,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
           if (!list.length) return null;
           const { roots, kids } = worktreeForest(list);
           return (
-            <Section key={r.id} title={r.name}>
+            <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-3.5" />}>
               {roots.map((w) => (
                 <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
               ))}
@@ -363,10 +364,13 @@ function statusText(s: Status): string {
   return { attention: "묻고 있다", error: "오류로 끝났다", working: "일하는 중", interrupted: "멈췄다", done: "끝냈다", ready: "기다리는 중" }[s as string] ?? "";
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="pt-3">
-      <h2 className="px-4 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{title}</h2>
+      <h2 className="flex items-center gap-1.5 px-4 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        {icon}
+        {title}
+      </h2>
       <div className="flex flex-col">{children}</div>
     </section>
   );

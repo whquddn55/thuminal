@@ -68,6 +68,16 @@ export interface RepoInfo {
   path: string;
 }
 
+/** 저장소 안에서 찾은 아이콘 그림 (`repo_icon` 요청) */
+export interface RepoIcon {
+  /** `image/png` 또는 `image/webp` */
+  mime: string;
+  /** 파일 내용 base64 */
+  data: string;
+  /** 저장소 기준 상대 경로 */
+  file: string;
+}
+
 export interface WorktreeInfo {
   repo: string;
   path: string;

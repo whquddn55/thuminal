@@ -335,6 +335,18 @@ impl Server {
                 }
             }
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
+            Request::RepoIcon { repo } => match self.workspace.repos().into_iter().find(|r| r.id == repo) {
+                None => Err(ErrorBody { code: ErrorCode::NotFound, message: format!("등록하지 않은 저장소다: {repo}") }),
+                Some(r) => match tokio::task::spawn_blocking(move || crate::repo_icon::find(std::path::Path::new(&r.path))).await {
+                    Ok(found) => Ok(Response::RepoIcon {
+                        icon: found.map(|i| {
+                            use base64::Engine as _;
+                            thuminal_protocol::RepoIcon { mime: i.mime.into(), data: base64::engine::general_purpose::STANDARD.encode(&i.bytes), file: i.file }
+                        }),
+                    }),
+                    Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+                },
+            },
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
             | Request::RemoveRepo { .. }
@@ -501,6 +513,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::GitCommit { .. } => "git_commit",
         Request::GitPush { .. } => "git_push",
         Request::ListBranches { .. } => "list_branches",
+        Request::RepoIcon { .. } => "repo_icon",
         Request::ListDir { .. } => "list_dir",
         Request::ReadFile { .. } => "read_file",
         Request::SearchText { .. } => "search_text",
@@ -545,6 +558,7 @@ fn is_slow(r: &Request) -> bool {
             | Request::GitLineCounts { .. }
             | Request::ListWorktrees { .. }
             | Request::ListRepos
+            | Request::RepoIcon { .. }
             | Request::FindCommands { .. }
             | Request::ResolvePath { .. }
             | Request::SavePasteImage { .. }

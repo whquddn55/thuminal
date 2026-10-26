@@ -16,6 +16,7 @@ import type {
   OrcaScan,
   RemoteDevice,
   RemoteStatus,
+  RepoIcon,
   RepoInfo,
   SearchHit,
   SessionId,
@@ -128,6 +129,8 @@ export interface HostApi {
   /** 폴더가 저장소가 아니면 바로 아래 저장소들을 모두 등록한다 */
   addRepos(path: string): Promise<RepoInfo[]>;
   removeRepo(repo: string): Promise<void>;
+  /** 저장소(id) 안의 흔한 자리(favicon, logo, Tauri 아이콘 …)에서 찾은 아이콘. 없으면 null */
+  repoIcon(repo: string): Promise<RepoIcon | null>;
   listWorktrees(): Promise<WorktreeInfo[]>;
   createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo>;
   /** 이름·고정·부모를 바꾼다. 준 것만 바꾼다. parent 를 null 로 주면 부모에서 뗀다 */
