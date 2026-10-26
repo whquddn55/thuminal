@@ -60,7 +60,7 @@ async function boot() {
     mobile ? (
       <MobileApp services={services} conn={host} onForget={forget} onDesktopUi={() => switchUi("desktop")} />
     ) : (
-      <App services={services} />
+      <App services={services} onMobileUi={() => switchUi("mobile")} />
     ),
   );
 }
