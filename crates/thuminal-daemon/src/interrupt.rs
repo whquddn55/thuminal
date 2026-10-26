@@ -2,9 +2,9 @@
 //!
 //! 1. 화면: Orca 처럼 "멈춤 키 + claude 스스로 쉬고 있다는 증거" 를 맞춘다. Orca 는 증거로 claude 의 OSC 7501
 //!    상태 보고(2.1.295 부터)나 터미널 제목 글리프(일할 때 ◐◑◒◓ · 브라유, 쉴 때 ✳)를 본다. 제목 글리프는 주제가
-//!    바뀔 때만 다시 써서 일하는 동안에도 ✳ 로 남는 일이 잦으므로, 여기서는 일하는 동안 아래 줄에 늘 보이는
-//!    "esc to interrupt" 를 증거로 쓴다. 키를 보낼 때 이 글이 보였고, 3초 안에 사라져 잠시 그대로면 멈춘 것이다
-//!    (메뉴를 닫는 Esc 처럼 일이 계속되면 글이 남는다).
+//!    바뀔 때만 다시 써서 일하는 동안에도 ✳ 로 남는 일이 잦으므로, 여기서는 일하는 동안만 화면에 보이는
+//!    돌아가는 상태 줄(`✻ Thinking… (3s)`)과 아래 줄 "esc to interrupt" 를 증거로 쓴다. 키를 보낼 때 이것이
+//!    보였고, 3초 안에 사라져 잠시 그대로면 멈춘 것이다 (메뉴를 닫는 Esc 처럼 일이 계속되면 남는다).
 //! 2. 대화 기록: 응답 도중 멈추면 claude 는 기록에 `[Request interrupted by user]`(도구 중이면 `… for tool use`)
 //!    사용자 글을 남긴다. 다른 길(웹 · CLI 입력, 권한 창의 Esc)로 멈춘 것도 잡는다.
 //!    보내자마자 멈추면 프롬프트가 입력 칸으로 돌아가고 기록에 아무것도 남지 않아 1 만 잡는다.
@@ -30,8 +30,23 @@ pub fn is_interrupt_key(data: &[u8]) -> bool {
     matches!(data, b"\x1b" | b"\x03" | b"\x1b[27u" | b"\x1b[27;1u" | b"\x1b[27;1:1u" | b"\x1b[99;5u")
 }
 
+/// claude 가 일하는 화면이다: 아래 줄의 "esc to interrupt", 또는 `✻ Recombobulating… (14s · ↓ 1.2k tokens)` 같은
+/// 돌아가는 상태 줄. 상태 줄(statusLine)을 따로 쓰면 아래 줄 안내가 빠지므로 상태 줄도 본다.
+/// 끝난 뒤의 `✻ Worked for 12s` 는 말 끝에 … 이 없어 걸리지 않는다
 pub fn shows_working(screen: &str) -> bool {
-    screen.contains(WORKING_HINT)
+    screen.contains(WORKING_HINT) || screen.lines().any(is_spinner_line)
+}
+
+/// claude 상태 줄 글리프
+const SPINNER_GLYPHS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '*'];
+
+fn is_spinner_line(line: &str) -> bool {
+    let mut chars = line.chars();
+    if !chars.next().is_some_and(|c| SPINNER_GLYPHS.contains(&c)) || chars.next() != Some(' ') {
+        return false;
+    }
+    let word = chars.as_str().split_whitespace().next().unwrap_or("");
+    word.strip_suffix('…').is_some_and(|w| !w.is_empty() && w.chars().all(char::is_alphabetic))
 }
 
 pub enum Verdict {
@@ -134,6 +149,9 @@ mod tests {
         assert!(matches!(w.observe(false, 460), Verdict::Interrupted));
         let mut w = EscWatch::new(1, 0);
         assert!(matches!(w.observe(true, 3300), Verdict::GiveUp));
+        assert!(shows_working("x\n✻ Recombobulating… (14s · ↓ 1.2k tokens)\n"));
+        assert!(shows_working("✢ Nucleating… "));
+        assert!(!shows_working("✻ Worked for 12s · done 오후 3:05\n⏺ Bash(sleep 20…)\n  Running cd …"));
         assert!(is_interrupt_key(b"\x1b") && is_interrupt_key(b"\x03") && !is_interrupt_key(b"\x1b[A"));
     }
 

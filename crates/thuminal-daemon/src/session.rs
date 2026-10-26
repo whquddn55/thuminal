@@ -333,7 +333,9 @@ impl Actor {
             return;
         };
         let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
-        if crate::interrupt::shows_working(&screen) {
+        let working = crate::interrupt::shows_working(&screen);
+        info!(event = "esc_watch", session = self.id.0, working);
+        if working {
             self.esc_watch = Some(crate::interrupt::EscWatch::new(updated_at, now_ms()));
         }
     }
@@ -344,7 +346,7 @@ impl Actor {
         let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
         match watch.observe(crate::interrupt::shows_working(&screen), now) {
             crate::interrupt::Verdict::Wait => return,
-            crate::interrupt::Verdict::GiveUp => {}
+            crate::interrupt::Verdict::GiveUp => info!(event = "esc_watch_still_working", session = self.id.0),
             crate::interrupt::Verdict::Interrupted => {
                 let baseline = watch.updated_at;
                 let session = {
