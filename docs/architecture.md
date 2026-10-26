@@ -59,7 +59,7 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - **로그**: `logs/daemon.log` 에 JSON 한 줄씩 남긴다. 기능 사용(세션 만들기, 붙기, CLI 명령)도 `event` 필드로 남겨 나중에 어떤 기능을 많이 쓰는지 셀 수 있게 한다.
 
 - **워크트리**: 저장소 목록(`workspace.json`)과 워크트리 만들기/지우기도 데몬이 맡는다. 그래야 CLI 로 만든 워크트리가 앱에도 바로 나타난다 (`workspace_changed` 이벤트). 새 워크트리는 저장소 옆 `<저장소>-thm-wt-<브랜치>` 에 만든다. 세션을 만들 때 시작 폴더가 워크트리 안이면 `worktree` 꼬리표를 단다.
-  - **하위 워크트리**: 워크트리마다 부모 워크트리를 기억한다 (`workspace.json` 의 워크트리 `parent`, `WorktreeInfo.parent`). `create_worktree { parent }` 나 `update_worktree { parent }`(빈 글이면 뗀다)로 정하고, 자기나 자기 밑의 워크트리를 부모로 삼으면 거절한다. 부모를 지우면 그 자식은 할아버지 밑으로 옮긴다. 사이드바는 자식을 부모 카드 밑에 들여 그리고 "N개 하위" 단추로 접는다. Orca 의 `worktreeLineageById` 도 가져온다. CLI 는 `thuminal wt new <브랜치> --parent <워크트리>`.
+  - **하위 워크트리**: 워크트리마다 부모 워크트리를 기억한다 (`workspace.json` 의 워크트리 `parent`, `WorktreeInfo.parent`). `create_worktree { parent }` 나 `update_worktree { parent }`(빈 글이면 뗀다)로 정하고, 자기나 자기 밑의 워크트리를 부모로 삼으면 거절한다. 부모를 지우면 그 자식은 할아버지 밑으로 옮긴다. 사이드바는 자식을 부모 카드 밑에 들여 그리고 "N개 하위" 단추로 접는다. Orca 의 `worktreeLineageById` 도 가져온다. CLI 는 `thuminal wt new <브랜치> --parent <워크트리>`, 나중에 바꾸려면 `wt set <워크트리> --parent …`/`--no-parent`.
   - **워크스페이스**(사이드바 프로젝트 묶음, 코드·프로토콜에서는 `group`. `WorkspaceId` 와 다르다): `workspace.json` 의 `groups`(id, 이름, 든 저장소 id 차례)다. `list_groups` 로 읽고 `set_groups` 로 통째로 바꾸며, 바뀌면 `workspace_changed` 를 낸다. 데몬은 읽고 쓸 때마다 저장소 목록에 맞춘다: 기본 워크스페이스(`default`)는 늘 있고 지우지 못하며, 프로젝트는 꼭 한 워크스페이스에 들고, 어디에도 없는 프로젝트(새로 등록한 것, 지운 워크스페이스에 들었던 것)는 기본 끝에 붙는다. 프로젝트를 빼면 워크스페이스에서도 뺀다. 옛 파일에는 `groups` 가 없고 그때는 기본 하나에 모든 프로젝트다.
   - 지울 때 `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도 `git branch -D`) 쓴다. `force_branch` 없이는 `git branch -d` 로 지우고, git 이 거절하면 브랜치를 남긴 채 워크트리만 지우고 성공으로 답한다. 답 `text` 에 "브랜치 X 는 합치지 않은 커밋이 있어 남겼다" 같은 까닭을 싣는다 (알릴 것이 없으면 빈 글).
 - **셸 통합**: 데몬이 기본 셸을 띄울 때 zsh 는 `ZDOTDIR`, bash 는 `--rcfile` 로 thuminal 파일(`shell/`)을 먼저 읽힌다. 그 파일은 사용자 설정을 그대로 다 읽은 뒤 `claude` 함수를 더한다. 함수는 실행기 `shell/claude-launch` 를 부르고, 실행기가 `--plugin-dir` 로 thuminal claude 플러그인을 그 실행에만 얹는다. 실행기는 에이전트 설정(`agent-settings.json`, 설정 창 · 에이전트)이 바뀔 때마다 다시 쓴다: 권한 확인 없이(`--dangerously-skip-permissions`, 기본 켬), 에이전트 팀(기본 켬). `term new -- claude …` 도 실행기로 띄운다.
@@ -134,7 +134,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 
 - `term …`: 세션 만들기, 보내기, 읽기, 기다리기, 붙기. 세션 자리에는 `12`, `s12`, 칸 `p7`(그 칸의 세션), `.` 을 쓴다
   - `term read --tail N` 은 빈 줄을 뺀 마지막 N 줄, `--json` 은 `{"session":12,"lines":[…]}` 이다
-  - `term wait --agent idle|working|attention` 은 에이전트가 그 상태가 될 때까지 이벤트로 기다린다. idle 은 이미 idle 이면 막 보낸 입력의 훅이 닿을 틈(1.5초)을 지켜보고, 그 사이 일을 시작하면 턴이 끝날 때까지 기다린다. 그래서 `term send p7 "…" --enter` 뒤에 바로 불러도 된다. 기다리는 동안 세션이 끝나면 종료 코드 1, 시간이 넘으면 124
+  - `term wait --agent idle|working|attention` 은 에이전트가 그 상태가 될 때까지 이벤트로 기다린다. idle 은 이미 idle 이면 막 보낸 입력의 훅이 닿을 틈(1.5초)을 지켜보고, 그 사이 일을 시작하면 턴이 끝날 때까지 기다린다. 그래서 `term send p7 "…" --enter` 뒤에 바로 불러도 된다. `--enter` 는 글을 보내고 300ms 뒤 Enter 를 따로 보낸다 (한 번에 닿으면 claude 가 붙여넣기로 받아 Enter 를 줄바꿈으로 삼킨다). 기다리는 동안 세션이 끝나면 종료 코드 1, 시간이 넘으면 124
 - `pane …`: `split`, `resize`, `focus`, `move`, `swap`, `zoom`, `equalize`, `break`, `close`, `ls`. 칸은 `p7`, 생략하거나 `.` 이면 이 셸이 든 칸(`THUMINAL_SESSION_ID`)이다
 - `tab …`: `new`, `select`, `close`, `rename`, `move`, `join`, `ls`. 탭은 `t3`. `tab new --title T` 는 탭 이름을 붙여 만든다
 - 터미널을 만드는 명령은 세션 번호도 찍어 바로 `term send/read/wait` 에 넣을 수 있다: `tab new` → `t3 p7 s12`, `pane split` → `p8 s13`, `layout apply` → 칸마다 `p7 s12` 한 줄(문서 칸은 `p7 -`). `--json` 에는 `panes: [{pane, tab, session}]` 가 더 붙는다
@@ -142,7 +142,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 - `browser open <주소>`: 앱 안 브라우저 탭을 연다 (스킴이 없으면 http:// 를 붙인다). `--beside p7` 이나 `--right` 류를 주면 그 칸 옆을 나눠 연다. 새 칸 번호를 찍는다
 - `--in <대상>`: 워크트리 경로나 브랜치 이름, `floating`, `other`, `.`(이 셸의 workspace, 기본)
 - `remote status|on|off|pair <이름>|rm <id>`: 원격 접속 켜기·끄기, 기기 등록 (주소를 찍는다)
-- `repo …`, `wt …`: 저장소 등록, 워크트리 만들기·지우기·상태. `wt rm --force` 는 워크트리만, `--delete-branch` 는 합친 브랜치만 지우고, 합치지 않은 브랜치는 `--force-branch` 를 줘야 지운다
+- `repo …`, `wt …`: 저장소 등록, 워크트리 만들기·지우기·상태. `wt rm --force` 는 워크트리만, `--delete-branch` 는 합친 브랜치만 지우고, 합치지 않은 브랜치는 `--force-branch` 를 줘야 지운다. `wt new --name` · `wt set --name/--pin/--unpin` 은 사이드바 이름·고정을 바꾼다 (`update_worktree`)
 
 ## 화면 (`packages/ui`)
 

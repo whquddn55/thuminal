@@ -2,7 +2,7 @@
 
 use clap::Subcommand;
 use thuminal_client::Client;
-use thuminal_protocol::{RepoInfo, SessionState, WORKTREE_LABEL, WorktreeInfo};
+use thuminal_protocol::{RepoInfo, Request, Response, SessionState, WORKTREE_LABEL, WorktreeInfo};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -41,8 +41,31 @@ pub enum WtCmd {
         /// 이 워크트리(경로나 브랜치)의 하위 워크트리로 만든다. 사이드바에서 그 밑에 들여 보인다
         #[arg(long)]
         parent: Option<String>,
+        /// 사이드바에 보일 이름 (없으면 브랜치 이름으로 보인다)
+        #[arg(long)]
+        name: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// 워크트리 이름·고정·부모를 바꾼다. 주지 않은 것은 그대로 둔다
+    Set {
+        /// 워크트리 경로나 브랜치 이름
+        target: String,
+        /// 사이드바에 보일 이름. 빈 글("")이면 지워 브랜치 이름으로 되돌린다
+        #[arg(long)]
+        name: Option<String>,
+        /// 이 워크트리(경로나 브랜치)의 하위 워크트리로 옮긴다
+        #[arg(long, conflicts_with = "no_parent")]
+        parent: Option<String>,
+        /// 부모를 떼어 맨 위로 올린다
+        #[arg(long)]
+        no_parent: bool,
+        /// 프로젝트 맨 위에 고정한다
+        #[arg(long, conflicts_with = "unpin")]
+        pin: bool,
+        /// 고정을 푼다
+        #[arg(long)]
+        unpin: bool,
     },
     /// 워크트리를 지운다. 그 안에서 돌던 세션도 끝낸다
     Rm {
@@ -124,7 +147,7 @@ pub async fn repo(c: &Client, cmd: RepoCmd) -> Res<()> {
         }
         RepoCmd::Rm { repo } => {
             let r = resolve_repo(c, Some(repo)).await?;
-            c.request(thuminal_protocol::Request::RemoveRepo { repo: r.id }).await?;
+            c.request(Request::RemoveRepo { repo: r.id }).await?;
         }
     }
     Ok(())
@@ -132,7 +155,8 @@ pub async fn repo(c: &Client, cmd: RepoCmd) -> Res<()> {
 
 fn print_worktrees(list: &[WorktreeInfo]) {
     for w in list {
-        println!("{}  {:<32}  {}{}", w.repo, w.branch.as_deref().unwrap_or("(detached)"), w.path, if w.is_main { "  (메인)" } else { "" });
+        let name = w.name.as_deref().map(|n| format!("  [{n}]")).unwrap_or_default();
+        println!("{}  {:<32}  {}{}{name}", w.repo, w.branch.as_deref().unwrap_or("(detached)"), w.path, if w.is_main { "  (메인)" } else { "" });
     }
 }
 
@@ -150,18 +174,36 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 print_worktrees(&list);
             }
         }
-        WtCmd::New { branch, base, repo, parent, json } => {
+        WtCmd::New { branch, base, repo, parent, name, json } => {
             let r = resolve_repo(c, repo).await?;
             let parent = match parent {
                 Some(p) => Some(find_worktree(c, &p, false).await?.path),
                 None => None,
             };
-            let w = c.create_worktree(r.id, branch, base, parent).await?;
+            let w = match c.request(Request::CreateWorktree { repo: r.id, branch, base, name, parent }).await? {
+                Response::Worktree { worktree } => worktree,
+                other => return Err(format!("예상하지 못한 응답: {other:?}").into()),
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&w)?);
             } else {
                 println!("{}", w.path);
             }
+        }
+        WtCmd::Set { target, name, parent, no_parent, pin, unpin } => {
+            let w = find_worktree(c, &target, false).await?;
+            // 데몬은 부모를 빈 글로 받으면 뗀다
+            let parent = match (parent, no_parent) {
+                (Some(p), _) => Some(find_worktree(c, &p, false).await?.path),
+                (None, true) => Some(String::new()),
+                (None, false) => None,
+            };
+            let pinned = if pin { Some(true) } else if unpin { Some(false) } else { None };
+            if name.is_none() && parent.is_none() && pinned.is_none() {
+                return Err("--name, --parent, --no-parent, --pin, --unpin 가운데 하나를 준다".into());
+            }
+            c.request(Request::UpdateWorktree { path: w.path.clone(), name, pinned, parent }).await?;
+            println!("{}", w.path);
         }
         WtCmd::Rm { target, force, delete_branch, force_branch } => {
             let w = &find_worktree(c, &target, false).await?;
@@ -188,8 +230,8 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 .filter(|w| here.starts_with(&w.path))
                 .max_by_key(|w| w.path.len())
                 .ok_or("등록한 저장소의 워크트리 안이 아니다 (thuminal repo add 로 등록한다)")?;
-            let st = match c.request(thuminal_protocol::Request::GitStatus { worktree: w.path.clone() }).await? {
-                thuminal_protocol::Response::GitStatus { status } => status,
+            let st = match c.request(Request::GitStatus { worktree: w.path.clone() }).await? {
+                Response::GitStatus { status } => status,
                 other => return Err(format!("예상하지 못한 응답: {other:?}").into()),
             };
             if json {

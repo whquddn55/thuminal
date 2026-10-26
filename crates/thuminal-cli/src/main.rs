@@ -470,11 +470,16 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
             }
         }
         TermCmd::Send { id, text, enter } => {
-            let mut text = text;
-            if enter {
-                text.push('\r');
+            let id = session_id(&c, &id).await?;
+            if !text.is_empty() {
+                c.send_text(id, text).await?;
             }
-            c.send_text(session_id(&c, &id).await?, text).await?;
+            if enter {
+                // 글과 Enter 가 한 번에 닿으면 claude 같은 TUI 는 붙여넣기로 받아 Enter 를 줄바꿈으로 삼킨다.
+                // 따로 친 키로 보이게 틈을 두고 보낸다
+                tokio::time::sleep(ENTER_AFTER_TEXT).await;
+                c.send_text(id, "\r").await?;
+            }
         }
         TermCmd::Read { id, scrollback, vt, tail, json } => {
             let id = session_id(&c, &id).await?;
@@ -500,6 +505,9 @@ async fn term(cmd: TermCmd) -> Res<ExitCode> {
     }
     Ok(ExitCode::SUCCESS)
 }
+
+/// `term send --enter` 가 글을 보낸 뒤 Enter 를 치기 전에 두는 틈
+const ENTER_AFTER_TEXT: Duration = Duration::from_millis(300);
 
 /// `--agent idle` 이 이미 idle 인 에이전트를 받아들이기 전에 지켜보는 틈 (막 보낸 프롬프트의 훅이 닿을 시간)
 const AGENT_IDLE_GRACE: Duration = Duration::from_millis(1500);
