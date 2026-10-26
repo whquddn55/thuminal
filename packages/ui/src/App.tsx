@@ -1,4 +1,4 @@
-import { SidebarSimpleIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
+import { SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo } from "react";
 
 import { Button } from "./components/ui/button";
@@ -13,7 +13,7 @@ import type { Services } from "./services";
 import { SettingsDialog } from "./Settings";
 import { Sidebar } from "./Sidebar";
 import { AppModel, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./store";
-import { TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
+import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import "./styles.css";
 
 export function App({ services }: { services: Services }) {
@@ -161,7 +161,7 @@ function Shell() {
           </TabBar>
         </div>
         <TerminalSurface surface="main" className="flex-1">
-          <WorkspaceView ws={active} empty={<Empty worktree={inWorktree} />} />
+          <WorkspaceView ws={active} empty={<EmptyWorkspace ws={active} />} />
         </TerminalSurface>
       </main>
       {panel && inWorktree && <RightPanel />}
@@ -200,29 +200,6 @@ function PanelButton({ on, label, onClick, children }: { on: boolean; label: str
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function Empty({ worktree }: { worktree: boolean }) {
-  const model = useModel();
-  return (
-    <div className="grid h-full place-content-center gap-3 text-center text-muted-foreground">
-      <TerminalWindowIcon className="mx-auto size-8 opacity-50" />
-      <p>{worktree ? "이 워크트리에 열린 터미널이 없다." : "열린 터미널이 없다."}</p>
-      <div className="flex justify-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => void model.newTab()}>
-          새 터미널 (⌘T)
-        </Button>
-        {worktree && (
-          <Button size="sm" variant="outline" onClick={() => void model.newTab(undefined, "claude")}>
-            claude 띄우기
-          </Button>
-        )}
-      </div>
-      <p className="text-2xs">
-        ⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · ⌘⌥A 플로팅
-      </p>
-    </div>
   );
 }
 

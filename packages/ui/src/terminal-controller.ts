@@ -426,12 +426,21 @@ export class TerminalController {
     host.appendChild(ta);
     this.textarea = ta;
 
+    // 안드로이드 키보드는 빈 글 칸에서 지우기를 누르면 아무 이벤트도 내지 않는다 (지울 글이 없어서).
+    // 글 칸에 늘 빈칸 몇 개를 깔아 두어 지우기가 deleteContentBackward 로 오게 하고, 올 때마다 다시 채운다
+    const pad = SOFT_KEYBOARD_PAD;
+    const refill = () => {
+      ta.value = pad;
+      ta.setSelectionRange(pad.length, pad.length);
+    };
+    if (pad) refill();
     // textarea 를 비운다. 조합 중이면 조합이 모두 끝난 뒤에 비운다
     const settle = () =>
       setTimeout(() => {
         if (this.composing > 0) return;
         this.engine?.setPreedit(null);
-        ta.value = "";
+        if (pad) refill();
+        else ta.value = "";
       });
     ta.addEventListener("keydown", (ev) => {
       const raw = !ev.isComposing && ev.keyCode !== 229 && !ev.metaKey && !ev.ctrlKey && !ev.altKey;
@@ -512,6 +521,8 @@ export class TerminalController {
       // 한글 입력기는 조합 이벤트 없이 앞 글자를 바꿔 쓰기도 한다 (ㅇ → 아 → 안). 글이 들어올 때마다 비우면 입력기가
       // 앞 글자를 잃어 자모가 하나씩 따로 확정된다 (ㅇㅏㄴ). 그래서 글이 길어졌을 때만 비운다
       if (ta.value.length > 64) settle();
+      // 깔아 둔 빈칸을 지웠으면 다시 깐다 (다음 지우기도 이벤트로 오게)
+      else if (pad && !ta.value.startsWith(pad)) refill();
     });
     ta.addEventListener("paste", (ev) => {
       ev.preventDefault();
@@ -628,6 +639,9 @@ export class TerminalController {
     this.engine = null;
   }
 }
+
+/** 안드로이드에서 글 칸에 깔아 두는 빈칸 (빈 칸에서 누른 지우기도 이벤트로 오게) */
+const SOFT_KEYBOARD_PAD = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent) ? "    " : "";
 
 /** 파일 내용을 base64 로 (data: 주소의 앞머리를 뗀다) */
 function toBase64(f: Blob): Promise<string> {

@@ -11,7 +11,7 @@ import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { cn } from "./lib/utils";
 import { FLOATING_WORKSPACE, type FloatingRect, useApp, useModel } from "./store";
-import { TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
+import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 
 const MIN_W = 420;
 const MIN_H = 280;
@@ -136,14 +136,7 @@ export function FloatingPanel() {
       <TerminalSurface surface="floating" className="flex-1">
         <WorkspaceView
           ws={FLOATING_WORKSPACE}
-          empty={
-            <div className="grid h-full place-content-center gap-2 text-center text-muted-foreground">
-              <p>열린 터미널이 없다.</p>
-              <Button size="sm" variant="outline" onClick={() => void model.newTab(FLOATING_WORKSPACE)}>
-                새 터미널 (⌘T)
-              </Button>
-            </div>
-          }
+          empty={<EmptyWorkspace ws={FLOATING_WORKSPACE} />}
         />
       </TerminalSurface>
       {!maximized && EDGES.map(({ edge, className }) => <div key={edge} className={cn("absolute z-10", className)} onPointerDown={(e) => drag(e, edge)} />)}

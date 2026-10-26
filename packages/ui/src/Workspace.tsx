@@ -12,6 +12,7 @@ import {
   GitDiffIcon,
   SquareSplitHorizontalIcon,
   SquareSplitVerticalIcon,
+  TerminalWindowIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -223,6 +224,27 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
       <NewTabMenu ws={ws} />
       <div className="h-full min-w-4 flex-1" {...drag} />
       {children}
+    </div>
+  );
+}
+
+/** 탭이 없는 워크스페이스 (메인 면, 플로팅 모두): 새 터미널 · claude 띄우기 */
+export function EmptyWorkspace({ ws }: { ws: WorkspaceId }) {
+  const model = useModel();
+  const floating = ws === FLOATING_WORKSPACE;
+  return (
+    <div className="grid h-full place-content-center gap-3 text-center text-muted-foreground">
+      <TerminalWindowIcon className="mx-auto size-8 opacity-50" />
+      <p>{ws.startsWith("/") ? "이 워크트리에 열린 터미널이 없다." : "열린 터미널이 없다."}</p>
+      <div className="flex justify-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => void model.newTab(ws)}>
+          새 터미널 (⌘T)
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => void model.newTab(ws, "claude")}>
+          claude 띄우기
+        </Button>
+      </div>
+      <p className="text-2xs">⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · ⌘⌥A {floating ? "플로팅 닫기" : "플로팅"}</p>
     </div>
   );
 }
