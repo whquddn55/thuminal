@@ -52,8 +52,8 @@ interface Slot {
 
 class Atlas {
   readonly tex: WebGLTexture;
-  private readonly canvas: OffscreenCanvas;
-  private readonly ctx: OffscreenCanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
   private readonly glyphs = new Map<number, number>();
   private next = 1;
   readonly cols: number;
@@ -75,8 +75,20 @@ class Atlas {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     this.cols = Math.floor(ATLAS / slotW);
     this.rowsCap = Math.floor(ATLAS / slotH);
-    this.canvas = new OffscreenCanvas(slotW, slotH);
-    this.ctx = this.canvas.getContext("2d")!;
+    // 글자는 문서에 붙인(숨긴) canvas 에 그린다. WebKit 은 canvas 글자에 macOS 글꼴 다듬기를 넣어 획을 굵게 그리는데
+    // (같은 굵기에서 Chrome 보다 잉크가 29% 많았다), 문서에 붙은 canvas 는 -webkit-font-smoothing 을 따른다.
+    // OffscreenCanvas 나 문서 밖 canvas 는 이 설정을 받지 못한다 (Safari 에서 재서 확인). 터미널 밖 화면 글자와 같은 두께가 된다
+    this.canvas = document.createElement("canvas");
+    this.canvas.width = slotW;
+    this.canvas.height = slotH;
+    this.canvas.style.cssText = "display:none;-webkit-font-smoothing:antialiased";
+    document.body.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext("2d", { willReadFrequently: false })!;
+  }
+
+  dispose(): void {
+    this.canvas.remove();
+    this.gl.deleteTexture(this.tex);
   }
 
   slot(cp: number, flags: number): number {
@@ -221,7 +233,7 @@ export class WebglRenderer implements Renderer {
     if (dpr !== this.dpr) {
       // 다른 배율 화면으로 옮겼다: 글자 그림판을 새 배율로 다시 만든다
       this.dpr = dpr;
-      this.gl.deleteTexture(this.atlas.tex);
+      this.atlas.dispose();
       this.atlas = this.makeAtlas();
       (this.metrics as { width: number; height: number }).width = this.cellW / dpr;
       (this.metrics as { width: number; height: number }).height = this.cellH / dpr;
@@ -325,6 +337,7 @@ export class WebglRenderer implements Renderer {
 
   dispose(): void {
     this.resizeObserver.disconnect();
+    this.atlas.dispose();
     this.canvas.remove();
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
