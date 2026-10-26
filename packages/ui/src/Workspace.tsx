@@ -14,7 +14,7 @@ import {
   SquareSplitVerticalIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import type { Pane, PaneNode, Renderer, SessionInfo, Tab, WorkspaceId } from "@thuminal/term-core";
@@ -32,7 +32,7 @@ import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
 import { rendererOptions } from "./terminal-font";
 import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
-import { type DocSpec, DocView } from "./viewers";
+import { type DocActions, type DocSpec, DocView } from "./viewers";
 
 type Surface = "main" | "floating";
 
@@ -398,7 +398,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
         ) : pane.doc.kind === "browser" ? (
           <BrowserPane paneId={pane.id} url={pane.doc.url ?? "about:blank"} focused={focused} inFloating={ws === FLOATING_WORKSPACE} />
         ) : (
-          <DocPane ws={ws} doc={pane.doc as unknown as DocSpec} onFocus={() => !focused && model.focusPane(pane.id)} />
+          <DocPane ws={ws} paneId={pane.id} doc={pane.doc as unknown as DocSpec} onFocus={() => !focused && model.focusPane(pane.id)} />
         )}
         {session?.state.state === "exited" && (
           <div className="absolute right-2 bottom-2 z-[8] flex items-center gap-2 rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md">
@@ -583,15 +583,30 @@ export function TerminalPane({
   );
 }
 
-function DocPane({ ws, doc, onFocus }: { ws: WorkspaceId; doc: DocSpec; onFocus: () => void }) {
+function DocPane({ ws, paneId, doc, onFocus }: { ws: WorkspaceId; paneId: number; doc: DocSpec; onFocus: () => void }) {
   const model = useModel();
   const status = useApp((s) => s.status[ws]);
   // git 상태가 바뀔 때마다 다시 읽는다
   const generation = JSON.stringify(status ?? null).length + (status?.files.length ?? 0);
+  const actions = useMemo<DocActions>(
+    () => ({
+      update: (doc) => void model.op({ op: "update_doc", pane: { by: "id", value: paneId }, doc: { ...doc } }).catch(model.fail),
+      openFile: (file, line) => model.openDoc(line ? { kind: "file", file, line: String(line) } : { kind: "file", file }),
+      // ⌘⇧+클릭은 앱 안 브라우저 칸으로. 브라우저 칸을 못 띄우는 껍데기(웹)는 바깥 브라우저로 연다
+      openUrl: (url, inApp) => {
+        const host = model.services.host;
+        if (inApp && host.browser) void model.newBrowserTab(ws, url).catch(model.fail);
+        else if (host.openUrl) void host.openUrl(url).catch(model.fail);
+        else window.open(url, "_blank", "noopener");
+      },
+      notice: model.notice,
+    }),
+    [model, ws, paneId],
+  );
   if (ws === FLOATING_WORKSPACE) return null;
   return (
     <div className="absolute inset-0 z-[7]" onPointerDown={onFocus}>
-      <DocView host={model.services.host} worktree={ws} doc={doc} generation={generation} />
+      <DocView host={model.services.host} worktree={ws} doc={doc} generation={generation} actions={actions} />
     </div>
   );
 }

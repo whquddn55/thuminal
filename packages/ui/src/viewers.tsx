@@ -1,10 +1,13 @@
-// 문서 칸: diff 보기, 파일 보기.
+// 문서 칸: diff 보기, 파일 보기. Markdown 파일은 미리보기를 기본으로 보인다 (markdown.tsx 는 처음 필요할 때 불러온다).
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import type { FileContent, HostApi } from "@thuminal/term-core";
 
 import { cn } from "./lib/utils";
+import { isMarkdownFile } from "./markdown-links";
+
+const MarkdownPreview = lazy(() => import("./markdown"));
 
 interface DiffLine {
   kind: "add" | "del" | "ctx" | "hunk" | "meta";
@@ -42,6 +45,38 @@ export interface DocSpec {
   staged?: string;
   /** 파일이면 이 줄(1 부터)로 스크롤하고 강조한다 (검색 결과에서 열 때) */
   line?: string;
+  /** Markdown 파일을 미리보기("preview")로 볼지 원문("source")으로 볼지. 없으면 line 이 있을 때만 원문이다 */
+  view?: string;
+}
+
+/** 문서 칸이 화면 밖에 부탁하는 것 (파일 · 주소 열기, 칸 상태 남기기) */
+export interface DocActions {
+  /** 칸의 doc 을 바꿔 남긴다 (데몬 배치의 update_doc) */
+  update: (doc: DocSpec) => void;
+  openFile: (file: string, line?: number) => void;
+  /** inApp: 앱 안 브라우저 칸으로 연다 */
+  openUrl: (url: string, inApp: boolean) => void;
+  notice: (text: string) => void;
+}
+
+type MdView = "preview" | "source";
+
+function Toggle({ value, onChange }: { value: MdView; onChange: (v: MdView) => void }) {
+  const item = (v: MdView, label: string) => (
+    <button
+      className={cn("rounded-[5px] px-2 py-0.5 transition-colors", value === v ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
+      aria-pressed={value === v}
+      onClick={() => onChange(v)}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <span className="flex shrink-0 items-center rounded-md bg-muted p-0.5 text-2xs">
+      {item("preview", "미리보기")}
+      {item("source", "원문")}
+    </span>
+  );
 }
 
 const ROW = "font-mono text-xs leading-[1.5]";
@@ -51,13 +86,26 @@ function Head({ children }: { children: React.ReactNode }) {
   return <div className="sticky top-0 z-[1] flex items-center gap-2.5 border-b bg-card px-3 py-2 text-xs">{children}</div>;
 }
 
-export function DocView({ host, worktree, doc, generation }: { host: HostApi; worktree: string; doc: DocSpec; generation: number }) {
+export function DocView({ host, worktree, doc, generation, actions }: { host: HostApi; worktree: string; doc: DocSpec; generation: number; actions?: DocActions }) {
   const [diff, setDiff] = useState<string | null>(null);
   const [file, setFile] = useState<FileContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const staged = doc.staged === "1";
   const line = Number(doc.line) || 0;
   const body = useRef<HTMLDivElement>(null);
+  const markdown = doc.kind === "file" && isMarkdownFile(doc.file);
+  // 줄로 가라는 요청(line)이 있으면 원문으로 연다 (Orca 와 같다). 고른 보기는 doc.view 로 칸에 남는다
+  const savedView: MdView = doc.view === "preview" || doc.view === "source" ? doc.view : line ? "source" : "preview";
+  const [view, setView] = useState<MdView>(savedView);
+  useEffect(() => setView(savedView), [savedView]);
+  const changeView = (v: MdView) => {
+    setView(v);
+    // 미리보기로 돌아가면 줄 강조를 지운다. 다음에 같은 줄로 가라는 요청이 와도 줄이 바뀐 것으로 보여야 한다
+    const { line: _line, ...rest } = doc;
+    actions?.update(v === "preview" ? { ...rest, view: v } : { ...doc, view: v });
+  };
+  const showPreview = markdown && view === "preview";
+  const scroller = useCallback(() => body.current, []);
 
   useEffect(() => {
     let alive = true;
@@ -75,9 +123,9 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
 
   // 검색 결과에서 열었으면 그 줄을 가운데로
   useEffect(() => {
-    if (!line || !file) return;
+    if (!line || !file || showPreview) return;
     body.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" });
-  }, [line, file]);
+  }, [line, file, showPreview]);
 
   const frame = (children: React.ReactNode) => (
     <div ref={body} className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">
@@ -136,9 +184,23 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
         <span className="flex-1 truncate font-mono">{doc.file}</span>
         <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
         {file.truncated && <span className="text-amber-500">앞 2MB 만 보인다</span>}
+        {markdown && !file.binary && <Toggle value={view} onChange={changeView} />}
       </Head>
       {file.binary ? (
         <div className="p-4 text-muted-foreground">글자 파일이 아니다</div>
+      ) : showPreview ? (
+        <Suspense fallback={<div className="p-4 text-muted-foreground">불러오는 중…</div>}>
+          <MarkdownPreview
+            host={host}
+            worktree={worktree}
+            file={doc.file}
+            text={file.text ?? ""}
+            scroller={scroller}
+            openFile={actions?.openFile ?? noop}
+            openUrl={actions?.openUrl ?? openUrlFallback(host)}
+            notice={actions?.notice ?? noop}
+          />
+        </Suspense>
       ) : (
         <table className={cn("w-full border-collapse", ROW)}>
           <tbody>
@@ -153,4 +215,10 @@ export function DocView({ host, worktree, doc, generation }: { host: HostApi; wo
       )}
     </>,
   );
+}
+
+const noop = () => undefined;
+
+function openUrlFallback(host: HostApi) {
+  return (url: string) => void host.openUrl?.(url);
 }

@@ -771,8 +771,12 @@ export class AppModel {
     for (const tab of this.get().layouts[ws]?.tabs ?? [])
       for (const p of panesOf(tab.root))
         if (p.type === "doc" && sameDoc(p.doc, doc)) {
-          // 같은 파일이 열려 있으면 그 칸으로. 줄이 다르면 그 줄로 옮긴다
-          if ((p.doc.line ?? "") !== (doc.line ?? "")) void this.op({ op: "update_doc", pane: byId(p.id), doc: { ...p.doc, ...doc } });
+          // 같은 파일이 열려 있으면 그 칸으로. 줄이 다르면 그 줄로 옮긴다 (Markdown 이 미리보기였어도 줄을 보이게 원문으로)
+          if ((p.doc.line ?? "") !== (doc.line ?? "")) {
+            const next = { ...p.doc, ...doc };
+            if (doc.line) delete next.view;
+            void this.op({ op: "update_doc", pane: byId(p.id), doc: next });
+          }
           void this.op({ op: "focus", target: byId(p.id) });
           return;
         }
