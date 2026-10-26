@@ -4,7 +4,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   AgentSettings,
   Attachment,
@@ -232,6 +232,14 @@ export class TauriHostApi implements HostApi {
 
   setAgentSettings(settings: AgentSettings): Promise<AgentSettings> {
     return req<AgentSettings>({ type: "set_agent_settings", settings }, (r) => r.settings);
+  }
+
+  openPath(path: string): Promise<void> {
+    return openPath(path);
+  }
+
+  resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null> {
+    return req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
   }
 
   findCommands(names: string[]): Promise<string[]> {

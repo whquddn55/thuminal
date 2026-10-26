@@ -32,6 +32,7 @@ import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } f
 import type { Services } from "./services";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
+import type { ResolvedLink } from "./terminal-link-hover";
 import {
   clampFontSize,
   loadTerminalFont,
@@ -422,6 +423,10 @@ export class AppModel {
     if (!c) {
       c = new TerminalController(this.services, id);
       c.setColors(this.engineColors);
+      c.links = {
+        resolve: (path) => this.services.host.resolvePath(path, this.linkBases(id)),
+        open: (link, mode) => this.openLink(id, link, mode),
+      };
       this.controllers.set(id, c);
       c.open().catch((e) => this.fail(`세션 ${id} 에 붙지 못했다: ${e}`));
     }
@@ -429,6 +434,45 @@ export class AppModel {
   }
 
   private engineColors: Parameters<TerminalController["setColors"]>[0] = null;
+
+  // ---- 터미널 링크 ----
+
+  /** 터미널 글자 속 상대 경로를 풀 기준 폴더: 셸 폴더, claude 폴더, 그 칸의 워크트리 */
+  private linkBases(id: SessionId): string[] {
+    const s = this.get().sessions[id];
+    const ws = this.workspaceOf(id);
+    const all = [s?.cwd, s?.agent?.cwd, ws && ws !== OTHER_WORKSPACE && ws !== FLOATING_WORKSPACE ? ws : null];
+    return [...new Set(all.filter((p): p is string => !!p && p.startsWith("/")))];
+  }
+
+  /** 링크를 연다. system: 기본 앱(⌘+클릭), app: thuminal 안(⌘⇧+클릭) */
+  openLink = (id: SessionId, link: ResolvedLink, mode: "system" | "app") => {
+    const host = this.services.host;
+    const fail = (e: unknown) => this.fail(e);
+    if (link.kind === "url") {
+      if (mode === "app" && host.browser) void this.newBrowserTab(this.workspaceOf(id) ?? undefined, link.url);
+      else if (host.openUrl) void host.openUrl(link.url).catch(fail);
+      else window.open(link.url, "_blank", "noopener");
+      return;
+    }
+    if (mode === "system" && host.openPath) return void host.openPath(link.path).catch(fail);
+    // thuminal 안: 폴더는 Finder, HTML 은 브라우저 칸, 워크트리 안 파일은 파일 칸 (줄까지)
+    if (link.isDir) return void host.reveal(link.path).catch(fail);
+    if (/\.html?$/i.test(link.path) && host.browser) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
+    const wt = this.get()
+      .worktrees.filter((w) => link.path.startsWith(`${w.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    if (!wt) {
+      // 파일 칸은 워크트리 안 파일만 연다. 밖이면 기본 앱으로
+      if (host.openPath) {
+        this.notice("워크트리 밖 파일이라 기본 앱으로 열었다");
+        return void host.openPath(link.path).catch(fail);
+      }
+      return this.notice("워크트리 밖 파일은 열 수 없다");
+    }
+    if (this.get().active !== wt.path) this.select(wt.path);
+    this.openDoc({ kind: "file", file: link.path.slice(wt.path.length + 1), ...(link.line ? { line: String(link.line) } : {}) });
+  };
 
   // ---- 워크스페이스 ----
 

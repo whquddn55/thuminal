@@ -83,6 +83,23 @@ describe("입력과 고르기", () => {
     expect(m("release", 0)).toBe("\x1b[M##\"");
   });
 
+  it("링크: 줄 글자와 칸 위치, OSC 8 주소, 자동 줄바꿈, 밑줄", () => {
+    const e = factory.create({ cols: 12, rows: 4, scrollback: 100 });
+    e.feed(enc("가a \x1b]8;;https://x.y/z\x1b\\link\x1b]8;;\x1b\\\r\n0123456789abcdef"));
+    const l = e.lineText(0);
+    expect(l.text.trimEnd()).toBe("가a link");
+    expect(l.cols.slice(0, 4)).toEqual([0, 2, 3, 4]);
+    expect(e.hyperlinkAt({ x: 5, y: 0 })).toBe("https://x.y/z");
+    expect(e.hyperlinkAt({ x: 2, y: 0 })).toBeNull();
+    expect(e.lineText(1).wrapped).toBe(true);
+    expect(e.lineText(1).text).toBe("0123456789ab");
+    expect(e.lineText(2).text.trimEnd()).toBe("cdef");
+    e.setLinkHighlight([{ y: 0, x0: 4, x1: 8 }]);
+    const r = row(e, 0, 9);
+    expect(r[5].flags & CellFlags.Underline).toBeTruthy();
+    expect(r[3].flags & CellFlags.Underline).toBeFalsy();
+  });
+
   it("동기 출력(모드 2026) 중에는 반쪽 화면을 넘기지 않고, 끝나면 넘긴다", () => {
     const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
     const sink: CellSink = { cell: () => {} };

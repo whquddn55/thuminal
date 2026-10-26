@@ -44,6 +44,22 @@ export interface EngineColors {
   minimumContrast?: number;
 }
 
+/** 화면 한 줄의 글자 */
+export interface LineText {
+  text: string;
+  /** text 의 UTF-16 코드 단위마다 놓인 칸 (넓은 글자는 앞 칸) */
+  cols: number[];
+  /** 자동 줄바꿈으로 다음 줄에 이어진다 */
+  wrapped: boolean;
+}
+
+/** 한 줄 안의 칸 구간 [x0, x1) */
+export interface CellRange {
+  y: number;
+  x0: number;
+  x1: number;
+}
+
 export interface CursorState {
   x: number;
   y: number;
@@ -74,6 +90,12 @@ export interface TerminalEngine {
   clearSelection(): void;
   /** 선택한 글자. 선택이 없으면 null */
   selectionText(): string | null;
+  /** 화면 한 줄의 글자 (터미널 링크 찾기) */
+  lineText(y: number): LineText;
+  /** 그 칸에 붙은 OSC 8 링크 주소. 없으면 null */
+  hyperlinkAt(at: CellPoint): string | null;
+  /** 마우스를 올린 링크 칸에 밑줄을 긋는다. null 이면 지운다 */
+  setLinkHighlight(ranges: CellRange[] | null): void;
   /** 지금 쓰는 기본 fg/bg (OSC 10/11 로 바뀌었으면 그 값). 렌더러는 bg 로 빈 자리를 칠한다 */
   defaultColors(): { fg: number; bg: number };
   /** 기본색을 바꾸고 다음 scan 에서 모든 칸을 다시 넘긴다 */

@@ -9,6 +9,7 @@ import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionI
 
 import { HangulComposer, isJamo } from "./hangul";
 import type { Services } from "./services";
+import { type LinkHandler, LinkHover } from "./terminal-link-hover";
 
 const enc = new TextEncoder();
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn", "Process", "Unidentified"]);
@@ -45,6 +46,9 @@ export class TerminalController {
   private dragFrom: CellPoint | null = null;
   private dragged = false;
   private cleanup: (() => void)[] = [];
+  /** 터미널 링크를 확인하고 여는 곳 (앱 상태가 넣는다) */
+  links: LinkHandler | null = null;
+  private linkHover: LinkHover | null = null;
   private colors: EngineColors | null = null;
   /** 칸을 누르거나 입력을 받으면 부른다 (화면이 이 칸을 포커스 칸으로 삼는다) */
   onActivate: (() => void) | null = null;
@@ -288,6 +292,27 @@ export class TerminalController {
       ev.preventDefault();
       this.onWheel(ev);
     });
+    // ⌘ 를 누른 채 올린 링크 (⌘+클릭 기본 앱, ⌘⇧+클릭 thuminal 안)
+    const links = new LinkHover(host, () => this.engine, () => this.links);
+    this.linkHover = links;
+    this.cleanup.push(() => {
+      links.dispose();
+      if (this.linkHover === links) this.linkHover = null;
+    });
+    let mouse: MouseEvent | null = null;
+    const inside = (ev: MouseEvent) => {
+      const r = host.getBoundingClientRect();
+      return ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom;
+    };
+    const hover = (meta: boolean) => links.update(mouse && inside(mouse) ? this.cellAt(mouse) : null, meta);
+    on(window, "mousemove", (ev) => {
+      mouse = ev;
+      hover(ev.metaKey);
+    });
+    on(host, "mouseleave", () => links.clear());
+    on(window, "keydown", (ev) => ev.key === "Meta" && hover(true));
+    on(window, "keyup", (ev) => ev.key === "Meta" && hover(false));
+    on(window, "blur", () => links.clear());
     // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
     let touchY: number | null = null;
     let touchMoved = false;
@@ -324,6 +349,10 @@ export class TerminalController {
       if ((ev.button !== 0 && ev.button !== 1) || !this.engine) return;
       const at = this.cellAt(ev);
       if (!at) return;
+      if (links.click(at, ev)) {
+        ev.preventDefault();
+        return;
+      }
       if (!ev.shiftKey && !ev.altKey && this.reportMouse("press", ev.button, ev)) {
         ev.preventDefault();
         this.mouseButton = ev.button;

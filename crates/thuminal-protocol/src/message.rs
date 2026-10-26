@@ -455,6 +455,9 @@ pub enum Request {
     GetTerminalColors,
     /// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다 (새 탭 메뉴가 설치된 에이전트를 보이려고 쓴다)
     FindCommands { names: Vec<String> },
+    /// 터미널에서 찾은 경로가 정말 있는지 본다. `~` 를 풀고, 상대 경로는 `bases`(절대 경로) 앞에서부터 붙여 보아
+    /// 처음 있는 것을 돌려준다 (터미널 링크를 열 때 쓴다)
+    ResolvePath { path: String, bases: Vec<String> },
     /// Orca 에 등록한 저장소·워크트리 이름·claude 세션을 읽는다 (바꾸지 않는다)
     ScanOrca,
     /// 이 claude 세션으로 떠 있는 claude 프로세스를 끝낸다 (SIGTERM, 끝날 때까지 기다린다). 가져와 이어 붙이기 전에 쓴다
@@ -518,6 +521,8 @@ pub enum Response {
     LayoutResult { layouts: Vec<WorkspaceLayout>, created: Vec<PaneId> },
     TerminalColors { colors: Option<TerminalColors> },
     Commands { found: Vec<String> },
+    /// 있는 경로 (없으면 None)
+    ResolvedPath { path: Option<String>, is_dir: bool },
     AgentSettings { settings: AgentSettings },
     Tmux { stdout: String, stderr: String, code: i32 },
     OrcaScan { scan: OrcaScan },

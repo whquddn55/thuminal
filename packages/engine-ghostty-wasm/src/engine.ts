@@ -8,7 +8,9 @@ import {
   type EngineColors,
   type EngineFactory,
   type InputEncoder,
+  type CellRange,
   type KeyInput,
+  type LineText,
   type MouseInput,
   type TerminalEngine,
 } from "@thuminal/term-core";
@@ -103,6 +105,13 @@ const T_REF_B = 304;
 const T_SEL = 320; // GhosttySelection 32바이트
 const T_OPTS = 360; // 24바이트
 const T_OUT = 392; // 포인터, 길이
+const T_ROW = 408; // GhosttyRow·GhosttyCell u64 (8바이트 정렬)
+const T_LEN = 416; // size_t
+const T_VAL = 420; // ghostty_row_get·ghostty_cell_get 결과
+const ROW_DATA_WRAP = 1;
+const CELL_DATA_WIDE = 3;
+const WIDE_SPACER_TAIL = 2;
+const HYPERLINK_MAX = 8192;
 
 const UNSHIFTED: Record<string, string> = {
   Minus: "-",
@@ -369,6 +378,9 @@ export class GhosttyWasmEngine implements TerminalEngine {
           if (theme) fg = theme.selectionFg;
           flags |= CellFlags.Selected;
         }
+        if (this.linkRanges && this.linkRanges.some((r) => r.y === y && x >= r.x0 && x < r.x1)) {
+          flags |= CellFlags.Underline;
+        }
         // 같은 색은 일부러 숨긴 글자로 보고 두고, 흐린 글자는 보정한 뒤 배경 쪽으로 반만 섞는다
         if (minContrast > 1 && fg !== bg) fg = this.readableFg(fg, bg, minContrast);
         if (faint) fg = mix(fg, bg, 0.5);
@@ -475,6 +487,64 @@ export class GhosttyWasmEngine implements TerminalEngine {
 
   clearSelection(): void {
     this.w.ex.ghostty_terminal_set(this.term, OPT_SELECTION, 0);
+  }
+
+  private linkRanges: CellRange[] | null = null;
+
+  setLinkHighlight(ranges: CellRange[] | null): void {
+    const same = (a: CellRange[] | null, b: CellRange[] | null) =>
+      a === b || (!!a && !!b && a.length === b.length && a.every((r, i) => r.y === b[i].y && r.x0 === b[i].x0 && r.x1 === b[i].x1));
+    if (same(this.linkRanges, ranges)) return;
+    this.linkRanges = ranges && ranges.length ? ranges : null;
+    this.forceFull = true;
+  }
+
+  lineText(y: number): LineText {
+    const { w } = this;
+    const ex = w.ex;
+    const ref = w.tmp + T_REF_A;
+    let text = "";
+    const cols: number[] = [];
+    let wrapped = false;
+    for (let x = 0; x < this.cols; x++) {
+      if (!this.gridRef({ x, y }, ref)) break;
+      if (x === 0 && ex.ghostty_grid_ref_row(ref, w.tmp + T_ROW) === SUCCESS) {
+        w.u8()[w.tmp + T_VAL] = 0;
+        ex.ghostty_row_get(w.dv().getBigUint64(w.tmp + T_ROW, true), ROW_DATA_WRAP, w.tmp + T_VAL);
+        wrapped = w.u8()[w.tmp + T_VAL] !== 0;
+      }
+      w.dv().setUint32(w.tmp + T_LEN, 0, true);
+      const n = ex.ghostty_grid_ref_graphemes(ref, w.tmp + T_GRAPHEME, 32, w.tmp + T_LEN) === SUCCESS ? w.dv().getUint32(w.tmp + T_LEN, true) : 0;
+      if (n === 0) {
+        // 넓은 글자의 뒤 칸은 글자가 없다. 그 밖의 빈칸은 공백으로 센다
+        if (ex.ghostty_grid_ref_cell(ref, w.tmp + T_ROW) === SUCCESS) {
+          w.dv().setUint32(w.tmp + T_VAL, 0, true);
+          ex.ghostty_cell_get(w.dv().getBigUint64(w.tmp + T_ROW, true), CELL_DATA_WIDE, w.tmp + T_VAL);
+          if (w.dv().getUint32(w.tmp + T_VAL, true) === WIDE_SPACER_TAIL) continue;
+        }
+        text += " ";
+        cols.push(x);
+        continue;
+      }
+      const dv = w.dv();
+      for (let i = 0; i < Math.min(n, 32); i++) {
+        const ch = String.fromCodePoint(dv.getUint32(w.tmp + T_GRAPHEME + i * 4, true));
+        text += ch;
+        for (let k = 0; k < ch.length; k++) cols.push(x);
+      }
+    }
+    return { text, cols, wrapped };
+  }
+
+  hyperlinkAt(at: CellPoint): string | null {
+    const { w } = this;
+    const ref = w.tmp + T_REF_A;
+    if (!this.gridRef(at, ref)) return null;
+    const buf = w.scratchFor(HYPERLINK_MAX);
+    w.dv().setUint32(w.tmp + T_LEN, 0, true);
+    if (w.ex.ghostty_grid_ref_hyperlink_uri(ref, buf, HYPERLINK_MAX, w.tmp + T_LEN) !== SUCCESS) return null;
+    const n = w.dv().getUint32(w.tmp + T_LEN, true);
+    return n > 0 ? new TextDecoder().decode(w.u8().slice(buf, buf + n)) : null;
   }
 
   selectionText(): string | null {

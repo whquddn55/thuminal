@@ -2,7 +2,8 @@
 // wasm 메모리는 커질 수 있어, 메모리 보기(Uint8Array, DataView)는 쓸 때마다 새로 잡는다
 // (include/ghostty/vt/wasm.h 의 Memory growth 절).
 
-export type Exports = { memory: WebAssembly.Memory } & Record<string, (...a: number[]) => number>;
+// u64 값을 그대로 받는 함수(ghostty_row_get, ghostty_cell_get)는 bigint 를 넘긴다
+export type Exports = { memory: WebAssembly.Memory } & Record<string, (...a: (number | bigint)[]) => number>;
 
 export const SUCCESS = 0;
 

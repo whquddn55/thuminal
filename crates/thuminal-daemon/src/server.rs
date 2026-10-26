@@ -318,6 +318,10 @@ impl Server {
                 .await
                 .map(|found| Response::Commands { found })
                 .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+            Request::ResolvePath { path, bases } => Ok(match resolve_path(&path, &bases) {
+                Some((p, is_dir)) => Response::ResolvedPath { path: Some(p.to_string_lossy().into_owned()), is_dir },
+                None => Response::ResolvedPath { path: None, is_dir: false },
+            }),
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
@@ -500,6 +504,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::SetTerminalColors { .. } => "set_terminal_colors",
         Request::GetTerminalColors => "get_terminal_colors",
         Request::FindCommands { .. } => "find_commands",
+        Request::ResolvePath { .. } => "resolve_path",
         Request::Tmux { .. } => "tmux",
         Request::ScanOrca => "scan_orca",
         Request::GetRemote => "get_remote",
@@ -527,8 +532,44 @@ fn is_slow(r: &Request) -> bool {
             | Request::ListWorktrees { .. }
             | Request::ListRepos
             | Request::FindCommands { .. }
+            | Request::ResolvePath { .. }
             | Request::ScanOrca
     )
+}
+
+/// `~` 를 홈 폴더로 풀고, 상대 경로는 기준 폴더마다 붙여 보아 처음 있는 경로와 폴더인지를 돌려준다.
+/// 돌려주는 경로는 심볼릭 링크를 푼 실제 경로다 (macOS `/tmp` 는 `/private/tmp` 라 워크트리 경로와 맞추려면 풀어야 한다)
+fn resolve_path(path: &str, bases: &[String]) -> Option<(std::path::PathBuf, bool)> {
+    use std::path::{Component, Path, PathBuf};
+    let path = path.trim();
+    if path.is_empty() || path.len() > 4096 {
+        return None;
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let expanded = match (path.strip_prefix('~'), &home) {
+        (Some(""), Some(h)) => h.clone(),
+        (Some(rest), Some(h)) if rest.starts_with('/') => h.join(rest.trim_start_matches('/')),
+        _ => PathBuf::from(path),
+    };
+    let candidates: Vec<PathBuf> = if expanded.is_absolute() {
+        vec![expanded]
+    } else {
+        bases.iter().map(Path::new).filter(|b| b.is_absolute()).map(|b| b.join(&expanded)).collect()
+    };
+    candidates.into_iter().find_map(|c| {
+        let mut clean = PathBuf::new();
+        for part in c.components() {
+            match part {
+                Component::ParentDir => {
+                    clean.pop();
+                }
+                Component::CurDir => {}
+                other => clean.push(other),
+            }
+        }
+        let meta = std::fs::metadata(&clean).ok()?;
+        Some((std::fs::canonicalize(&clean).unwrap_or(clean), meta.is_dir()))
+    })
 }
 
 fn err_frame(id: u64, code: ErrorCode, message: String) -> Frame {
@@ -547,4 +588,25 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<
     let mut body = vec![0u8; n];
     rd.read_exact(&mut body).await?;
     Frame::decode(&body).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_path;
+
+    #[test]
+    fn resolve_path_tries_bases_and_folds_dots() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("a/src")).unwrap();
+        std::fs::write(root.join("a/src/main.rs"), "fn main() {}").unwrap();
+        let bases = vec!["/nope".to_string(), root.join("a").to_string_lossy().into_owned()];
+        let (p, is_dir) = resolve_path("src/main.rs", &bases).unwrap();
+        assert_eq!((p, is_dir), (root.join("a/src/main.rs"), false));
+        assert_eq!(resolve_path("./src/../src", &bases).unwrap(), (root.join("a/src"), true));
+        let abs = root.join("a/src/main.rs").to_string_lossy().into_owned();
+        assert!(resolve_path(&abs, &[]).is_some());
+        assert!(resolve_path("src/none.rs", &bases).is_none());
+        assert!(resolve_path("relative.rs", &["not-absolute".into()]).is_none());
+    }
 }

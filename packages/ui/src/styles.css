@@ -186,3 +186,22 @@
   caret-color: transparent;
   z-index: 6;
 }
+
+/* 터미널 링크에 ⌘ 를 누른 채 올렸을 때 칸 왼쪽 아래에 뜨는 주소 (Orca 와 같은 자리) */
+.thm-link-tip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 6;
+  max-width: 80%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-top-right-radius: 4px;
+  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  color: var(--popover-foreground);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}

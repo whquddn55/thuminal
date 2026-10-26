@@ -212,6 +212,9 @@ impl Manager {
         env.insert("TERM".into(), "xterm-256color".into());
         env.insert("COLORTERM".into(), "truecolor".into());
         env.insert("TERM_PROGRAM".into(), "thuminal".into());
+        // 링크에 주소를 붙여 내게 한다 (OSC 8). claude 는 TERM_PROGRAM 이 아는 터미널이 아니면 이것이 있어야 붙인다.
+        // 줄이 잘려도 주소가 칸마다 붙어 있어 화면 글자에서 찾는 것보다 확실하다
+        env.insert("FORCE_HYPERLINK".into(), "1".into());
         env.insert("THUMINAL_SESSION_ID".into(), id.to_string());
         env.insert("THUMINAL_SOCKET".into(), self.socket.to_string_lossy().into_owned());
         // 세션 안의 CLI(에이전트 훅 포함)가 이 데몬에 붙게 데이터 폴더를 넘긴다.

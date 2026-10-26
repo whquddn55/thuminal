@@ -140,6 +140,13 @@ export interface HostApi {
   reveal(path: string): Promise<void>;
   /** 시스템 브라우저로 열기 */
   openUrl?(url: string): Promise<void>;
+  /** 파일·폴더를 그 종류의 기본 앱으로 열기 (데스크톱만) */
+  openPath?(path: string): Promise<void>;
+  /**
+   * 경로가 있는지 본다. `~` 를 풀고, 상대 경로는 bases(절대 경로) 앞에서부터 붙여 본다.
+   * 처음 있는 절대 경로를 돌려주고, 없으면 null (터미널 링크)
+   */
+  resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null>;
   /** 브라우저 칸을 지원하는 껍데기만 둔다 */
   readonly browser?: BrowserHost;
   /**
