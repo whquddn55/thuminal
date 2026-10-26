@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "./components/ui/label";
 import { Switch } from "./components/ui/switch";
 import { cn } from "./lib/utils";
-import { useApp, useModel } from "./store";
+import { type SettingsSection, useApp, useModel } from "./store";
 import { DEFAULT_TERMINAL_FONT, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack } from "./terminal-font";
 import { currentTheme } from "./theme";
 
@@ -425,11 +425,16 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
 export function SettingsDialog() {
   const model = useModel();
   const open = useApp((s) => s.dialog?.kind === "settings");
+  const want = useApp((s) => (s.dialog?.kind === "settings" ? s.dialog.section : undefined));
   const theme = useApp((s) => s.theme);
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
-  const [section, setSection] = useState<"theme" | "font" | "agent" | "notify" | "remote">("theme");
+  const [section, setSection] = useState<SettingsSection>("theme");
+  // 칸을 정해 열면 (새 탭 메뉴의 "에이전트 설정…") 그 칸으로 간다
+  useEffect(() => {
+    if (open && want) setSection(want);
+  }, [open, want]);
   const remote = model.services.host.remote;
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 

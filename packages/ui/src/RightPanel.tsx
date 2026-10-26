@@ -23,6 +23,7 @@ import type { ChangeKind, DirEntry, FileChange, GitStatus, LineCount, SearchHit 
 
 import { Button } from "./components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "./components/ui/context-menu";
+import { baseName as base, dirName as dirOf, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
 import { type Panel, useApp, useModel } from "./store";
 
@@ -48,15 +49,6 @@ const TONE: Record<ChangeKind, string> = {
   deleted: "text-red-500",
   conflicted: "text-red-500",
 };
-
-function base(path: string) {
-  return path.split("/").pop() ?? path;
-}
-
-function dirOf(path: string) {
-  const i = path.lastIndexOf("/");
-  return i < 0 ? "" : path.slice(0, i);
-}
 
 const HEAD = "flex items-center justify-between px-3 pt-2.5 pb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground";
 
@@ -431,27 +423,7 @@ function NameMatches({ worktree, query, kindOf }: { worktree: string; query: str
       alive = false;
     };
   }, [model, worktree]);
-  const matches = useMemo(() => {
-    if (!all) return [];
-    const q = query.toLowerCase();
-    const scored: [number, string][] = [];
-    for (const f of all.files) {
-      const low = f.toLowerCase();
-      const name = low.slice(low.lastIndexOf("/") + 1);
-      let score = -1;
-      if (name.startsWith(q)) score = 0;
-      else if (name.includes(q)) score = 1;
-      else if (low.includes(q)) score = 2;
-      else {
-        let i = 0;
-        for (const ch of low) if (ch === q[i]) i++;
-        if (i === q.length) score = 3;
-      }
-      if (score >= 0) scored.push([score, f]);
-    }
-    scored.sort((a, b) => a[0] - b[0] || a[1].length - b[1].length);
-    return scored.slice(0, 300).map(([, f]) => f);
-  }, [all, query]);
+  const matches = useMemo(() => (all ? matchFiles(all.files, query, 300) : []), [all, query]);
   if (!all) return <div className="px-3 py-2 text-muted-foreground">파일 목록을 읽는 중…</div>;
   if (!matches.length) return <div className="px-3 py-2 text-muted-foreground">맞는 파일이 없다</div>;
   return (

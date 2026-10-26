@@ -1,6 +1,6 @@
-// 창: 워크트리 만들기·지우기, ⌘J 워크트리로 가기, Orca 에서 가져오기.
+// 창: 워크트리 만들기·지우기, ⌘J 워크트리로 가기, ⌘⇧O Markdown 열기, Orca 에서 가져오기.
 
-import { CaretDownIcon, CaretRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, CaretRightIcon, FileTextIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { BranchList, OrcaScan, OrcaSession, WorktreeInfo } from "@thuminal/term-core";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
+import { baseName, dirName, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
 import { type NewWorktree, useApp, useModel, worktreeTitle } from "./store";
 
@@ -39,6 +40,8 @@ export function Dialogs() {
       return <DeleteWorktreeDialog worktree={dialog.worktree} onClose={close} />;
     case "jump":
       return <JumpPalette onClose={close} />;
+    case "open-markdown":
+      return <MarkdownPalette onClose={close} />;
     case "import-orca":
       return <ImportOrcaDialog onClose={close} />;
     case "confirm":
@@ -360,6 +363,82 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
             </div>
           ))}
           {list.length === 0 && <div className="px-3 py-6 text-center text-muted-foreground">맞는 워크트리가 없다</div>}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const MARKDOWN = /\.(md|markdown|mdx)$/i;
+
+/** ⌘⇧O: 지금 워크트리의 Markdown 파일을 이름으로 찾아 연다 */
+function MarkdownPalette({ onClose }: { onClose: () => void }) {
+  const model = useModel();
+  const worktree = useApp((s) => s.active);
+  const [files, setFiles] = useState<string[] | null>(null);
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void model.services.host.files.all(worktree).then(
+      (r) => alive && setFiles(r.files.filter((f) => MARKDOWN.test(f)).sort((a, b) => a.length - b.length || a.localeCompare(b))),
+      (e) => {
+        if (alive) setFiles([]);
+        model.fail(e);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [model, worktree]);
+  const list = useMemo(() => (!files ? [] : q.trim() ? matchFiles(files, q.trim(), 200) : files.slice(0, 200)), [files, q]);
+  const pick = (f?: string) => {
+    if (!f) return;
+    model.openDoc({ kind: "file", file: f });
+    onClose();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="top-[20%] translate-y-0 gap-0 p-0 sm:max-w-[520px]" showCloseButton={false}>
+        <DialogTitle className="sr-only">Markdown 열기</DialogTitle>
+        <div className="flex items-center gap-2 border-b px-3">
+          <MagnifyingGlassIcon className="size-4 text-muted-foreground" />
+          <input
+            className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            autoFocus
+            value={q}
+            placeholder="Markdown 파일 이름"
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSel(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") setSel((s) => Math.min(list.length - 1, s + 1));
+              else if (e.key === "ArrowUp") setSel((s) => Math.max(0, s - 1));
+              else if (e.key === "Enter") pick(list[sel]);
+              else return;
+              e.preventDefault();
+            }}
+          />
+        </div>
+        <div className="max-h-80 overflow-y-auto p-1 thm-scroll">
+          {list.map((f, i) => (
+            <div
+              key={f}
+              className={cn("flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5", i === sel && "bg-accent")}
+              title={f}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => pick(f)}
+            >
+              <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="shrink-0">{baseName(f)}</span>
+              <span className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground [direction:rtl]">{dirName(f)}</span>
+            </div>
+          ))}
+          {files && list.length === 0 && (
+            <div className="px-3 py-6 text-center text-muted-foreground">{files.length ? "맞는 Markdown 파일이 없다" : "이 워크트리에 Markdown 파일이 없다"}</div>
+          )}
+          {!files && <div className="px-3 py-6 text-center text-muted-foreground">파일 목록을 읽는 중…</div>}
         </div>
       </DialogContent>
     </Dialog>

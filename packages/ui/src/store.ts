@@ -64,11 +64,17 @@ export interface NewWorktree {
   parent?: string;
 }
 
+/** 설정창의 칸 */
+export type SettingsSection = "theme" | "font" | "agent" | "notify" | "remote";
+
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }
   | { kind: "delete-worktree"; worktree: WorktreeInfo }
   | { kind: "jump" }
-  | { kind: "settings" }
+  /** section 이 있으면 그 칸을 펴서 연다 */
+  | { kind: "settings"; section?: SettingsSection }
+  /** ⌘⇧O: 지금 워크트리의 Markdown 파일을 골라 연다 */
+  | { kind: "open-markdown" }
   | { kind: "import-orca" }
   /** 되돌릴 수 없는 일을 하기 전에 묻는 창 */
   | { kind: "confirm"; title: string; body: string; action: string; run: () => void }

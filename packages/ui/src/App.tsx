@@ -86,6 +86,11 @@ function useShortcuts(model: AppModel) {
       if (e.shiftKey && key === "e") return run(() => model.setPanel("files"));
       if (e.shiftKey && key === "g") return run(() => model.setPanel("changes"));
       if (e.shiftKey && key === "f") return run(() => model.setPanel("search"));
+      // ⌘⇧O : 지금 워크트리의 Markdown 파일 열기 (Orca 와 같다)
+      if (e.shiftKey && key === "o") {
+        if (s.active.startsWith("/")) run(() => model.setDialog({ kind: "open-markdown" }));
+        return;
+      }
       // 브라우저 칸이면 위에서 주소 칸으로 갔다. 그 밖에는 오른쪽 사이드바 (Orca 와 같다)
       if (key === "l" && !e.shiftKey && !e.altKey) return run(() => model.toggleRight());
       if (e.shiftKey && key === "enter") return run(() => model.zoom());
