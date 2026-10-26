@@ -3,6 +3,7 @@
 //! 엔진과 PTY 는 [`DaemonConfig`] 로 받는다. 어떤 어댑터를 끼울지는 실행 파일
 //! (`thuminald`) 이 정한다.
 
+pub mod images;
 pub mod interrupt;
 pub mod layout;
 pub mod lock;
@@ -126,6 +127,9 @@ async fn save_loop(manager: Arc<manager::Manager>, layouts: Arc<layout::Layouts>
             _ = tick.tick() => {
                 n += 1;
                 manager.check_interrupted();
+                // 기록을 처음 읽으면 오래 걸릴 수 있어 블로킹 스레드에서 센다
+                let m = manager.clone();
+                let _ = tokio::task::spawn_blocking(move || m.check_images()).await;
                 layouts.save_if_dirty();
                 if dirty {
                     persist.save_records(&manager.list());

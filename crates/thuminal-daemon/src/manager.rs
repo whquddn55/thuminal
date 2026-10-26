@@ -72,12 +72,17 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         turn_ended_at: None,
         cwd: None,
         interrupted: false,
+        image_count: 0,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
         a.session_id = r.agent_session_id;
     }
     if r.transcript.is_some() {
+        // 새 기록(/clear 등)이면 그림도 새로 센다 (데몬이 1초 안에 다시 센다)
+        if r.transcript != a.transcript {
+            a.image_count = 0;
+        }
         a.transcript = r.transcript;
     }
     if r.cwd.is_some() {
@@ -164,6 +169,8 @@ pub struct Manager {
     /// 모든 세션 엔진의 기본색 (`terminal-colors.json`)
     colors: Mutex<Option<TerminalColors>>,
     colors_file: PathBuf,
+    /// 에이전트 대화 기록에서 찾은 붙인 그림 (세션마다)
+    images: crate::images::Images,
 }
 
 fn not_found(id: SessionId) -> ErrorBody {
@@ -188,6 +195,7 @@ impl Manager {
             shell,
             colors: Mutex::new(colors),
             colors_file,
+            images: Default::default(),
         }
     }
 
@@ -404,6 +412,49 @@ impl Manager {
         }
     }
 
+    /// 에이전트 대화 기록이 자랐으면 늘어난 부분에서 붙인 그림을 세고, 수가 바뀐 세션을 알린다 (1초마다 부른다)
+    pub fn check_images(&self) {
+        let watched: BTreeMap<SessionId, (String, u32)> = self
+            .list()
+            .into_iter()
+            .filter_map(|i| {
+                let a = i.agent?;
+                Some((i.id, (a.transcript?, a.image_count)))
+            })
+            .collect();
+        self.images.retain(|id| watched.contains_key(&id));
+        for (id, (transcript, count)) in watched {
+            let n = self.images.refresh(id, &transcript) as u32;
+            if n == count {
+                continue;
+            }
+            let Ok(h) = self.handle(id) else { continue };
+            let info = {
+                let mut i = h.info.lock().unwrap();
+                // 세는 사이에 기록이 바뀌었으면 다음 번에 센다
+                let Some(a) = i.agent.as_mut().filter(|a| a.transcript.as_deref() == Some(transcript.as_str())) else { continue };
+                a.image_count = n;
+                i.clone()
+            };
+            let _ = self.events.send(Event::SessionUpdated { session: info });
+        }
+    }
+
+    fn transcript_of(&self, id: SessionId) -> Result<Option<String>, ErrorBody> {
+        Ok(self.info(id)?.agent.and_then(|a| a.transcript))
+    }
+
+    /// 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로)
+    pub fn agent_images(&self, id: SessionId) -> Result<Vec<thuminal_protocol::AgentImage>, ErrorBody> {
+        Ok(self.transcript_of(id)?.map(|t| self.images.list(id, &t)).unwrap_or_default())
+    }
+
+    /// 그림 하나 (형식, 바이트). `thumb` 이면 줄인 그림
+    pub fn agent_image(&self, id: SessionId, image: &str, thumb: bool) -> Result<(String, Vec<u8>), ErrorBody> {
+        let Some(t) = self.transcript_of(id)? else { return Err(ErrorBody { code: ErrorCode::NotFound, message: "에이전트 대화 기록이 없다".into() }) };
+        self.images.image(id, &t, image, thumb).map_err(|message| ErrorBody { code: ErrorCode::NotFound, message })
+    }
+
     pub fn kill(&self, id: SessionId) -> Result<(), ErrorBody> {
         info!(event = "session_kill", session = id.0);
         self.send(id, Cmd::Kill)
@@ -561,6 +612,17 @@ mod tests {
         let f = step(Some(f), AgentReport { notification_type: Some("idle_prompt".into()), ..report("Notification") }, 12);
         assert_eq!(f.state, AgentState::Failed);
         assert_eq!(step(Some(f), report("UserPromptSubmit"), 13).state, AgentState::Working);
+    }
+
+    #[test]
+    fn new_transcript_resets_image_count() {
+        let t = |p: &str| AgentReport { transcript: Some(p.into()), ..report("SessionStart") };
+        let mut a = step(None, t("/a.jsonl"), 1);
+        a.image_count = 3;
+        // 같은 기록(resume, compact)이면 그대로, /clear 로 새 기록이면 0 부터
+        assert_eq!(step(Some(a.clone()), t("/a.jsonl"), 2).image_count, 3);
+        assert_eq!(step(Some(a.clone()), report("UserPromptSubmit"), 2).image_count, 3);
+        assert_eq!(step(Some(a), t("/b.jsonl"), 3).image_count, 0);
     }
 
     #[test]

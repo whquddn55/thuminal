@@ -6,6 +6,7 @@
 // 연결이 끊기면 다시 붙고 `daemon_reconnected` 이벤트를 흘린다 (화면이 다시 붙는다). 폰이 잠들었다 깨면 바로 다시 붙는다.
 
 import type {
+  AgentImage,
   AgentSettings,
   Attachment,
   BranchList,
@@ -358,6 +359,14 @@ export class WebHostApi implements HostApi {
 
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null> {
     return this.req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
+  }
+
+  agentImages(session: SessionId): Promise<AgentImage[]> {
+    return this.req({ type: "agent_images", session }, (r) => r.images);
+  }
+
+  agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }> {
+    return this.req({ type: "agent_image", session, id, thumb }, (r) => ({ mediaType: String(r.media_type), data: String(r.data) }));
   }
 
   savePasteImage(data: string, ext: string): Promise<string> {

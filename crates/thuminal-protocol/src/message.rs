@@ -147,6 +147,27 @@ pub struct AgentInfo {
     /// 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다. 훅은 멈춤을 알리지 않는다). 다음 프롬프트에서 지운다
     #[serde(default)]
     pub interrupted: bool,
+    /// 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 기록을 읽어 센다. 기록이 바뀌면 0 부터)
+    #[serde(default)]
+    pub image_count: u32,
+}
+
+/// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentImage {
+    /// 기록 안 자리 (`<줄 바이트 위치>:<줄 안 차례>`). 그림을 받을 때 쓴다
+    pub id: String,
+    /// 대화에 `[Image #N]` 으로 남은 번호
+    pub n: u32,
+    /// `image/png`, `image/jpeg` …
+    pub media_type: String,
+    /// 원본 크기 (px). 머리를 읽지 못하면 0
+    pub width: u32,
+    pub height: u32,
+    /// 원본 바이트 수
+    pub bytes: u64,
+    /// 보낸 때 (유닉스 시간 ms, 모르면 0)
+    pub at: u64,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다
@@ -530,6 +551,15 @@ pub enum Request {
     PairRemote { name: String },
     /// 등록한 기기를 지운다. 붙어 있던 연결은 바로 끊는다
     RemoveRemoteDevice { id: String },
+    /// 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로). 에이전트가 없으면 빈 목록
+    AgentImages { session: SessionId },
+    /// 그림 하나의 내용. `thumb` 이면 긴 변을 줄인 작은 그림이다
+    AgentImage {
+        session: SessionId,
+        id: String,
+        #[serde(default)]
+        thumb: bool,
+    },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     Tmux {
         /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
@@ -580,6 +610,9 @@ pub enum Response {
     RunningAgents { found: Vec<RunningAgent> },
     AgentSettings { settings: AgentSettings },
     Tmux { stdout: String, stderr: String, code: i32 },
+    AgentImages { images: Vec<AgentImage> },
+    /// 그림 내용 (`data` 는 base64)
+    AgentImageData { media_type: String, data: String },
     OrcaScan { scan: OrcaScan },
     Remote { remote: RemoteStatus },
     /// 새로 등록한 기기와 그 기기가 열 주소들 (주소마다 토큰이 들어 있다. 이 응답에서만 보인다)

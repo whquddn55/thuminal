@@ -3,6 +3,7 @@
 // 화면 코드는 이 인터페이스로만 데몬과 운영체제에 닿는다. 껍데기를 바꾸면 이 구현만 새로 쓴다.
 
 import type {
+  AgentImage,
   AgentSettings,
   BranchList,
   CreateSession,
@@ -198,6 +199,10 @@ export interface HostApi {
    * 처음 있는 절대 경로를 돌려주고, 없으면 null (터미널 링크)
    */
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null>;
+  /** 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로) */
+  agentImages(session: SessionId): Promise<AgentImage[]>;
+  /** 그림 하나. thumb 이면 긴 변을 줄인 작은 그림. data 는 base64 */
+  agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
   savePasteImage(data: string, ext: string): Promise<string>;
   /** 세션 셸 밑에서 이름이 names 에 든 프로세스(에이전트)가 도는 세션들 */

@@ -10,6 +10,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
+  AgentImage,
   AgentSettings,
   Attachment,
   BranchList,
@@ -338,6 +339,14 @@ export class TauriHostApi implements HostApi {
 
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null> {
     return this.req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
+  }
+
+  agentImages(session: SessionId): Promise<AgentImage[]> {
+    return this.req({ type: "agent_images", session }, (r) => r.images);
+  }
+
+  agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }> {
+    return this.req({ type: "agent_image", session, id, thumb }, (r) => ({ mediaType: String(r.media_type), data: String(r.data) }));
   }
 
   savePasteImage(data: string, ext: string): Promise<string> {

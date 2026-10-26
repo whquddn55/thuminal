@@ -334,6 +334,25 @@ impl Server {
                     Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
                 }
             }
+            Request::AgentImages { session } => {
+                let m = m.clone();
+                tokio::task::spawn_blocking(move || m.agent_images(session))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|images| Response::AgentImages { images })
+            }
+            Request::AgentImage { session, id, thumb } => {
+                let m = m.clone();
+                tokio::task::spawn_blocking(move || m.agent_image(session, &id, thumb))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|(media_type, bytes)| {
+                        use base64::Engine as _;
+                        Response::AgentImageData { media_type, data: base64::engine::general_purpose::STANDARD.encode(bytes) }
+                    })
+            }
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             Request::ListGroups => Ok(Response::Groups { groups: self.workspace.groups() }),
             Request::RepoIcon { repo } => match self.workspace.repos().into_iter().find(|r| r.id == repo) {
@@ -539,6 +558,8 @@ fn request_kind(r: &Request) -> &'static str {
         Request::SavePasteImage { .. } => "save_paste_image",
         Request::RunningAgents { .. } => "running_agents",
         Request::Tmux { .. } => "tmux",
+        Request::AgentImages { .. } => "agent_images",
+        Request::AgentImage { .. } => "agent_image",
         Request::ScanOrca => "scan_orca",
         Request::GetRemote => "get_remote",
         Request::SetRemote { .. } => "set_remote",
@@ -550,7 +571,7 @@ fn request_kind(r: &Request) -> &'static str {
     }
 }
 
-/// 오래 걸릴 수 있고 다른 요청과 순서가 상관없는 요청 (git, 파일, 셸에 묻기, Orca 읽기)
+/// 오래 걸릴 수 있고 다른 요청과 순서가 상관없는 요청 (git, 파일, 셸에 묻기, Orca 읽기, 대화 기록 그림)
 fn is_slow(r: &Request) -> bool {
     matches!(
         r,
@@ -570,6 +591,8 @@ fn is_slow(r: &Request) -> bool {
             | Request::SavePasteImage { .. }
             | Request::RunningAgents { .. }
             | Request::ScanOrca
+            | Request::AgentImages { .. }
+            | Request::AgentImage { .. }
     )
 }
 
