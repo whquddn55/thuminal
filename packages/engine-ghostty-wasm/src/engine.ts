@@ -9,6 +9,7 @@ import {
   type EngineFactory,
   type InputEncoder,
   type KeyInput,
+  type MouseInput,
   type TerminalEngine,
 } from "@thuminal/term-core";
 
@@ -172,7 +173,9 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.iterSlot = w.slot((pp) => ex.ghostty_render_state_row_iterator_new(0, pp), "row_iterator_new");
     this.cellsSlot = w.slot((pp) => ex.ghostty_render_state_row_cells_new(0, pp), "row_cells_new");
     this.encoder = w.create((pp) => ex.ghostty_key_encoder_new(0, pp), "key_encoder_new");
-    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t), wheel: (up, at) => this.encodeWheel(up, at) };
+    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t), wheel: (up, at) => this.encodeWheel(up, at),
+      mouse: (m) => this.encodeMouse(m),
+    };
   }
 
   feed(bytes: Uint8Array): void {
@@ -549,22 +552,51 @@ export class GhosttyWasmEngine implements TerminalEngine {
    * 마우스를 받지 않는 대체 화면 프로그램(less 등)에는 방향키를 하나 보낸다 (alternate scroll, 모드 1007)
    */
   private encodeWheel(up: boolean, at: CellPoint): Uint8Array | null {
-    if ([MODE_MOUSE_X10, MODE_MOUSE_NORMAL, MODE_MOUSE_BUTTON, MODE_MOUSE_ANY].some((m) => this.mode(m))) {
-      const b = up ? 64 : 65;
-      const x = Math.max(0, Math.min(this.cols - 1, at.x)) + 1;
-      const y = Math.max(0, Math.min(this.rows - 1, at.y)) + 1;
-      let one: string;
-      if (this.mode(MODE_MOUSE_SGR)) one = `\x1b[<${b};${x};${y}M`;
-      else if (this.mode(MODE_MOUSE_URXVT)) one = `\x1b[${32 + b};${x};${y}M`;
-      else one = `\x1b[M${String.fromCharCode(32 + b, 32 + Math.min(x, 223), 32 + Math.min(y, 223))}`;
-      return new TextEncoder().encode(one);
-    }
+    if (this.mouseTracking()) return this.mouseReport(up ? 64 : 65, at, false);
     const alt = this.mode(MODE_ALT_SCREEN_SAVE) || this.mode(MODE_ALT_SCREEN) || this.mode(MODE_ALT_SCREEN_LEGACY);
     if (alt && this.mode(MODE_ALT_SCROLL)) {
       const arrow = up ? "ArrowUp" : "ArrowDown";
       return this.encodeKey({ key: arrow, code: arrow, ctrl: false, alt: false, shift: false, meta: false });
     }
     return null;
+  }
+
+  /** 켜진 마우스 모드. 여럿이면 가장 많이 받는 것 */
+  private mouseTracking(): "x10" | "normal" | "button" | "any" | null {
+    if (this.mode(MODE_MOUSE_ANY)) return "any";
+    if (this.mode(MODE_MOUSE_BUTTON)) return "button";
+    if (this.mode(MODE_MOUSE_NORMAL)) return "normal";
+    if (this.mode(MODE_MOUSE_X10)) return "x10";
+    return null;
+  }
+
+  /** 마우스 보고 하나. SGR(1006) 은 뗀 버튼을 그대로 알리고, 옛 형식은 뗀 것을 버튼 3 으로 알린다 */
+  private mouseReport(code: number, at: CellPoint, release: boolean): Uint8Array {
+    const x = Math.max(0, Math.min(this.cols - 1, at.x)) + 1;
+    const y = Math.max(0, Math.min(this.rows - 1, at.y)) + 1;
+    let s: string;
+    if (this.mode(MODE_MOUSE_SGR)) s = `\x1b[<${code};${x};${y}${release ? "m" : "M"}`;
+    else {
+      const c = release ? (code & ~3) | 3 : code;
+      if (this.mode(MODE_MOUSE_URXVT)) s = `\x1b[${32 + c};${x};${y}M`;
+      else s = `\x1b[M${String.fromCharCode(32 + c, 32 + Math.min(x, 223), 32 + Math.min(y, 223))}`;
+    }
+    return new TextEncoder().encode(s);
+  }
+
+  private encodeMouse(m: MouseInput): Uint8Array | null {
+    const tracking = this.mouseTracking();
+    if (!tracking) return null;
+    if (tracking === "x10") return m.action === "press" && m.button !== null ? this.mouseReport(m.button, m.at, false) : null;
+    if (m.action === "move") {
+      if (tracking === "normal" || (tracking === "button" && m.button === null)) return null;
+    }
+    let code = m.button ?? 3;
+    if (m.action === "move") code += 32;
+    if (m.shift) code += 4;
+    if (m.alt) code += 8;
+    if (m.ctrl) code += 16;
+    return this.mouseReport(code, m.at, m.action === "release");
   }
 
   private encodePaste(text: string): Uint8Array {

@@ -64,6 +64,25 @@ describe("입력과 고르기", () => {
     expect(dec(e.input.wheel(true, { x: 0, y: 0 }))).toBe("\x1b[M`!!");
   });
 
+  it("마우스: 켠 모드가 받는 누르기·떼기·끌기만 보고한다", () => {
+    const e = factory.create({ cols: 20, rows: 5, scrollback: 100 });
+    const m = (action: "press" | "release" | "move", button: 0 | 1 | 2 | null, x = 2, y = 1, shift = false) =>
+      dec(e.input.mouse({ action, button, at: { x, y }, shift, alt: false, ctrl: false }));
+    expect(m("press", 0)).toBeNull();
+    e.feed(enc("\x1b[?1000h\x1b[?1006h"));
+    expect(m("press", 0)).toBe("\x1b[<0;3;2M");
+    expect(m("release", 0)).toBe("\x1b[<0;3;2m");
+    expect(m("move", 0, 4, 1)).toBeNull();
+    e.feed(enc("\x1b[?1002h"));
+    expect(m("move", 0, 4, 1)).toBe("\x1b[<32;5;2M");
+    expect(m("move", null)).toBeNull();
+    e.feed(enc("\x1b[?1003h"));
+    expect(m("move", null)).toBe("\x1b[<35;3;2M");
+    expect(m("press", 0, 2, 1, true)).toBe("\x1b[<4;3;2M");
+    e.feed(enc("\x1b[?1006l"));
+    expect(m("release", 0)).toBe("\x1b[M##\"");
+  });
+
   it("동기 출력(모드 2026) 중에는 반쪽 화면을 넘기지 않고, 끝나면 넘긴다", () => {
     const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
     const sink: CellSink = { cell: () => {} };

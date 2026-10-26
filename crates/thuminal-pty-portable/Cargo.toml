@@ -9,3 +9,6 @@ rust-version.workspace = true
 [dependencies]
 thuminal-pty.workspace = true
 portable-pty.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

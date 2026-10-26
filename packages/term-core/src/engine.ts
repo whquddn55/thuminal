@@ -110,6 +110,21 @@ export interface InputEncoder {
    * null 이면 프로그램이 휠을 받지 않으니 앱이 스크롤백을 움직인다
    */
   wheel(up: boolean, at: CellPoint): Uint8Array | null;
+  /**
+   * 마우스 버튼·움직임 보고. 프로그램이 켠 마우스 모드(9·1000·1002·1003)가 받는 것만 바이트로 바꾼다.
+   * null 이면 프로그램이 받지 않으니 앱이 고르기 등을 한다
+   */
+  mouse(m: MouseInput): Uint8Array | null;
+}
+
+export interface MouseInput {
+  action: "press" | "release" | "move";
+  /** 0 왼쪽, 1 가운데, 2 오른쪽. 버튼 없이 움직이면 null */
+  button: 0 | 1 | 2 | null;
+  at: CellPoint;
+  shift: boolean;
+  alt: boolean;
+  ctrl: boolean;
 }
 
 export interface EngineFactory {

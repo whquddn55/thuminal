@@ -4325,6 +4325,7 @@ dependencies = [
 name = "thuminal-pty-portable"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "portable-pty",
  "thuminal-pty",
 ]

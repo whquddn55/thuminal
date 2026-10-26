@@ -69,6 +69,8 @@ impl PtySystem for PortablePty {
         // 자식이 PTY 를 열었으니 데몬 쪽 slave 는 닫는다. 그래야 자식이 끝날 때 reader 가 EOF 를 받는다
         drop(pair.slave);
         let reader = pair.master.try_clone_reader().map_err(|e| PtyError::Io(e.to_string()))?;
+        #[cfg(unix)]
+        let reader = coalesce::wrap(reader, pair.master.as_raw_fd());
         let writer = pair.master.take_writer().map_err(|e| PtyError::Io(e.to_string()))?;
         let killer = child.clone_killer();
         Ok(Spawned {
@@ -78,6 +80,59 @@ impl PtySystem for PortablePty {
             child: Box::new(Child(child)),
             killer: Box::new(Killer(killer)),
         })
+    }
+}
+
+/// PTY 출력을 묶어 읽는다.
+///
+/// macOS PTY 는 read 한 번에 1KB 까지만 준다. 그래서 claude 가 한 번에 쓴 화면(수 KB)이 1KB 조각 여럿으로 나뉘어
+/// 조각마다 메시지가 되었다. 데스크톱 앱은 1KB 넘는 메시지를 Tauri 채널이 웹뷰에서 한 번 더 받아 가는 길로 보내
+/// 화면 하나에 왕복이 여러 번 들고, 조각 사이가 수십 ms 씩 벌어져 스크롤이 굼떴다.
+/// 한 번 읽은 뒤 지금 바로 더 읽을 수 있으면(기다리지 않는 poll) 버퍼가 찰 때까지 마저 읽는다
+#[cfg(unix)]
+mod coalesce {
+    use std::io::{self, Read};
+    use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+    use std::os::unix::io::AsRawFd;
+
+    pub fn wrap(inner: Box<dyn Read + Send>, master: Option<RawFd>) -> Box<dyn Read + Send> {
+        // 폴링용 fd 는 따로 복제해 둔다. master 가 먼저 닫혀도 엉뚱한 fd 를 보지 않는다
+        let poll_fd = master.and_then(|fd| {
+            let d = unsafe { libc::dup(fd) };
+            (d >= 0).then(|| unsafe { OwnedFd::from_raw_fd(d) })
+        });
+        match poll_fd {
+            Some(poll_fd) => Box::new(Coalesce { inner, poll_fd }),
+            None => inner,
+        }
+    }
+
+    struct Coalesce {
+        inner: Box<dyn Read + Send>,
+        poll_fd: OwnedFd,
+    }
+
+    impl Coalesce {
+        fn readable_now(&self) -> bool {
+            let mut p = libc::pollfd { fd: self.poll_fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            unsafe { libc::poll(&mut p, 1, 0) > 0 && p.revents & libc::POLLIN != 0 }
+        }
+    }
+
+    impl Read for Coalesce {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let mut n = self.inner.read(buf)?;
+            while n > 0 && n < buf.len() && self.readable_now() {
+                match self.inner.read(&mut buf[n..]) {
+                    Ok(0) => break,
+                    Ok(m) => n += m,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    // 다음 read 가 같은 오류를 다시 낸다. 읽은 것은 먼저 넘긴다
+                    Err(_) => break,
+                }
+            }
+            Ok(n)
+        }
     }
 }
 
@@ -110,5 +165,21 @@ mod tests {
         }
         assert!(out.contains("hi-pty"), "{out:?}");
         assert_eq!(s.child.wait().unwrap(), Some(3));
+    }
+
+    #[test]
+    fn reads_one_big_write_at_once() {
+        let mut s = PortablePty
+            .spawn(&SpawnSpec {
+                command: vec!["/bin/sh".into(), "-c".into(), "sleep 0.2; /usr/bin/python3 -c 'import os; os.write(1, b\"x\" * 8000)'; sleep 1".into()],
+                cols: 80,
+                rows: 24,
+                ..Default::default()
+            })
+            .unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let n = s.reader.read(&mut buf).unwrap();
+        // macOS PTY 는 한 번에 1KB 씩 주지만 바로 이어 읽을 수 있는 것은 묶는다
+        assert_eq!(n, 8000);
     }
 }

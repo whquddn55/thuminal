@@ -30,6 +30,12 @@ export class TerminalController {
 
   private disposed = false;
   private wheelAcc = 0;
+  /** 프로그램에 보낼 휠의 남은 줄 (xterm.js 의 _wheelPartialScroll) */
+  private wheelPartial = 0;
+  private lastWheelReport = 0;
+  /** 프로그램에 누름을 보낸 버튼 (떼기·끌기도 프로그램에 보낸다) */
+  private mouseButton: 0 | 1 | null = null;
+  private lastMouseCell: CellPoint | null = null;
   private dragFrom: CellPoint | null = null;
   private dragged = false;
   private cleanup: (() => void)[] = [];
@@ -194,16 +200,67 @@ export class TerminalController {
   }
 
   /**
-   * 휠·손가락 끌기 이벤트 하나로 움직인 줄 수. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은
-   * 스크롤백이 없어 그 프로그램에 넘기고, 아니면 스크롤백을 움직인다.
-   * 프로그램에는 줄 수와 상관없이 휠 신호 하나만 보낸다 (xterm.js 와 같다). 줄 수만큼 몰아 보내면 claude 가 신호마다
-   * 가속해 한 번 쓸어도 수백 줄씩 건너뛰었다
+   * 마우스 휠 이벤트 하나. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은 스크롤백이 없어
+   * 그 프로그램에 넘기고, 아니면 스크롤백을 픽셀만큼 움직인다.
+   *
+   * 프로그램에 넘길 때는 Orca(xterm.js + claude) 와 같게 움직인다: 줄 수는 xterm.js 처럼 세되(작은 움직임은 0.3배)
+   * 이벤트 하나에 신호는 한 번만 낸다. 그 한 번이 40ms 넘게 쉬었다 온 것이면 3줄, 이어서 오면 1줄로 보낸다
+   * (claude 가 xterm.js 에서 쓰는 규칙이다. thuminal 의 claude 는 실행기가 가속을 꺼 신호 하나가 1줄이다).
+   * 마우스 휠 한 칸은 120px 로 오므로 한 칸에 3줄, 트랙패드는 이벤트마다 1줄씩 따라간다
    */
-  private wheel(lines: number, at: CellPoint | null) {
+  private onWheel(ev: WheelEvent) {
+    if (!this.engine || !this.renderer) return;
+    const h = this.renderer.metrics.height;
+    const px = ev.deltaMode === 1 ? ev.deltaY * h : ev.deltaMode === 2 ? ev.deltaY * this.engine.rows * h : ev.deltaY;
+    const at = this.cellAt(ev) ?? { x: 0, y: 0 };
+    const one = px ? this.engine.input.wheel(px < 0, at) : null;
+    if (!one) {
+      this.wheelAcc += px;
+      const lines = Math.trunc(this.wheelAcc / h);
+      if (lines) {
+        this.wheelAcc -= lines * h;
+        this.engine.scroll(lines);
+      }
+      return;
+    }
+    let l = px / h;
+    if (ev.deltaMode === 0 && Math.abs(ev.deltaY) < 50) l *= 0.3;
+    if (Math.sign(l) !== Math.sign(this.wheelPartial)) this.wheelPartial = 0;
+    this.wheelPartial += l;
+    if (Math.abs(this.wheelPartial) < 1) return;
+    this.wheelPartial %= 1;
+    const now = performance.now();
+    const n = now - this.lastWheelReport > 40 ? 3 : 1;
+    this.lastWheelReport = now;
+    const out = new Uint8Array(one.length * n);
+    for (let i = 0; i < n; i++) out.set(one, i * one.length);
+    this.send(out);
+  }
+
+  /** 손가락으로 끈 줄 수. 프로그램에는 줄마다 휠 신호 하나(1줄)를 보내 손가락을 그대로 따라가게 한다 */
+  private touchScroll(lines: number, at: CellPoint | null) {
     if (!this.engine) return;
-    const bytes = this.engine.input.wheel(lines < 0, at ?? { x: 0, y: 0 });
-    if (bytes) this.send(bytes);
-    else this.engine.scroll(lines);
+    const one = this.engine.input.wheel(lines < 0, at ?? { x: 0, y: 0 });
+    if (!one) {
+      this.engine.scroll(lines);
+      return;
+    }
+    const n = Math.min(Math.abs(lines), 50);
+    const out = new Uint8Array(one.length * n);
+    for (let i = 0; i < n; i++) out.set(one, i * one.length);
+    this.send(out);
+  }
+
+  /** 프로그램이 마우스를 받으면 보고를 보낸다. 보냈으면 true */
+  private reportMouse(action: "press" | "release" | "move", button: 0 | 1 | 2 | null, ev: MouseEvent): boolean {
+    if (!this.engine) return false;
+    const at = this.cellAt(ev);
+    if (!at) return false;
+    const bytes = this.engine.input.mouse({ action, button, at, shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey });
+    if (!bytes) return false;
+    this.lastMouseCell = at;
+    this.send(bytes);
+    return true;
   }
 
   private cellAt(ev: { clientX: number; clientY: number }): CellPoint | null {
@@ -220,15 +277,8 @@ export class TerminalController {
       this.cleanup.push(() => t.removeEventListener(k, f as EventListener));
     };
     on(host, "wheel", (ev) => {
-      if (!this.engine || !this.renderer) return;
       ev.preventDefault();
-      // 줄 단위(deltaMode 1)로 오는 휠도 있다
-      this.wheelAcc += ev.deltaMode === 1 ? ev.deltaY * this.renderer.metrics.height : ev.deltaY;
-      const lines = Math.trunc(this.wheelAcc / this.renderer.metrics.height);
-      if (lines) {
-        this.wheelAcc -= lines * this.renderer.metrics.height;
-        this.wheel(lines, this.cellAt(ev));
-      }
+      this.onWheel(ev);
     });
     // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
     let touchY: number | null = null;
@@ -248,7 +298,7 @@ export class TerminalController {
       if (lines) {
         touchMoved = true;
         this.wheelAcc -= lines * this.renderer.metrics.height;
-        this.wheel(lines, this.cellAt(t));
+        this.touchScroll(lines, this.cellAt(t));
       }
     });
     on(host, "touchend", (ev) => {
@@ -261,10 +311,21 @@ export class TerminalController {
       this.onActivate?.();
       this.focus();
     });
+    // 마우스를 받는 프로그램(claude 등)에는 누르기·떼기·끌기를 넘긴다. Shift 나 ⌥ 를 누르고 끌면 앱이 글을 고른다 (xterm.js 와 같다)
     on(host, "mousedown", (ev) => {
-      if (ev.button !== 0 || !this.engine) return;
+      if ((ev.button !== 0 && ev.button !== 1) || !this.engine) return;
       const at = this.cellAt(ev);
       if (!at) return;
+      if (!ev.shiftKey && !ev.altKey && this.reportMouse("press", ev.button, ev)) {
+        ev.preventDefault();
+        this.mouseButton = ev.button;
+        this.engine.clearSelection();
+        this.dragFrom = null;
+        this.onActivate?.();
+        setTimeout(() => this.focus());
+        return;
+      }
+      if (ev.button !== 0) return;
       if (ev.detail >= 3) {
         this.engine.selectLine(at);
         this.dragFrom = null;
@@ -280,13 +341,28 @@ export class TerminalController {
       setTimeout(() => this.focus());
     });
     on(window, "mousemove", (ev) => {
+      if (this.mouseButton !== null || host.contains(ev.target as Node)) {
+        // 같은 칸 안에서 움직인 것은 보내지 않는다
+        const at = this.cellAt(ev);
+        const moved = at && (at.x !== this.lastMouseCell?.x || at.y !== this.lastMouseCell?.y);
+        if (moved && this.dragFrom === null) {
+          if (this.mouseButton !== null) this.reportMouse("move", this.mouseButton, ev);
+          else if (!ev.buttons) this.reportMouse("move", null, ev);
+        }
+        if (this.mouseButton !== null) return;
+      }
       if (!this.dragFrom || !this.engine || !(ev.buttons & 1)) return;
       const at = this.cellAt(ev);
       if (!at) return;
       this.dragged = true;
       this.engine.select(this.dragFrom, at);
     });
-    on(window, "mouseup", () => {
+    on(window, "mouseup", (ev) => {
+      if (this.mouseButton !== null) {
+        this.reportMouse("release", this.mouseButton, ev);
+        this.mouseButton = null;
+        return;
+      }
       if (this.dragFrom && !this.dragged) this.engine?.clearSelection();
       this.dragFrom = null;
     });
