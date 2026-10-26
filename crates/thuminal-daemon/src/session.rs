@@ -11,7 +11,7 @@ use std::thread;
 
 use thuminal_engine::{EngineConfig, EngineEvent, EngineFactory, TerminalEngine, color_scheme_report};
 use thuminal_protocol::{
-    Event, Frame, Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SessionState,
+    AgentState, Event, Frame, Response, ResponseResult, ScreenFormat, ServerMessage, SessionId, SessionInfo, SessionState,
     SnapshotFormat, TerminalColors,
 };
 use thuminal_pty::{PtyControl, PtyKiller, Spawned};
@@ -159,6 +159,7 @@ pub fn start(
                 pending_input: restore.input,
                 last_bell: 0,
                 last_notification: 0,
+                esc_watch: None,
             }
             .run(rx);
         })
@@ -180,6 +181,8 @@ struct Actor {
     /// 마지막으로 알린 벨, 데스크톱 알림 (ms). 이벤트를 1초에 하나까지만 낸다
     last_bell: u64,
     last_notification: u64,
+    /// 일하던 claude 에 Esc · ⌃C 를 보냈다. 화면에서 "esc to interrupt" 가 사라지는지 본다
+    esc_watch: Option<crate::interrupt::EscWatch>,
 }
 
 /// 같은 세션의 벨·알림 이벤트 사이 최소 간격
@@ -190,7 +193,23 @@ const NOTIFICATION_BODY_MAX: usize = 1000;
 
 impl Actor {
     fn run(mut self, rx: mpsc::Receiver<Cmd>) {
-        for cmd in rx {
+        loop {
+            // Esc 를 지켜보는 동안에는 출력이 멎어도 다시 본다 (claude 가 멈춘 화면을 그리고 조용해진다)
+            let cmd = if self.esc_watch.is_some() {
+                match rx.recv_timeout(crate::interrupt::ESC_RECHECK) {
+                    Ok(cmd) => cmd,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        self.check_esc_watch();
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match rx.recv() {
+                    Ok(cmd) => cmd,
+                    Err(_) => break,
+                }
+            };
             match cmd {
                 Cmd::Output(data) => self.output(data),
                 Cmd::Exited(code) => {
@@ -204,6 +223,9 @@ impl Actor {
                     self.sync_attached();
                 }
                 Cmd::Input(data) => {
+                    if crate::interrupt::is_interrupt_key(&data) {
+                        self.start_esc_watch();
+                    }
                     let _ = self.input.send(data);
                 }
                 Cmd::Resize { cols, rows, reply } => {
@@ -300,6 +322,52 @@ impl Actor {
         if let Some(session) = changed {
             let _ = self.events.send(Event::SessionUpdated { session });
         }
+        if self.esc_watch.is_some() {
+            self.check_esc_watch();
+        }
+    }
+
+    /// 일하는 중인 에이전트 화면에 "esc to interrupt" 가 보일 때 Esc · ⌃C 가 오면 지켜보기 시작한다
+    fn start_esc_watch(&mut self) {
+        let Some(updated_at) = self.info.lock().unwrap().agent.as_ref().filter(|a| a.state == AgentState::Working).map(|a| a.updated_at) else {
+            return;
+        };
+        let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
+        if crate::interrupt::shows_working(&screen) {
+            self.esc_watch = Some(crate::interrupt::EscWatch::new(updated_at, now_ms()));
+        }
+    }
+
+    fn check_esc_watch(&mut self) {
+        let Some(watch) = self.esc_watch.as_mut() else { return };
+        let now = now_ms();
+        let screen = self.engine.read_screen(ScreenFormat::Plain, false).unwrap_or_default();
+        match watch.observe(crate::interrupt::shows_working(&screen), now) {
+            crate::interrupt::Verdict::Wait => return,
+            crate::interrupt::Verdict::GiveUp => {}
+            crate::interrupt::Verdict::Interrupted => {
+                let baseline = watch.updated_at;
+                let session = {
+                    let mut i = self.info.lock().unwrap();
+                    // 그사이 훅이 새 상태를 알렸으면 그것을 믿는다
+                    match i.agent.as_mut() {
+                        Some(a) if a.state == AgentState::Working && a.updated_at == baseline => {
+                            a.state = AgentState::Idle;
+                            a.tool_name = None;
+                            a.turn_ended_at = Some(now);
+                            a.updated_at = now;
+                            Some(i.clone())
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(session) = session {
+                    info!(event = "agent_interrupted", session = self.id.0, by = "esc");
+                    let _ = self.events.send(Event::SessionUpdated { session });
+                }
+            }
+        }
+        self.esc_watch = None;
     }
 
     fn attach(&mut self, conn: ConnId, tx: Outbox, format: SnapshotFormat, req_id: u64) {
