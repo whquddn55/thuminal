@@ -128,8 +128,9 @@ impl Scan {
 
 /// 한 줄에서 사용자가 붙인 그림들 (content 차례, 정보). id 는 비워 두고, 번호를 모르면 n 은 0
 fn images_in_line(line: &[u8]) -> Vec<(usize, AgentImage)> {
-    // 대부분의 줄은 그림이 없다. 풀기 전에 바이트로 거른다
-    if line.starts_with(br#"{"type":"api-request-blob""#) || memchr::memmem::find(line, br#""type":"image""#).is_none() {
+    // 대부분의 줄은 그림이 없다. 풀기 전에 바이트로 거른다 (claude 는 빈칸 없는 JSON 을 쓰지만 빈칸이 있어도 걸리게
+    // `"image"` 만 찾는다. 요청 사본 줄은 크므로 앞머리로 먼저 뺀다. 종류는 푼 뒤에 다시 본다)
+    if line.starts_with(br#"{"type":"api-request-blob""#) || memchr::memmem::find(line, br#""image""#).is_none() {
         return Vec::new();
     }
     let Ok(v) = serde_json::from_slice::<Value>(line) else { return Vec::new() };
@@ -463,7 +464,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (p1, p2) = (dir.path().join("1.jsonl"), dir.path().join("2.jsonl"));
         let big = png(1000, 500, false);
-        std::fs::write(&p1, pasted(&[1], &[("image/png", &big)], "2026-10-26T05:00:00Z") + "\n").unwrap();
+        // 빈칸이 든 JSON (`"type": "image"`) 도 읽는다
+        std::fs::write(&p1, pasted(&[1], &[("image/png", &big)], "2026-10-26T05:00:00Z").replace("\":", "\": ") + "\n").unwrap();
         std::fs::write(&p2, "").unwrap();
         let images = Images::default();
         let s = SessionId(1);
