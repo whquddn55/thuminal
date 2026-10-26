@@ -172,7 +172,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.iterSlot = w.slot((pp) => ex.ghostty_render_state_row_iterator_new(0, pp), "row_iterator_new");
     this.cellsSlot = w.slot((pp) => ex.ghostty_render_state_row_cells_new(0, pp), "row_cells_new");
     this.encoder = w.create((pp) => ex.ghostty_key_encoder_new(0, pp), "key_encoder_new");
-    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t), wheel: (n, at) => this.encodeWheel(n, at) };
+    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t), wheel: (up, at) => this.encodeWheel(up, at) };
   }
 
   feed(bytes: Uint8Array): void {
@@ -546,12 +546,9 @@ export class GhosttyWasmEngine implements TerminalEngine {
 
   /**
    * 휠을 프로그램에 넘길 바이트. 마우스를 받는 프로그램(claude, vim 등)에는 휠 버튼(위 64, 아래 65)을,
-   * 마우스를 받지 않는 대체 화면 프로그램(less 등)에는 방향키를 줄 수만큼 보낸다 (alternate scroll, 모드 1007)
+   * 마우스를 받지 않는 대체 화면 프로그램(less 등)에는 방향키를 하나 보낸다 (alternate scroll, 모드 1007)
    */
-  private encodeWheel(lines: number, at: CellPoint): Uint8Array | null {
-    if (!lines) return null;
-    const n = Math.min(Math.abs(lines), 50);
-    const up = lines < 0;
+  private encodeWheel(up: boolean, at: CellPoint): Uint8Array | null {
     if ([MODE_MOUSE_X10, MODE_MOUSE_NORMAL, MODE_MOUSE_BUTTON, MODE_MOUSE_ANY].some((m) => this.mode(m))) {
       const b = up ? 64 : 65;
       const x = Math.max(0, Math.min(this.cols - 1, at.x)) + 1;
@@ -560,16 +557,12 @@ export class GhosttyWasmEngine implements TerminalEngine {
       if (this.mode(MODE_MOUSE_SGR)) one = `\x1b[<${b};${x};${y}M`;
       else if (this.mode(MODE_MOUSE_URXVT)) one = `\x1b[${32 + b};${x};${y}M`;
       else one = `\x1b[M${String.fromCharCode(32 + b, 32 + Math.min(x, 223), 32 + Math.min(y, 223))}`;
-      return new TextEncoder().encode(one.repeat(n));
+      return new TextEncoder().encode(one);
     }
     const alt = this.mode(MODE_ALT_SCREEN_SAVE) || this.mode(MODE_ALT_SCREEN) || this.mode(MODE_ALT_SCREEN_LEGACY);
     if (alt && this.mode(MODE_ALT_SCROLL)) {
       const arrow = up ? "ArrowUp" : "ArrowDown";
-      const one = this.encodeKey({ key: arrow, code: arrow, ctrl: false, alt: false, shift: false, meta: false });
-      if (!one) return null;
-      const out = new Uint8Array(one.length * n);
-      for (let i = 0; i < n; i++) out.set(one, i * one.length);
-      return out;
+      return this.encodeKey({ key: arrow, code: arrow, ctrl: false, alt: false, shift: false, meta: false });
     }
     return null;
   }

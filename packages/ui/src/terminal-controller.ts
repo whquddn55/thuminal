@@ -194,12 +194,14 @@ export class TerminalController {
   }
 
   /**
-   * 휠·손가락 끌기로 움직인 줄 수. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은
-   * 스크롤백이 없어 그 프로그램에 넘기고, 아니면 스크롤백을 움직인다
+   * 휠·손가락 끌기 이벤트 하나로 움직인 줄 수. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은
+   * 스크롤백이 없어 그 프로그램에 넘기고, 아니면 스크롤백을 움직인다.
+   * 프로그램에는 줄 수와 상관없이 휠 신호 하나만 보낸다 (xterm.js 와 같다). 줄 수만큼 몰아 보내면 claude 가 신호마다
+   * 가속해 한 번 쓸어도 수백 줄씩 건너뛰었다
    */
   private wheel(lines: number, at: CellPoint | null) {
     if (!this.engine) return;
-    const bytes = this.engine.input.wheel(lines, at ?? { x: 0, y: 0 });
+    const bytes = this.engine.input.wheel(lines < 0, at ?? { x: 0, y: 0 });
     if (bytes) this.send(bytes);
     else this.engine.scroll(lines);
   }

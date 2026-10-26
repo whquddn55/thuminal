@@ -105,11 +105,11 @@ export interface InputEncoder {
   /** 붙여넣기 (bracketed paste 모드면 감싼다) */
   paste(text: string): Uint8Array;
   /**
-   * 휠 한 칸. 음수면 위로, `at` 은 마우스가 있는 화면 칸.
-   * 프로그램이 마우스를 받으면 마우스 휠 이벤트를, 대체 화면이면 방향키를 낸다.
+   * 휠 이벤트 하나. `at` 은 마우스가 있는 화면 칸.
+   * 프로그램이 마우스를 받으면 휠 버튼 하나를, 대체 화면이면 방향키 하나를 낸다 (xterm.js 와 같다. 얼마나 움직일지는 프로그램이 정한다).
    * null 이면 프로그램이 휠을 받지 않으니 앱이 스크롤백을 움직인다
    */
-  wheel(lines: number, at: CellPoint): Uint8Array | null;
+  wheel(up: boolean, at: CellPoint): Uint8Array | null;
 }
 
 export interface EngineFactory {

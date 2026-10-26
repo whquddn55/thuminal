@@ -50,18 +50,18 @@ describe("입력과 고르기", () => {
     expect(row(e, 0, 5)[2].cp).toBe(0);
   });
 
-  it("휠: 마우스를 받으면 휠 버튼, 대체 화면이면 방향키, 아니면 앱이 스크롤백을 움직인다", () => {
+  it("휠: 마우스를 받으면 휠 버튼, 대체 화면이면 방향키를 하나씩, 아니면 앱이 스크롤백을 움직인다", () => {
     const e = factory.create({ cols: 20, rows: 5, scrollback: 100 });
-    expect(e.input.wheel(-1, { x: 0, y: 0 })).toBeNull();
+    expect(e.input.wheel(true, { x: 0, y: 0 })).toBeNull();
     e.feed(enc("\x1b[?1049h"));
-    expect(dec(e.input.wheel(-2, { x: 0, y: 0 }))).toBe("\x1b[A\x1b[A");
+    expect(dec(e.input.wheel(true, { x: 0, y: 0 }))).toBe("\x1b[A");
     e.feed(enc("\x1b[?1h"));
-    expect(dec(e.input.wheel(1, { x: 0, y: 0 }))).toBe("\x1bOB");
+    expect(dec(e.input.wheel(false, { x: 0, y: 0 }))).toBe("\x1bOB");
     e.feed(enc("\x1b[?1000h\x1b[?1006h"));
-    expect(dec(e.input.wheel(-1, { x: 3, y: 2 }))).toBe("\x1b[<64;4;3M");
-    expect(dec(e.input.wheel(2, { x: 3, y: 2 }))).toBe("\x1b[<65;4;3M\x1b[<65;4;3M");
+    expect(dec(e.input.wheel(true, { x: 3, y: 2 }))).toBe("\x1b[<64;4;3M");
+    expect(dec(e.input.wheel(false, { x: 3, y: 2 }))).toBe("\x1b[<65;4;3M");
     e.feed(enc("\x1b[?1006l"));
-    expect(dec(e.input.wheel(-1, { x: 0, y: 0 }))).toBe("\x1b[M`!!");
+    expect(dec(e.input.wheel(true, { x: 0, y: 0 }))).toBe("\x1b[M`!!");
   });
 
   it("동기 출력(모드 2026) 중에는 반쪽 화면을 넘기지 않고, 끝나면 넘긴다", () => {
