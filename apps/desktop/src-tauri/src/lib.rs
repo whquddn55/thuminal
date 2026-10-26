@@ -133,6 +133,13 @@ async fn detach(state: State<'_, AppState>, id: SessionId) -> CmdResult<()> {
     state.client().await?.detach(id).await.map_err(err)
 }
 
+/// 앱 화면 전체 배율 (⌘+ ⌘- 를 터미널 밖에서 눌렀을 때)
+#[tauri::command]
+fn set_ui_zoom(app: tauri::AppHandle, scale: f64) -> CmdResult<()> {
+    let w = app.get_webview("main").ok_or("메인 웹뷰가 없다")?;
+    w.set_zoom(scale.clamp(0.3, 3.0)).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn input(state: State<'_, AppState>, id: SessionId, data: Vec<u8>) -> CmdResult<()> {
     let c = state.client().await?;
@@ -324,6 +331,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             daemon_info,
+            set_ui_zoom,
             list_sessions,
             create_session,
             attach,

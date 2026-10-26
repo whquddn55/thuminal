@@ -7,11 +7,10 @@ import { createRoot } from "react-dom/client";
 
 import { ghosttyWasmEngineForBrowser } from "@thuminal/engine-ghostty-wasm/browser";
 import { webglRenderer } from "@thuminal/renderer-webgl";
-import { App, appBridge, MobileApp, PairScreen, type Services } from "@thuminal/ui";
+import { App, appBridge, loadTerminalFont, MobileApp, PairScreen, registerTerminalFonts, type Services } from "@thuminal/ui";
 
 import { WebHostApi } from "./web-host";
 
-const FONT = "MesloLGLDZ Nerd Font Mono";
 const TOKEN_KEY = "thuminal.remoteToken";
 const UI_KEY = "thuminal.remoteUi";
 
@@ -42,16 +41,10 @@ async function boot() {
   }
   const engines = ghosttyWasmEngineForBrowser();
   const host = new WebHostApi(location.origin, token);
-  const [, faces] = await Promise.all([engines.load(), host.registerFont(FONT).catch(() => 0)]);
-  if (!faces) console.warn(`[thuminal] 글꼴 ${FONT} 을 받지 못해 기본 고정폭 글꼴로 그린다`);
+  // 글꼴은 데몬이 있는 컴퓨터에서 받아 등록한다 (글꼴 · 크기는 설정창에서 바꾼다. 폰은 폰 화면의 글자 크기를 쓴다)
+  await Promise.all([engines.load(), registerTerminalFonts(host, loadTerminalFont().family)]);
   const mobile = mobileUi();
-  const services: Services = {
-    host,
-    engines,
-    renderer: webglRenderer,
-    rendererOptions: { fontFamily: `'${FONT}', Menlo, 'Apple SD Gothic Neo', 'Noto Sans Mono CJK KR', monospace`, fontSize: mobile ? 12 : 13 },
-    scrollback: 10_000,
-  };
+  const services: Services = { host, engines, renderer: webglRenderer, scrollback: 10_000 };
   const forget = () => {
     localStorage.removeItem(TOKEN_KEY);
     // 안드로이드 앱이면 앱에 남긴 주소도 지우고 처음 화면으로 간다

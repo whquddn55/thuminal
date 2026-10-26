@@ -49,6 +49,16 @@ function useShortcuts(model: AppModel) {
       // ⌃1~9 : 지금 워크스페이스의 탭
       if (e.ctrlKey && !e.metaKey && !e.altKey && /^Digit[1-9]$/.test(e.code)) return run(() => model.selectTabIndex(Number(e.code.slice(5)) - 1));
       if (!e.metaKey) return;
+      // ⌘+ ⌘- ⌘0 : 터미널에 포커스가 있으면 터미널 글자 크기, 아니면 앱 화면 배율 (웹은 브라우저 확대에 맡긴다)
+      if (!e.altKey && !e.ctrlKey && (e.code === "Equal" || e.code === "Minus" || e.code === "Digit0")) {
+        const dir = e.code === "Minus" ? -1 : e.code === "Digit0" ? 0 : 1;
+        if (document.activeElement?.classList.contains("thm-input")) return run(() => model.zoomTerminal(dir));
+        if (model.zoomUi(dir)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       const s = model.get();
       if (s.dialog) return;
       const key = e.key.toLowerCase();

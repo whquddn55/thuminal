@@ -29,6 +29,7 @@ import { activeTab, dropRect, panesOf } from "./layout";
 import { cn } from "./lib/utils";
 import { NewTabMenu } from "./NewTabMenu";
 import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
+import { rendererOptions } from "./terminal-font";
 import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { type DocSpec, DocView } from "./viewers";
@@ -42,9 +43,12 @@ export function TerminalSurface({ surface, className, children }: { surface: Sur
   const model = useModel();
   const ref = useRef<HTMLDivElement>(null);
   const [renderer, setRenderer] = useState<Renderer | null>(null);
+  // 글꼴이 바뀌면 렌더러를 새로 만든다 (칸 크기를 새 글꼴로 다시 잰다. 터미널 칸은 새 렌더러에 다시 붙는다)
+  const font = useApp((s) => s.terminalFont);
+  const fontSize = useApp((s) => model.terminalFontSize(s));
   useEffect(() => {
     const { services } = model;
-    const r = services.renderer(ref.current!, services.rendererOptions);
+    const r = services.renderer(ref.current!, rendererOptions(font, fontSize));
     setRenderer(r);
     let raf = 0;
     const loop = () => {
@@ -56,7 +60,7 @@ export function TerminalSurface({ surface, className, children }: { surface: Sur
       cancelAnimationFrame(raf);
       r.dispose();
     };
-  }, [model]);
+  }, [model, font, fontSize]);
   return (
     <div ref={ref} className={cn("relative min-h-0 min-w-0", className)}>
       <RendererContext.Provider value={{ renderer, surface }}>{children}</RendererContext.Provider>

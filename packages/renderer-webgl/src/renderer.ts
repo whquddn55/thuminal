@@ -132,7 +132,7 @@ export class WebglRenderer implements Renderer {
 
   constructor(
     private readonly root: HTMLElement,
-    private readonly options: RendererOptions,
+    readonly options: RendererOptions,
   ) {
     this.dpr = window.devicePixelRatio || 1;
     const c = document.createElement("canvas");
@@ -156,7 +156,8 @@ export class WebglRenderer implements Renderer {
   }
 
   private font(bold: boolean, italic: boolean): string {
-    return `${italic ? "italic " : ""}${bold ? "bold " : ""}${this.options.fontSize * this.dpr}px ${this.options.fontFamily}`;
+    const weight = bold ? (this.options.fontWeightBold ?? 700) : (this.options.fontWeight ?? 400);
+    return `${italic ? "italic " : ""}${weight} ${this.options.fontSize * this.dpr}px ${this.options.fontFamily}`;
   }
 
   private makeAtlas(): Atlas {

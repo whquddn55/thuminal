@@ -1,4 +1,4 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 에이전트 띄우는 옵션, 알림, 원격 접속.
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 터미널 글꼴, 에이전트 띄우는 옵션, 알림, 원격 접속.
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
 import { CheckIcon, CopyIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
@@ -13,6 +13,7 @@ import { Label } from "./components/ui/label";
 import { Switch } from "./components/ui/switch";
 import { cn } from "./lib/utils";
 import { useApp, useModel } from "./store";
+import { DEFAULT_TERMINAL_FONT, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack } from "./terminal-font";
 import { currentTheme } from "./theme";
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
@@ -98,6 +99,104 @@ function Toggle({ checked, onChange, title, children }: { checked: boolean; onCh
         <span className="text-muted-foreground">{children}</span>
       </span>
     </label>
+  );
+}
+
+const FONT_SUGGESTIONS = ["SF Mono", "MesloLGLDZ Nerd Font Mono", "Menlo", "JetBrains Mono", "D2Coding", "Fira Code"];
+const WEIGHTS: [number, string][] = [
+  [300, "300 가늘게"],
+  [400, "400 보통"],
+  [500, "500 중간"],
+  [600, "600"],
+  [700, "700 굵게"],
+  [800, "800"],
+];
+
+/** 터미널 글꼴 (이 앱에 남는다). 데스크톱 · 웹 · 폰 터미널이 같이 바뀐다 (폰은 글자 크기만 폰 화면 값을 쓴다) */
+function FontSection() {
+  const model = useModel();
+  const font = useApp((s) => s.terminalFont);
+  const zoom = useApp((s) => s.zoom);
+  const [family, setFamily] = useState(font.family);
+  useEffect(() => setFamily(font.family), [font.family]);
+  const apply = (patch: Parameters<typeof model.setTerminalFont>[0]) => void model.setTerminalFont(patch).catch(model.fail);
+  const select = "h-7 rounded border bg-background px-2 text-xs";
+  const theme = currentTheme(useApp((s) => s.theme), useApp((s) => s.systemDark));
+  return (
+    <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1 text-xs">
+      <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
+        <label className="flex flex-col gap-1">
+          글꼴 이름
+          <input
+            className="h-7 w-64 rounded border bg-background px-2 font-mono"
+            value={family}
+            list="thm-font-suggestions"
+            onChange={(e) => setFamily(e.target.value)}
+            onBlur={() => family.trim() && family !== font.family && apply({ family: family.trim() })}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+          <datalist id="thm-font-suggestions">
+            {FONT_SUGGESTIONS.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+        </label>
+        <label className="flex flex-col gap-1">
+          크기
+          <input
+            className="h-7 w-16 rounded border bg-background px-2 font-mono"
+            type="number"
+            min={FONT_SIZE_MIN}
+            max={FONT_SIZE_MAX}
+            value={font.size}
+            onChange={(e) => Number(e.target.value) && apply({ size: Number(e.target.value) })}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          굵기
+          <select className={select} value={font.weight} onChange={(e) => apply({ weight: Number(e.target.value) })}>
+            {WEIGHTS.map(([w, l]) => (
+              <option key={w} value={w}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          굵은 글자
+          <select className={select} value={font.weightBold} onChange={(e) => apply({ weightBold: Number(e.target.value) })}>
+            {WEIGHTS.map(([w, l]) => (
+              <option key={w} value={w}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="h-7 rounded-md border px-3 hover:bg-accent" onClick={() => apply({ ...DEFAULT_TERMINAL_FONT })}>
+          기본값 (Orca 와 같게)
+        </button>
+      </div>
+      <div
+        className="overflow-hidden rounded-lg border px-4 py-3 leading-[1.3] whitespace-pre"
+        style={{ background: theme.background, color: theme.foreground, fontFamily: fontStack(font.family), fontSize: font.size, fontWeight: font.weight }}
+      >
+        {"❯ claude --resume 90e31298\n"}
+        <span style={{ fontWeight: font.weightBold }}>{"● 굵은 글자: 스크롤이 굼뜨던 원인을 찾았다\n"}</span>
+        {"  fn readable(&self, wait_ms: i32) -> bool { 0O 1lI }\n"}
+        {"  한글과 English 가 섞인 줄 ─── │ ✔ ↻"}
+      </div>
+      <div className="flex flex-col gap-1 text-muted-foreground">
+        <p>
+          SF Mono 는 macOS 에 들어 있는 고정폭 글꼴이다. 다른 글꼴은 이 컴퓨터에 설치된 이름을 그대로 적는다. 프롬프트 아이콘처럼 그 글꼴에 없는 글자는{" "}
+          <Code>MesloLGLDZ Nerd Font Mono</Code> 로 채운다.
+        </p>
+        <p>
+          터미널에서 <Code>⌘+</Code> <Code>⌘-</Code> 로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄인다. <Code>⌘0</Code> 은 원래대로.
+          {zoom.terminal !== 0 && ` 지금 터미널은 ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
+          {zoom.ui !== 1 && ` 지금 화면 배율은 ${Math.round(zoom.ui * 100)}%.`}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -330,7 +429,7 @@ export function SettingsDialog() {
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
-  const [section, setSection] = useState<"theme" | "agent" | "notify" | "remote">("theme");
+  const [section, setSection] = useState<"theme" | "font" | "agent" | "notify" | "remote">("theme");
   const remote = model.services.host.remote;
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 
@@ -342,7 +441,9 @@ export function SettingsDialog() {
           <DialogDescription>
             {section === "theme"
               ? "테마를 누르면 바로 바뀐다. 터미널 안에서 도는 프로그램도 새 색으로 답을 받는다."
-              : section === "agent"
+              : section === "font"
+                ? "터미널 글꼴이다. 바꾸면 바로 모든 터미널에 적용되고 이 앱에 남는다."
+                : section === "agent"
                 ? "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."
                 : section === "remote"
                   ? "폰·다른 컴퓨터에서 Tailscale 로 붙는다. 설정은 데몬에 남는다."
@@ -354,6 +455,7 @@ export function SettingsDialog() {
             value={section}
             options={[
               ["theme", "테마"],
+              ["font", "글꼴"],
               ["agent", "에이전트"],
               ["notify", "알림"],
               ...(remote ? ([["remote", "원격 접속"]] as ["remote", string][]) : []),
@@ -363,6 +465,8 @@ export function SettingsDialog() {
         </div>
         {section === "remote" && remote ? (
           <RemoteSection remote={remote} />
+        ) : section === "font" ? (
+          <FontSection />
         ) : section === "agent" ? (
           <AgentSection />
         ) : section === "notify" ? (

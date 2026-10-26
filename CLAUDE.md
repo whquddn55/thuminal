@@ -53,6 +53,7 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - 터미널 그림판(WebGL 렌더러)은 **면마다 하나**다 (메인 면, 플로팅 패널). 칸 자리는 DOM 이 잡고 글자는 그 위 canvas 가 그린다. 칸이 옮겨지면 `renderer.layout()` 을 불러야 자리가 다시 잡힌다.
 - 끌어 놓기는 pointer 이벤트로 직접 한다 (`dnd.ts`). 놓을 곳은 `data-drop-pane`, `data-drop-tabbar`(+`data-tab-index`), `data-drop-workspace` 속성으로 찾는다.
 - **브라우저 칸**은 Tauri `unstable` 자식 웹뷰(진짜 WKWebView)를 칸 자리에 얹는다 (`src-tauri/src/browser.rs`, `ui/src/BrowserPane.tsx`). 네이티브 뷰라 HTML 위에 그려지므로 메뉴·창·끌기·플로팅 패널이 겹치면 숨긴다. 페이지가 키보드를 잡고 있으면 ⌘ 단축키를 `thuminal-key://` 이동으로 바꿔 메인 웹뷰로 넘긴다. capabilities 는 메인 웹뷰(`webviews: ["main"]`)에만 준다.
+- **터미널 글꼴**은 설정창 값(`ui/src/terminal-font.ts`, localStorage)이다. 기본은 Orca 와 같은 SF Mono 14px · 굵기 500. WebKit 은 시스템 SF Mono 를 `ui-monospace` 로만 주고, 사용자 설치 글꼴은 숨기므로 `registerFont` 로 직접 등록한다. 글꼴이 바뀌면 면의 렌더러를 새로 만든다.
 - **테마** 하나로 세 곳을 맞춘다: 화면 토큰(`<html>` CSS 변수, `themes` 의 `uiTokens`), 앱 엔진 기본색(`setColors`), 데몬 엔진 기본색(`set_terminal_colors`).
 - 한글 IME: 조합 중인 글자는 엔진 `setPreedit` 으로 커서 자리에 밑줄로 그린다. textarea 는 조합이 모두 끝난 뒤에만 비운다 (WebKit 은 다음 글자 조합 시작이 앞 글자 조합 끝보다 먼저 오기도 한다). 입력 소스를 바꾼 직후 입력기가 붙지 않아 자모가 keyCode 229 없이 하나씩 오면 `hangul.ts` 가 직접 묶는다.
 
@@ -61,7 +62,7 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - **프로토콜 타입은 두 벌이다.** 원본은 `crates/thuminal-protocol/src/{message,layout}.rs`, TS 쪽은 `packages/term-core/src/protocol.ts`. 와이어 모양을 바꾸면 둘을 같이 바꾼다. enum 은 serde `tag = "type"`(op 는 `tag = "op"`), snake_case 다. 새 필드는 `#[serde(default)]` 로 옛 데몬·앱과 맞춘다.
 - 앱의 데몬 요청은 대부분 generic `daemon_request` Tauri 명령으로 그대로 넘어간다 (`tauri-host.ts` 의 `req()`). 새 요청에 Tauri 명령을 늘릴 필요는 보통 없다.
 - 데몬은 바깥 환경의 `THUMINAL_*`, `ORCA_*`, `CLAUDE_CODE_*` 를 세션에 물려주지 않는다 (`SCRUBBED_ENV_PREFIXES`). 세션 안 CLI 가 써야 하는 값은 데몬이 다시 넣는다.
-- 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다 (`ui/src/App.tsx` `useShortcuts`).
+- 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다. ⌘+ ⌘- ⌘0 은 터미널에 포커스가 있으면 모든 터미널 글자 크기, 아니면 앱 화면 배율(Tauri 웹뷰 확대)이다 (`ui/src/App.tsx` `useShortcuts`).
 - 주석·문서·CLI 도움말·화면 글은 한국어 `-다` 평서형이다. 주변 코드의 주석 밀도와 말투를 따른다.
 - CLI 는 orca CLI 와 호환하지 않는다. 명령 하나 = 연결 하나 + 바꾸는 요청 하나가 원칙이고, 대상(`p7`, `t3`, `s12`, `.`)은 데몬이 푼다.
 - **macOS 알림에 `mac-notification-sys` 나 `tauri-plugin-notification`(속으로 같은 것을 쓴다)을 쓰지 않는다.** 처음 알림을 보낼 때 `NSBundle` 번들 id 를 바꿔치기(swizzle)해서, 그 뒤로 앱이 macOS 에 Finder 로 보이고 입력기(IMK)·창 끌기가 몇 초씩 막힌다.

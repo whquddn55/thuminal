@@ -152,6 +152,11 @@ export interface HostApi {
    * 찾은 글꼴 면(굵기, 기울임) 수를 돌려준다. 없으면 0.
    */
   registerFont?(family: string): Promise<number>;
+  /**
+   * 앱 화면 전체 배율 (1 이 원래 크기). 껍데기가 웹뷰 확대를 지원할 때만 있다.
+   * 없으면(웹) 브라우저가 ⌘+ ⌘- 로 스스로 확대한다
+   */
+  setUiZoom?(scale: number): Promise<void>;
   /** 배치. workspace 를 비우면 모두 */
   getLayout(workspace?: string): Promise<WorkspaceLayout[]>;
   /** 배치를 바꾼다. 바뀐 배치와 새로 만든 칸을 돌려준다 */

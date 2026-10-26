@@ -12,8 +12,14 @@ export interface CellMetrics {
 }
 
 export interface RendererOptions {
+  /** CSS font-family 목록 */
   fontFamily: string;
+  /** CSS 픽셀 */
   fontSize: number;
+  /** 보통 글자 굵기 (기본 400) */
+  fontWeight?: number;
+  /** 굵은 글자 굵기 (기본 700) */
+  fontWeightBold?: number;
 }
 
 export interface RenderTarget {
@@ -26,6 +32,8 @@ export interface RenderTarget {
 
 export interface Renderer {
   readonly metrics: CellMetrics;
+  /** 만들 때 받은 글꼴 설정 (바꾸려면 렌더러를 새로 만든다) */
+  readonly options: RendererOptions;
   /** 그릴 터미널을 더한다. 돌려준 함수를 부르면 뺀다 */
   add(target: RenderTarget): () => void;
   /** 바뀐 터미널만 다시 그린다. 앱이 requestAnimationFrame 마다 부른다 */

@@ -32,6 +32,17 @@ import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } f
 import type { Services } from "./services";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
+import {
+  clampFontSize,
+  loadTerminalFont,
+  loadZoom,
+  nextUiZoom,
+  registerTerminalFonts,
+  saveTerminalFont,
+  saveZoom,
+  type TerminalFont,
+  type Zoom,
+} from "./terminal-font";
 import { applyTheme, loadThemeSettings, saveThemeSettings, type ThemeSettings } from "./theme";
 
 export { FLOATING_WORKSPACE, OTHER_WORKSPACE };
@@ -95,6 +106,10 @@ export interface AppState {
   focusArea: "main" | "floating";
   dialog: Dialog;
   theme: ThemeSettings;
+  /** 터미널 글꼴 설정 (설정창) */
+  terminalFont: TerminalFont;
+  /** ⌘+ ⌘- 로 바꾼 터미널 글자 크기와 앱 화면 배율 */
+  zoom: Zoom;
   /** 시스템 다크 모드 여부 (테마 설정이 시스템 따라가기일 때 쓴다) */
   systemDark: boolean;
   sidebarWidth: number;
@@ -188,6 +203,8 @@ export class AppModel {
       focusArea: "main",
       dialog: null,
       theme: loadThemeSettings(),
+      terminalFont: loadTerminalFont(),
+      zoom: loadZoom(),
       systemDark: media.matches,
       sidebarWidth: Number(localStorage.getItem(SIDEBAR_KEY)) || 280,
       sidebarOpen: localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0",
@@ -244,6 +261,7 @@ export class AppModel {
     }
     this.markSeen();
     void this.applyTheme();
+    if (this.get().zoom.ui !== 1) void host.setUiZoom?.(this.get().zoom.ui).catch(() => undefined);
     void this.services.host.findCommands(AGENTS.map((a) => a.cmd)).then(
       (agents) => this.set({ agents }),
       () => undefined,
@@ -741,6 +759,43 @@ export class AppModel {
     saveThemeSettings(theme);
     this.set({ theme });
     void this.applyTheme();
+  };
+
+  // ---- 글꼴과 확대 ----
+
+  /** 터미널 글꼴을 바꾼다. 새 글꼴을 등록한 뒤에 바꿔야 칸 크기를 그 글꼴로 잰다 */
+  setTerminalFont = async (patch: Partial<TerminalFont>) => {
+    const font = { ...this.get().terminalFont, ...patch };
+    if (patch.size !== undefined) font.size = clampFontSize(patch.size);
+    saveTerminalFont(font);
+    if (patch.family !== undefined) await registerTerminalFonts(this.services.host, font.family);
+    this.set({ terminalFont: font });
+  };
+
+  /** 지금 터미널 글자 크기 (설정 + ⌘+ ⌘-) */
+  terminalFontSize = (s: AppState = this.get()) => clampFontSize(s.terminalFont.size + s.zoom.terminal);
+
+  private setZoom(zoom: Zoom) {
+    saveZoom(zoom);
+    this.set({ zoom });
+  }
+
+  /** ⌘+ ⌘- ⌘0 을 터미널에서: 모든 터미널 글자 크기를 1px 씩, 0 이면 설정 크기로 */
+  zoomTerminal = (dir: 1 | -1 | 0) => {
+    const s = this.get();
+    const terminal = dir === 0 ? 0 : clampFontSize(this.terminalFontSize() + dir) - s.terminalFont.size;
+    this.setZoom({ ...s.zoom, terminal });
+  };
+
+  /** ⌘+ ⌘- ⌘0 을 터미널 밖에서: 앱 화면 배율. 껍데기가 확대를 못 하면(웹) false 를 돌려 브라우저에 맡긴다 */
+  zoomUi = (dir: 1 | -1 | 0): boolean => {
+    const host = this.services.host;
+    if (!host.setUiZoom) return false;
+    const s = this.get();
+    const ui = dir === 0 ? 1 : nextUiZoom(s.zoom.ui, dir);
+    this.setZoom({ ...s.zoom, ui });
+    void host.setUiZoom(ui).catch((e) => this.fail(e));
+    return true;
   };
 
   /** 화면 토큰, 앱 엔진 색, 데몬 엔진 색을 지금 테마로 맞춘다 */

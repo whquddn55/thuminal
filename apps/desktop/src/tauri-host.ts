@@ -44,6 +44,13 @@ async function req<T>(request: Record<string, unknown>, pick: (r: Record<string,
 }
 
 export class TauriHostApi implements HostApi {
+  /** 앱 화면 배율. 브라우저 칸(네이티브 웹뷰)은 창 좌표로 놓으므로 DOM 좌표에 곱한다 */
+  private uiZoom = 1;
+  private readonly at = (r: { x: number; y: number; width: number; height: number }) => {
+    const z = this.uiZoom;
+    return { x: r.x * z, y: r.y * z, w: r.width * z, h: r.height * z };
+  };
+
   readonly git: GitApi = {
     status: (worktree) => req<GitStatus>({ type: "git_status", worktree }, (r) => r.status),
     diff: (worktree, file, staged) => req<string>({ type: "git_diff", worktree, file, staged }, (r) => r.text),
@@ -65,8 +72,8 @@ export class TauriHostApi implements HostApi {
   };
 
   readonly browser: BrowserHost = {
-    open: (id, url, at) => invoke("browser_open", { id, url, x: at.x, y: at.y, w: at.width, h: at.height }),
-    setBounds: (id, at) => invoke("browser_bounds", { id, x: at.x, y: at.y, w: at.width, h: at.height }),
+    open: (id, url, at) => invoke("browser_open", { id, url, ...this.at(at) }),
+    setBounds: (id, at) => invoke("browser_bounds", { id, ...this.at(at) }),
     setVisible: (id, visible) => invoke("browser_visible", { id, visible }),
     navigate: (id, url) => invoke("browser_navigate", { id, url }),
     go: (id, delta) => invoke("browser_go", { id, delta }),
@@ -242,6 +249,11 @@ export class TauriHostApi implements HostApi {
 
   removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string> {
     return invoke("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch, forceBranch: opts.forceBranch ?? false });
+  }
+
+  async setUiZoom(scale: number): Promise<void> {
+    this.uiZoom = scale;
+    await invoke("set_ui_zoom", { scale });
   }
 
   async registerFont(family: string): Promise<number> {

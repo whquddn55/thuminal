@@ -31,6 +31,7 @@ import { cn } from "./lib/utils";
 import type { Services } from "./services";
 import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
 import { AppModel, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
+import { rendererOptions } from "./terminal-font";
 import "./styles.css";
 
 /** 안드로이드 앱(apps/android)이 WebView 에 넣어 주는 기능 */
@@ -56,6 +57,8 @@ type Screen = { kind: "home" } | { kind: "ws"; ws: WorkspaceId } | { kind: "term
 
 const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
 const FONT_KEY = "thuminal.mobileFontSize";
+/** 폰 터미널 글자 크기 기본값 (글꼴 · 굵기는 설정창 값을 쓴다) */
+const MOBILE_FONT_SIZE = 12;
 
 export function MobileApp({
   services,
@@ -366,9 +369,10 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
 function useRenderer(ref: React.RefObject<HTMLDivElement | null>, fontSize: number): Renderer | null {
   const model = useModel();
   const [renderer, setRenderer] = useState<Renderer | null>(null);
+  const font = useApp((s) => s.terminalFont);
   useEffect(() => {
     const { services } = model;
-    const r = services.renderer(ref.current!, { ...services.rendererOptions, fontSize });
+    const r = services.renderer(ref.current!, rendererOptions(font, fontSize));
     setRenderer(r);
     let raf = 0;
     const loop = () => {
@@ -381,7 +385,7 @@ function useRenderer(ref: React.RefObject<HTMLDivElement | null>, fontSize: numb
       setRenderer(null);
       r.dispose();
     };
-  }, [model, ref, fontSize]);
+  }, [model, ref, font, fontSize]);
   return renderer;
 }
 
@@ -391,7 +395,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
   const worktrees = useApp((st) => st.worktrees);
   const layout = useApp((st) => st.layouts[ws]);
   const generation = useApp((st) => st.generation);
-  const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem(FONT_KEY)) || model.services.rendererOptions.fontSize);
+  const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem(FONT_KEY)) || MOBILE_FONT_SIZE);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const renderer = useRenderer(surfaceRef, fontSize);

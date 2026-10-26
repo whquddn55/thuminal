@@ -511,8 +511,8 @@ export class TerminalController {
       top: `${c.y * height}px`,
       height: `${height}px`,
       lineHeight: `${height}px`,
-      fontSize: `${this.s.rendererOptions.fontSize}px`,
-      fontFamily: this.s.rendererOptions.fontFamily,
+      fontSize: `${this.renderer.options.fontSize}px`,
+      fontFamily: this.renderer.options.fontFamily,
     });
   }
 
