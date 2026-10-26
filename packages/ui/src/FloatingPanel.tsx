@@ -105,7 +105,10 @@ export function FloatingPanel() {
   return (
     <div
       className={cn(
-        "fixed z-40 flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl",
+        // 떠 있는 느낌: 넓게 퍼진 그림자와 가까운 그림자를 겹친다. 어두운 테마는 검은 그림자가 잘 안 보여 진하게 하고 바깥 테두리를 밝게 둔다
+        "fixed z-40 flex flex-col overflow-hidden rounded-xl border bg-background",
+        "shadow-[0_28px_70px_-10px_rgb(0_0_0/0.45),0_10px_24px_-6px_rgb(0_0_0/0.3)]",
+        "dark:shadow-[0_28px_80px_-6px_rgb(0_0_0/0.85),0_10px_28px_rgb(0_0_0/0.6),0_0_0_1px_rgb(255_255_255/0.07)]",
         focused ? "border-ring/50" : "border-border",
       )}
       style={style}

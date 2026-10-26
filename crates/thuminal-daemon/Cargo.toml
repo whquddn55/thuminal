@@ -21,6 +21,7 @@ libc.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 fontdb = "0.24.0"
+base64 = "0.22"
 
 [dev-dependencies]
 thuminal-engine-ghostty.workspace = true

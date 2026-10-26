@@ -147,6 +147,10 @@ export interface HostApi {
    * 처음 있는 절대 경로를 돌려주고, 없으면 null (터미널 링크)
    */
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null>;
+  /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
+  savePasteImage(data: string, ext: string): Promise<string>;
+  /** 세션 셸 밑에서 이름이 names 에 든 프로세스(에이전트)가 도는 세션들 */
+  runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]>;
   /** 브라우저 칸을 지원하는 껍데기만 둔다 */
   readonly browser?: BrowserHost;
   /**

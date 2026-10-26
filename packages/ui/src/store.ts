@@ -427,6 +427,7 @@ export class AppModel {
         resolve: (path) => this.services.host.resolvePath(path, this.linkBases(id)),
         open: (link, mode) => this.openLink(id, link, mode),
       };
+      c.isAgent = () => !!this.get().sessions[id]?.agent;
       this.controllers.set(id, c);
       c.open().catch((e) => this.fail(`세션 ${id} 에 붙지 못했다: ${e}`));
     }
@@ -688,22 +689,32 @@ export class AppModel {
     await this.op({ op: "split", target, side });
   };
 
-  /** 에이전트가 든 칸은 닫기 전에 묻는다 (닫으면 그 세션이 끝난다) */
+  /**
+   * 에이전트가 든 칸은 닫기 전에 묻는다 (닫으면 그 세션이 끝난다). 다른 터미널은 바로 닫는다.
+   * 훅이 알려 온 에이전트가 없어도 셸 밑에 claude 같은 프로세스가 돌면 묻는다 (플러그인 없이 띄운 claude 등)
+   */
   private guardClose(panes: number[], what: string, run: () => void) {
     const s = this.get();
-    const busy = Object.values(s.layouts)
+    const terms = Object.values(s.layouts)
       .flatMap((l) => l.tabs)
       .flatMap((t) => panesOf(t.root))
-      .filter((p) => panes.includes(p.id) && p.type === "terminal" && s.sessions[p.session]?.agent)
-      .map((p) => (p.type === "terminal" ? s.sessions[p.session].agent!.kind : ""));
-    if (!busy.length) return run();
-    this.setDialog({
-      kind: "confirm",
-      title: `${what} 닫을까?`,
-      body: `${[...new Set(busy)].join(", ")} 가 돌고 있다. 닫으면 그 세션이 끝난다.`,
-      action: "닫기",
-      run,
-    });
+      .flatMap((p) => (panes.includes(p.id) && p.type === "terminal" && s.sessions[p.session] ? [s.sessions[p.session]] : []))
+      .filter((info) => info.state.state !== "exited");
+    const ask = (busy: string[]) =>
+      this.setDialog({
+        kind: "confirm",
+        title: `${what} 닫을까?`,
+        body: `${[...new Set(busy)].join(", ")} 가 돌고 있다. 닫으면 그 세션이 끝난다.`,
+        action: "닫기",
+        run,
+      });
+    const reported = terms.flatMap((t) => (t.agent ? [t.agent.kind] : []));
+    if (reported.length) return ask(reported);
+    if (!terms.length) return run();
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500));
+    Promise.race([this.services.host.runningAgents(terms.map((t) => t.id), AGENTS.map((a) => a.cmd)), timeout])
+      .then((found) => (found.length ? ask(found.map((f) => f.name)) : run()))
+      .catch(() => run());
   }
 
   closePane = (id: number) => this.guardClose([id], "칸을", () => void this.op({ op: "close_pane", target: byId(id) }));

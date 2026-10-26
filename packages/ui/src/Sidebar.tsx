@@ -339,9 +339,12 @@ function Group({
       >
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-4">{label}</span>
-        {count !== undefined && <span className={cn("text-[11px] tabular-nums text-muted-foreground/70 group-hover:hidden", menuOpen && "hidden")}>{count}</span>}
+        {count !== undefined && (
+          <span className={cn("pr-1.5 text-[11px] tabular-nums text-muted-foreground/70 group-hover:hidden", menuOpen && "hidden")}>{count}</span>
+        )}
+        {/* 올렸을 때만 자리를 차지한다 (안 보일 때도 자리를 잡으면 개수가 가운데로 밀린다) */}
         <span
-          className={cn("flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100", menuOpen && "opacity-100")}
+          className={cn("hidden items-center gap-0.5 group-hover:flex", menuOpen && "flex")}
           onClick={(e) => e.stopPropagation()}
         >
           {menu && (

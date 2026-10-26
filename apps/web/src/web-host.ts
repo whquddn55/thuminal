@@ -346,6 +346,14 @@ export class WebHostApi implements HostApi {
     return this.req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
   }
 
+  savePasteImage(data: string, ext: string): Promise<string> {
+    return this.req({ type: "save_paste_image", data, ext }, (r) => String(r.path));
+  }
+
+  runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]> {
+    return this.req({ type: "running_agents", sessions, names }, (r) => r.found);
+  }
+
   findCommands(names: string[]): Promise<string[]> {
     return this.req({ type: "find_commands", names }, (r) => r.found);
   }

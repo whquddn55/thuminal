@@ -8,6 +8,7 @@ pub mod lock;
 pub mod manager;
 pub mod orca;
 pub mod persist;
+pub mod procs;
 pub mod remote;
 pub mod server;
 pub mod session;

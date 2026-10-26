@@ -62,6 +62,13 @@ pub enum SessionState {
     Exited { code: Option<i32> },
 }
 
+/// 세션 밑에서 찾은 에이전트 프로세스
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunningAgent {
+    pub session: SessionId,
+    pub name: String,
+}
+
 /// 세션 정보. `labels` 는 데몬이 뜻을 모르는 꼬리표다.
 /// 앱은 여기에 워크트리, 탭 같은 자기 정보를 넣어 두고 다시 붙을 때 찾는다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -458,6 +465,12 @@ pub enum Request {
     /// 터미널에서 찾은 경로가 정말 있는지 본다. `~` 를 풀고, 상대 경로는 `bases`(절대 경로) 앞에서부터 붙여 보아
     /// 처음 있는 것을 돌려준다 (터미널 링크를 열 때 쓴다)
     ResolvePath { path: String, bases: Vec<String> },
+    /// 붙여넣은 그림을 임시 폴더에 파일로 쓴다. `data` 는 base64, `ext` 는 확장자(png, jpg …).
+    /// 앱은 돌려받은 경로를 터미널에 붙여 넣는다 (claude 는 붙여 넣은 그림 경로를 그림으로 붙인다)
+    SavePasteImage { data: String, ext: String },
+    /// 세션 셸 밑에서 도는 프로세스 중 이름(실행 파일, node 스크립트)이 `names` 에 든 것을 찾는다.
+    /// 에이전트 훅이 알려 오지 않은 claude 도 닫기 전에 묻게 한다
+    RunningAgents { sessions: Vec<SessionId>, names: Vec<String> },
     /// Orca 에 등록한 저장소·워크트리 이름·claude 세션을 읽는다 (바꾸지 않는다)
     ScanOrca,
     /// 이 claude 세션으로 떠 있는 claude 프로세스를 끝낸다 (SIGTERM, 끝날 때까지 기다린다). 가져와 이어 붙이기 전에 쓴다
@@ -523,6 +536,9 @@ pub enum Response {
     Commands { found: Vec<String> },
     /// 있는 경로 (없으면 None)
     ResolvedPath { path: Option<String>, is_dir: bool },
+    /// 데몬이 쓴 파일
+    Saved { path: String },
+    RunningAgents { found: Vec<RunningAgent> },
     AgentSettings { settings: AgentSettings },
     Tmux { stdout: String, stderr: String, code: i32 },
     OrcaScan { scan: OrcaScan },

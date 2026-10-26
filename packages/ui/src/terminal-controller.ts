@@ -48,6 +48,8 @@ export class TerminalController {
   private cleanup: (() => void)[] = [];
   /** 터미널 링크를 확인하고 여는 곳 (앱 상태가 넣는다) */
   links: LinkHandler | null = null;
+  /** 이 세션에 에이전트(claude 등)가 떠 있다 (앱 상태가 넣는다) */
+  isAgent: (() => boolean) | null = null;
   private linkHover: LinkHover | null = null;
   private colors: EngineColors | null = null;
   /** 칸을 누르거나 입력을 받으면 부른다 (화면이 이 칸을 포커스 칸으로 삼는다) */
@@ -515,7 +517,15 @@ export class TerminalController {
       ev.preventDefault();
       this.flushHangul();
       const text = ev.clipboardData?.getData("text/plain");
-      if (text && this.engine) this.send(this.engine.input.paste(text));
+      if (text) {
+        if (this.engine) this.send(this.engine.input.paste(text));
+        return;
+      }
+      // 그림만 있으면(스크린샷 등) 데몬 쪽 임시 파일로 써서 그 경로를 붙여 넣는다. claude 는 붙여 넣은 그림 경로를 그림으로 붙인다
+      const images = [...(ev.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+      if (images.length) void this.pasteImages(images);
+      // 웹뷰가 그림을 넘기지 않았으면, 같은 맥의 claude 에는 ⌃V 를 보내 claude 가 클립보드 그림을 직접 읽게 한다
+      else if (!this.s.host.isRemote && this.isAgent?.()) this.send(new Uint8Array([0x16]));
     });
     // Cmd+C: 고른 글자를 복사한다 (textarea 의 copy 이벤트로 받아 클립보드 권한이 필요 없다)
     ta.addEventListener("copy", (ev) => {
@@ -583,6 +593,19 @@ export class TerminalController {
     if (text && this.engine) this.send(this.engine.input.paste(text));
   }
 
+  private async pasteImages(files: File[]) {
+    const paths: string[] = [];
+    for (const f of files) {
+      const ext = f.type.slice("image/".length).replace("jpeg", "jpg").replace(/\+.*$/, "") || "png";
+      try {
+        paths.push(await this.s.host.savePasteImage(await toBase64(f), ext));
+      } catch (e) {
+        console.warn("붙여넣은 그림을 쓰지 못했다", e);
+      }
+    }
+    if (paths.length) this.paste(paths.join(" "));
+  }
+
   hasSelection(): boolean {
     return !!this.engine?.selectionText();
   }
@@ -604,4 +627,14 @@ export class TerminalController {
     this.engine?.dispose();
     this.engine = null;
   }
+}
+
+/** 파일 내용을 base64 로 (data: 주소의 앞머리를 뗀다) */
+function toBase64(f: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(f);
+  });
 }

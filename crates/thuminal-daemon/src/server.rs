@@ -322,6 +322,18 @@ impl Server {
                 Some((p, is_dir)) => Response::ResolvedPath { path: Some(p.to_string_lossy().into_owned()), is_dir },
                 None => Response::ResolvedPath { path: None, is_dir: false },
             }),
+            Request::SavePasteImage { data, ext } => match tokio::task::spawn_blocking(move || save_paste_image(&data, &ext)).await {
+                Ok(Ok(path)) => Ok(Response::Saved { path: path.to_string_lossy().into_owned() }),
+                Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
+                Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+            },
+            Request::RunningAgents { sessions, names } => {
+                let roots: Vec<_> = sessions.iter().filter_map(|&id| Some((id, m.info(id).ok()?.pid?))).collect();
+                match tokio::task::spawn_blocking(move || crate::procs::running_agents(&roots, &names)).await {
+                    Ok(found) => Ok(Response::RunningAgents { found }),
+                    Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+                }
+            }
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             req @ (Request::AddRepo { .. }
             | Request::AddRepos { .. }
@@ -505,6 +517,8 @@ fn request_kind(r: &Request) -> &'static str {
         Request::GetTerminalColors => "get_terminal_colors",
         Request::FindCommands { .. } => "find_commands",
         Request::ResolvePath { .. } => "resolve_path",
+        Request::SavePasteImage { .. } => "save_paste_image",
+        Request::RunningAgents { .. } => "running_agents",
         Request::Tmux { .. } => "tmux",
         Request::ScanOrca => "scan_orca",
         Request::GetRemote => "get_remote",
@@ -533,8 +547,36 @@ fn is_slow(r: &Request) -> bool {
             | Request::ListRepos
             | Request::FindCommands { .. }
             | Request::ResolvePath { .. }
+            | Request::SavePasteImage { .. }
+            | Request::RunningAgents { .. }
             | Request::ScanOrca
     )
+}
+
+/// 붙여넣은 그림을 쓸 폴더. 하루 지난 것은 지운다 (claude 는 보낼 때 읽으므로 오래 둘 필요가 없다)
+const PASTE_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn save_paste_image(data: &str, ext: &str) -> Result<std::path::PathBuf, String> {
+    use base64::Engine as _;
+    let ext = ext.to_ascii_lowercase();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "heic") {
+        return Err(format!("그림 형식이 아니다: {ext}"));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("base64 를 풀지 못했다: {e}"))?;
+    let dir = std::env::temp_dir().join("thuminal-paste");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > PASTE_KEEP);
+            if old {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let path = dir.join(format!("paste-{}-{:03}.{ext}", now.as_secs(), now.subsec_millis()));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path)
 }
 
 /// `~` 를 홈 폴더로 풀고, 상대 경로는 기준 폴더마다 붙여 보아 처음 있는 경로와 폴더인지를 돌려준다.
@@ -593,6 +635,15 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<
 #[cfg(test)]
 mod tests {
     use super::resolve_path;
+
+    #[test]
+    fn save_paste_image_writes_file() {
+        let p = super::save_paste_image("iVBORw0KGgo=", "PNG").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"\x89PNG\r\n\x1a\n");
+        assert!(p.extension().is_some_and(|e| e == "png"));
+        std::fs::remove_file(p).unwrap();
+        assert!(super::save_paste_image("AAAA", "sh").is_err());
+    }
 
     #[test]
     fn resolve_path_tries_bases_and_folds_dots() {

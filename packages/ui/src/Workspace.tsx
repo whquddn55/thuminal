@@ -133,6 +133,13 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                   beginDrag(e, model, { kind: "tab", tab: t.id, workspace: ws, title, panes: panes.map((p) => p.id) }, () => model.selectTab(t.id));
                 }}
                 onDoubleClick={() => setRenaming(t.id)}
+                // 가운데 버튼(휠 클릭)으로 닫는다. 누를 때 막아야 자동 스크롤이 시작되지 않는다
+                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                onAuxClick={(e) => {
+                  if (e.button !== 1) return;
+                  e.preventDefault();
+                  model.closeTab(t.id);
+                }}
               >
                 <span className="text-[10px] tabular-nums text-muted-foreground/70">{i + 1}</span>
                 {agent ? (
