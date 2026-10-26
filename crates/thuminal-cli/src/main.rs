@@ -303,6 +303,7 @@ fn agent_request(session: SessionId, kind: String, event: Option<String>, payloa
         notification_type: (event == "Notification").then(|| notification_type(payload)).flatten(),
         source: field("source"),
         model: field("model"),
+        cwd: field("cwd"),
         event,
     })
 }

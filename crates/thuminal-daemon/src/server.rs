@@ -234,6 +234,7 @@ impl Server {
                 notification_type,
                 source,
                 model,
+                cwd,
             } => {
                 let report = crate::manager::AgentReport {
                     kind,
@@ -246,6 +247,7 @@ impl Server {
                     notification_type,
                     source,
                     model,
+                    cwd,
                 };
                 m.report_agent(session, report).map(|session| Response::Session { session })
             }

@@ -47,6 +47,8 @@ export interface AgentInfo {
   model: string | null;
   /** 턴이 Stop 으로 끝난 때 (ms). 있고 state 가 idle 이면 "끝남", 없이 idle 이면 막 시작해 기다리는 중 */
   turn_ended_at: number | null;
+  /** 에이전트가 도는 폴더 (훅의 cwd). 셸이 알린 폴더와 다를 수 있다 */
+  cwd?: string | null;
 }
 
 export interface CreateSession {

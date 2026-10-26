@@ -43,6 +43,10 @@ async fn restores_sessions_after_signal_stop_but_not_after_user_stop() {
     }
     let dir = tempfile::Builder::new().prefix("thm").tempdir_in("/tmp").unwrap();
     let paths = Paths::new(dir.path());
+    // claude 는 셸 폴더(/tmp)가 아닌 곳에서 돈다 (`cd 프로젝트 && claude` 로 띄우면 셸이 바뀐 폴더를 알리기 전에 claude 가 뜬다)
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let project = project.to_string_lossy().into_owned();
 
     // 1. 첫 데몬: 세션을 만들고 화면에 글을 남기고, claude 훅 알림을 보낸다
     let d1 = Daemon::bind(config(dir.path())).unwrap();
@@ -68,6 +72,7 @@ async fn restores_sessions_after_signal_stop_but_not_after_user_stop() {
             notification_type: None,
             source: Some("startup".into()),
             model: None,
+            cwd: Some(project.clone()),
         })
         .await
         .unwrap();
@@ -86,7 +91,7 @@ async fn restores_sessions_after_signal_stop_but_not_after_user_stop() {
     assert_eq!(sessions.len(), 1, "되살린 세션이 하나여야 한다");
     let s = &sessions[0];
     assert_eq!(s.restored_from, Some(old_id));
-    assert_eq!(s.cwd, "/tmp");
+    assert_eq!(s.cwd, project, "claude 가 돌던 폴더에서 되살려야 한다");
     assert_eq!(s.labels.get("worktree").map(String::as_str), Some("/tmp"));
     assert_eq!((s.cols, s.rows), (70, 12));
     let screen = wait_screen(&c, s.id, "claude --resume abc-123").await;

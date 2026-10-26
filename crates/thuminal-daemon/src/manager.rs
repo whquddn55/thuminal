@@ -34,6 +34,7 @@ pub struct AgentReport {
     pub notification_type: Option<String>,
     pub source: Option<String>,
     pub model: Option<String>,
+    pub cwd: Option<String>,
 }
 
 /// 묻는 도구: 이 도구의 PreToolUse 는 사용자 답을 기다리는 것이다 (Orca `isAskUserQuestionTool` 과 같다)
@@ -65,6 +66,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         tool_name: None,
         model: None,
         turn_ended_at: None,
+        cwd: None,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -72,6 +74,9 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
     }
     if r.transcript.is_some() {
         a.transcript = r.transcript;
+    }
+    if r.cwd.is_some() {
+        a.cwd = r.cwd;
     }
     let tool = r.tool_name.filter(|t| !t.is_empty());
     let state = match r.event.as_str() {
@@ -385,9 +390,17 @@ impl Manager {
                 .and_then(|a| a.session_id.as_ref())
                 .filter(|sid| sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
                 .map(|sid| format!("claude --resume {sid}\r").into_bytes());
+            // claude 는 자기 폴더에서 이어 붙여야 기록을 찾는다. 셸이 알린 폴더는 `cd x && claude` 로 띄우면 옛 폴더다
+            let cwd = old
+                .agent
+                .as_ref()
+                .filter(|_| input.is_some())
+                .and_then(|a| a.cwd.clone())
+                .filter(|c| Path::new(c).is_dir())
+                .unwrap_or_else(|| old.cwd.clone());
             let req = CreateSession {
                 command: Vec::new(),
-                cwd: Some(old.cwd.clone()),
+                cwd: Some(cwd),
                 env: BTreeMap::new(),
                 cols: old.cols,
                 rows: old.rows,

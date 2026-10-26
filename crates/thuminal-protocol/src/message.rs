@@ -134,6 +134,9 @@ pub struct AgentInfo {
     /// 이것이 있고 state 가 idle 이면 "끝남", 없이 idle 이면 막 시작해 기다리는 중이다
     #[serde(default)]
     pub turn_ended_at: Option<u64>,
+    /// 에이전트가 도는 폴더 (훅 JSON 의 `cwd`). 되살릴 때 이 폴더에서 `--resume` 한다
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다
@@ -343,6 +346,9 @@ pub enum Request {
         /// SessionStart 의 `model`
         #[serde(default)]
         model: Option<String>,
+        /// 에이전트가 도는 폴더 (훅 JSON 의 `cwd`). 셸이 알린 폴더와 다를 수 있다 (`cd x && claude`)
+        #[serde(default)]
+        cwd: Option<String>,
     },
     Kill { session: SessionId },
     /// 끝난 세션을 목록에서 지운다
