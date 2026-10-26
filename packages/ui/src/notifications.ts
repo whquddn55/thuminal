@@ -49,14 +49,14 @@ export function noticeFor(prev: SessionInfo | undefined, next: SessionInfo): Not
   if (a) {
     const name = agentName(a);
     if (a.state === "needs_attention" && p?.state !== "needs_attention") {
-      const what = a.tool_name ? `${a.tool_name} 를 써도 되는지` : "입력을";
-      return { kind: "attention", subtitle: `${name} 가 묻고 있다`, body: clip(`${what} 기다린다${a.prompt ? ` · ${a.prompt}` : ""}`) };
+      const what = a.tool_name ? `${a.tool_name} 도구를 써도 되는지` : "입력을";
+      return { kind: "attention", subtitle: `${name}가 묻고 있다`, body: clip(`${what} 기다린다${a.prompt ? ` · ${a.prompt}` : ""}`) };
     }
     if (a.state === "failed" && a.turn_ended_at && a.turn_ended_at !== p?.turn_ended_at) {
       return { kind: "attention", subtitle: `${name} 턴이 오류로 끝났다`, body: clip(a.last_assistant_message || a.prompt || "") };
     }
     if (a.state === "idle" && a.turn_ended_at && a.turn_ended_at !== p?.turn_ended_at) {
-      return { kind: "done", subtitle: `${name} 가 일을 마쳤다`, body: clip(a.last_assistant_message || a.prompt || "") };
+      return { kind: "done", subtitle: `${name}가 일을 마쳤다`, body: clip(a.last_assistant_message || a.prompt || "") };
     }
   }
   if ((next.bell_at ?? 0) > (prev?.bell_at ?? 0) && prev) {

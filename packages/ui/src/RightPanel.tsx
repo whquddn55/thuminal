@@ -189,7 +189,7 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
   const discard = (paths: string[]) =>
     model.setDialog({
       kind: "confirm",
-      title: paths.length === 1 ? `${base(paths[0])} 의 변경을 버릴까?` : `변경 ${paths.length}개를 버릴까?`,
+      title: paths.length === 1 ? `${base(paths[0])}의 변경을 버릴까?` : `변경 ${paths.length}개를 버릴까?`,
       body: "되돌릴 수 없다. 새로 만든 파일은 지워진다.",
       action: "버리기",
       run: () => void run("되돌리기", () => host.git.discard(worktree, paths)),
@@ -291,7 +291,7 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
       </div>
       <textarea
         className="mx-3 min-h-16 resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        placeholder="커밋 메시지 (⌘Enter 로 커밋)"
+        placeholder="커밋 메시지 (⌘Enter로 커밋)"
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={(e) => {

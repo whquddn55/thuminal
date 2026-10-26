@@ -227,7 +227,7 @@ function Mermaid({ code }: { code: string }) {
   if (error)
     return (
       <div className="md-mermaid-error">
-        <div>mermaid 를 그리지 못했다: {error}</div>
+        <div>mermaid를 그리지 못했다: {error}</div>
         <pre>
           <code>{code}</code>
         </pre>

@@ -173,7 +173,7 @@ function FontSection() {
           </select>
         </label>
         <button className="h-7 rounded-md border px-3 hover:bg-accent" onClick={() => apply({ ...DEFAULT_TERMINAL_FONT })}>
-          기본값 (Orca 와 같게)
+          기본값 (Orca와 같게)
         </button>
       </div>
       <div
@@ -183,15 +183,15 @@ function FontSection() {
         {"❯ claude --resume 90e31298\n"}
         <span style={{ fontWeight: font.weightBold }}>{"● 굵은 글자: 스크롤이 굼뜨던 원인을 찾았다\n"}</span>
         {"  fn readable(&self, wait_ms: i32) -> bool { 0O 1lI }\n"}
-        {"  한글과 English 가 섞인 줄 ─── │ ✔ ↻"}
+        {"  한글과 English가 섞인 줄 ─── │ ✔ ↻"}
       </div>
       <div className="flex flex-col gap-1 text-muted-foreground">
         <p>
-          SF Mono 는 macOS 에 들어 있는 고정폭 글꼴이다. 다른 글꼴은 이 컴퓨터에 설치된 이름을 그대로 적는다. 프롬프트 아이콘처럼 그 글꼴에 없는 글자는{" "}
-          <Code>MesloLGLDZ Nerd Font Mono</Code> 로 채운다.
+          SF Mono는 macOS에 들어 있는 고정폭 글꼴이다. 다른 글꼴은 이 컴퓨터에 설치된 이름을 그대로 적는다. 프롬프트 아이콘처럼 그 글꼴에 없는 글자는{" "}
+          <Code>MesloLGLDZ Nerd Font Mono</Code>로 채운다.
         </p>
         <p>
-          터미널에서 <Code>⌘+</Code> <Code>⌘-</Code> 로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄인다. <Code>⌘0</Code> 은 원래대로.
+          터미널에서 <Code>⌘+</Code> <Code>⌘-</Code>로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄인다. <Code>⌘0</Code>은 원래대로.
           {zoom.terminal !== 0 && ` 지금 터미널은 ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
           {zoom.ui !== 1 && ` 지금 화면 배율은 ${Math.round(zoom.ui * 100)}%.`}
         </p>
@@ -218,16 +218,16 @@ function AgentSection() {
       <Toggle
         checked={settings.claude.skip_permissions}
         onChange={(v) => change({ ...settings, claude: { ...settings.claude, skip_permissions: v } })}
-        title="claude 를 권한 확인 없이 띄우기"
+        title="claude를 권한 확인 없이 띄우기"
       >
-        thuminal 안에서 띄우는 claude 에 <Code>--dangerously-skip-permissions</Code> 를 붙인다. 파일 수정·명령 실행을 묻지 않고 바로 한다.
+        thuminal 안에서 띄우는 claude에 <Code>--dangerously-skip-permissions</Code>를 붙인다. 파일 수정·명령 실행을 묻지 않고 바로 한다.
       </Toggle>
       <Toggle checked={settings.claude.teams} onChange={(v) => change({ ...settings, claude: { ...settings.claude, teams: v } })} title="에이전트 팀 쓰기">
-        claude 에게 팀을 만들라고 시키면 팀원 claude 를 띄운다 (<Code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS</Code>). 리더 칸의 [팀원 N] 단추를 누르면
+        claude에게 팀을 만들라고 시키면 팀원 claude를 띄운다 (<Code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS</Code>). 리더 칸의 [팀원 N] 단추를 누르면
         팀원 목록이 팝업으로 뜨고, 이름을 누르면 그 팀원 터미널을 본다. 시키지 않으면 아무 일도 하지 않는다.
       </Toggle>
       <p className="text-xs text-muted-foreground">
-        바꾸면 다음에 띄우는 claude 부터 적용된다 (이미 열린 셸에서 치는 <Code>claude</Code> 도). 지금 돌고 있는 claude 는 다시 띄워야 한다.
+        바꾸면 다음에 띄우는 claude부터 적용된다 (이미 열린 셸에서 치는 <Code>claude</Code>도). 지금 돌고 있는 claude는 다시 띄워야 한다.
       </p>
     </div>
   );
@@ -241,7 +241,7 @@ function NotifySection() {
   return (
     <div className="flex flex-col gap-3">
       <Toggle checked={n.enabled} onChange={(v) => model.setNotify({ enabled: v })} title="알림 쓰기">
-        에이전트가 일을 마치거나 묻거나, 터미널 벨이 울리면 macOS 알림을 띄운다. 알림을 누르면 그 칸으로 간다. 지금 보고 있는 칸이면 띄우지 않는다. Dock 에는 안 읽은
+        에이전트가 일을 마치거나 묻거나, 터미널 벨이 울리면 macOS 알림을 띄운다. 알림을 누르면 그 칸으로 간다. 지금 보고 있는 칸이면 띄우지 않는다. Dock에는 안 읽은
         워크트리 수가 뜬다.
       </Toggle>
       <div className={cn("flex flex-col gap-3", sub)}>
@@ -252,7 +252,7 @@ function NotifySection() {
           권한 확인처럼 사용자를 부를 때, 턴이 오류로 끝났을 때 알린다.
         </Toggle>
         <Toggle checked={n.bell} onChange={(v) => model.setNotify({ bell: v })} title="터미널 벨과 터미널 알림">
-          터미널 프로그램이 벨을 울리거나 알림(OSC 9 · 777)을 보내면 알린다.
+          터미널 프로그램이 벨을 울리거나 알림(OSC 9/777)을 보내면 알린다.
         </Toggle>
         <Toggle checked={n.sound} onChange={(v) => model.setNotify({ sound: v })} title="알림 소리">
           알림과 함께 기본 소리를 낸다.
@@ -335,7 +335,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
         ) : (
           <div className="text-muted-foreground">받고 있지 않다</div>
         )}
-        {!st.tailnet.length && <div className="text-agent-attention">Tailscale 주소를 찾지 못했다. Tailscale 을 켜면 15초 안에 그 주소에서도 받는다.</div>}
+        {!st.tailnet.length && <div className="text-agent-attention">Tailscale 주소를 찾지 못했다. Tailscale을 켜면 15초 안에 그 주소에서도 받는다.</div>}
         {st.error && <div className="whitespace-pre-wrap text-destructive">{st.error}</div>}
         {!st.web && <div className="text-agent-attention">웹 화면 파일이 없어 브라우저로 열면 빈 화면이다 (개발 중이면 pnpm -C apps/web build).</div>}
       </div>
@@ -352,14 +352,14 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
         </label>
         <label className="flex items-center gap-2">
           <Switch checked={st.lan} onCheckedChange={(v) => change({ lan: v })} />
-          같은 Wi‑Fi 에서도 받기 (내용이 암호화되지 않는다)
+          같은 Wi‑Fi에서도 받기 (내용이 암호화되지 않는다)
         </label>
       </div>
 
       <div className="flex flex-col gap-2 rounded-md border p-3">
         <div className="text-sm font-medium">기기 등록</div>
         <p className="text-xs text-muted-foreground">
-          기기마다 토큰이 든 주소를 만든다. 폰 카메라로 QR 을 찍으면 브라우저로 열리고, thuminal 안드로이드 앱에서는 [QR 찍기] 로 찍는다.
+          기기마다 토큰이 든 주소를 만든다. 폰 카메라로 QR을 찍으면 브라우저로 열리고, thuminal 안드로이드 앱에서는 [QR 찍기]로 찍는다.
         </p>
         <div className="flex items-center gap-2">
           <input className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="기기 이름" />
@@ -372,7 +372,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
             {paired.urls[0] ? qr(paired.urls[0]) : null}
             <div className="flex min-w-0 flex-1 flex-col gap-1 text-xs">
               <div>
-                <b>{paired.name}</b> 를 등록했다. 이 주소는 지금만 보인다.
+                <b>{paired.name}</b> 기기를 등록했다. 이 주소는 지금만 보인다.
               </div>
               {paired.urls.length ? (
                 paired.urls.map((u) => (
@@ -382,7 +382,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
                   </div>
                 ))
               ) : (
-                <div className="text-agent-attention">폰이 닿을 주소가 없다. Tailscale 을 켜거나 같은 Wi‑Fi 받기를 켠다.</div>
+                <div className="text-agent-attention">폰이 닿을 주소가 없다. Tailscale을 켜거나 같은 Wi‑Fi 받기를 켠다.</div>
               )}
             </div>
           </div>
@@ -391,7 +391,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
           <div className="flex items-center gap-3 border-t pt-2">
             {qr(apkUrl)}
             <div className="flex min-w-0 flex-col gap-1 text-xs">
-              <div>안드로이드 앱 내려받기 (폰이 Tailscale 에 붙어 있어야 한다)</div>
+              <div>안드로이드 앱 내려받기 (폰이 Tailscale에 붙어 있어야 한다)</div>
               <div className="flex items-center gap-1">
                 <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] select-all">{apkUrl}</code>
                 <CopyButton text={apkUrl} />
@@ -411,7 +411,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
             <span className="text-muted-foreground">{d.connected ? `연결 ${d.connected}` : ago(d.last_seen)}</span>
             <button
               className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
-              onClick={() => confirm(`${d.name} 를 지울까? 붙어 있으면 바로 끊긴다`) && void remote.removeDevice(d.id).then(setSt, model.fail)}
+              onClick={() => confirm(`${d.name} 기기를 지울까? 붙어 있으면 바로 끊긴다`) && void remote.removeDevice(d.id).then(setSt, model.fail)}
             >
               지우기
             </button>
@@ -451,7 +451,7 @@ export function SettingsDialog() {
                 : section === "agent"
                 ? "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."
                 : section === "remote"
-                  ? "폰·다른 컴퓨터에서 Tailscale 로 붙는다. 설정은 데몬에 남는다."
+                  ? "폰·다른 컴퓨터에서 Tailscale로 붙는다. 설정은 데몬에 남는다."
                   : "언제 알릴지 고른다. 누르면 바로 저장된다."}
           </DialogDescription>
         </DialogHeader>
@@ -511,7 +511,7 @@ export function SettingsDialog() {
               <div className="flex flex-col gap-2">
                 <div className="text-xs text-muted-foreground">
                   미리보기: <span className="text-foreground">{picked.name}</span>
-                  {picked.id !== now.id && <span> (지금은 {now.scheme === "dark" ? "다크" : "라이트"} 모양이라 {now.name} 를 쓴다)</span>}
+                  {picked.id !== now.id && <span> (지금은 {now.scheme === "dark" ? "다크" : "라이트"} 모양이라 {now.name} 테마를 쓴다)</span>}
                 </div>
                 <Preview theme={picked} />
               </div>

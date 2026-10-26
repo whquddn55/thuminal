@@ -80,7 +80,7 @@ fn emit(app: &AppHandle, e: BrowserEvent) {
 }
 
 fn webview(app: &AppHandle, id: u64) -> CmdResult<tauri::Webview> {
-    app.get_webview(&label(id)).ok_or_else(|| format!("브라우저 칸 {id} 이 없다"))
+    app.get_webview(&label(id)).ok_or_else(|| format!("{id}번 브라우저 칸이 없다"))
 }
 
 /// 칸 자리에 웹뷰를 연다. 이미 있으면 자리만 옮기고 보인다

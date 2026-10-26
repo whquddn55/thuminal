@@ -93,7 +93,7 @@ export class LinkHover {
       this.tip.className = "thm-link-tip";
       this.host.appendChild(this.tip);
     }
-    this.tip.textContent = `${found.label}  ·  ⌘+클릭 기본 앱으로 열기, ⌘⇧+클릭 thuminal 에서 열기`;
+    this.tip.textContent = `${found.label} · ⌘+클릭 기본 앱으로 열기, ⌘⇧+클릭 thuminal에서 열기`;
     this.tip.style.display = "";
   }
 

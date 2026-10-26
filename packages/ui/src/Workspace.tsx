@@ -374,7 +374,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           {mates.length > 0 && pane.type === "terminal" && (
             <button
               className="flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
-              title={`팀원 ${mates.map(mateName).join(", ")} — 눌러서 목록 ${teamOpen ? "닫기" : "보기"}`}
+              title={`팀원 ${mates.map(mateName).join(", ")} (눌러서 목록 ${teamOpen ? "닫기" : "보기"})`}
               onClick={() => model.toggleTeam(pane.session)}
             >
               {mates.map((m) => (

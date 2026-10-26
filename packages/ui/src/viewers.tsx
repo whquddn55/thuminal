@@ -183,7 +183,7 @@ export function DocView({ host, worktree, doc, generation, actions }: { host: Ho
       <Head>
         <span className="flex-1 truncate font-mono">{doc.file}</span>
         <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
-        {file.truncated && <span className="text-amber-500">앞 2MB 만 보인다</span>}
+        {file.truncated && <span className="text-amber-500">앞 2MB만 보인다</span>}
         {markdown && !file.binary && <Toggle value={view} onChange={changeView} />}
       </Head>
       {file.binary ? (

@@ -485,7 +485,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
       />
       {taken && (
         <button className="shrink-0 bg-accent px-3 py-1 text-left text-[12px] text-muted-foreground" onClick={() => (c.claimSize(), setTaken(false))}>
-          데스크톱 크기로 그려지고 있다 · 누르면 폰 크기로 맞춘다
+          데스크톱 크기로 그려지고 있다. 누르면 폰 크기로 맞춘다
         </button>
       )}
       <div ref={surfaceRef} className="relative min-h-0 flex-1" style={{ touchAction: "none" }}>
@@ -585,7 +585,7 @@ export function PairScreen({ onToken }: { onToken: (token: string) => void }) {
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background p-6 text-foreground">
       <h1 className="text-xl font-semibold">thuminal</h1>
       <p className="max-w-sm text-center text-[14px] leading-6 text-muted-foreground">
-        이 기기는 아직 등록하지 않았다. 데스크톱 thuminal 의 설정 → 원격 접속에서 [기기 등록] 을 누르고, 나온 QR 을 찍거나 주소를 붙여 넣는다.
+        이 기기는 아직 등록하지 않았다. 데스크톱 thuminal의 설정 → 원격 접속에서 [기기 등록]을 누르고, 나온 QR을 찍거나 주소를 붙여 넣는다.
       </p>
       <input
         className="h-11 w-full max-w-sm rounded-lg border bg-card px-3 text-[14px] outline-none focus:border-ring"

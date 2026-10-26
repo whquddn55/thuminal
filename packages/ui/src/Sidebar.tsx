@@ -180,7 +180,7 @@ export function Sidebar() {
               <DownloadSimpleIcon className="size-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Orca 에서 가져오기</TooltipContent>
+          <TooltipContent>Orca에서 가져오기</TooltipContent>
         </Tooltip>
       </div>
 
@@ -205,7 +205,7 @@ export function Sidebar() {
             menu={
               <>
                 <DropdownMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: r.id })}>새 워크트리…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder 에서 보기</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void model.services.host.reveal(r.path).catch(model.fail)}>Finder에서 보기</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => copy(r.path)}>경로 복사</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onSelect={() => void model.removeProject(r.id)}>
@@ -247,7 +247,7 @@ export function Sidebar() {
         )}
         {repos.length === 0 && (
           <button className="mx-2 mt-2 w-[calc(100%-1rem)] rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" onClick={() => model.setDialog({ kind: "import-orca" })}>
-            Orca 에서 프로젝트·claude 세션 가져오기
+            Orca에서 프로젝트·claude 세션 가져오기
           </button>
         )}
       </div>
@@ -539,7 +539,7 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
         <ContextMenuItem disabled={!w.branch} onSelect={() => copy(w.branch ?? "")}>
           브랜치 이름 복사
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void model.services.host.reveal(w.path).catch(model.fail)}>Finder 에서 보기</ContextMenuItem>
+        <ContextMenuItem onSelect={() => void model.services.host.reveal(w.path).catch(model.fail)}>Finder에서 보기</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" disabled={w.is_main} onSelect={() => model.setDialog({ kind: "delete-worktree", worktree: w })}>
           워크트리 지우기…

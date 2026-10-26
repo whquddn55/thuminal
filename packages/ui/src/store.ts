@@ -429,7 +429,7 @@ export class AppModel {
       };
       c.isAgent = () => !!this.get().sessions[id]?.agent;
       this.controllers.set(id, c);
-      c.open().catch((e) => this.fail(`세션 ${id} 에 붙지 못했다: ${e}`));
+      c.open().catch((e) => this.fail(`세션 ${id}에 붙지 못했다: ${e}`));
     }
     return c;
   }
@@ -704,7 +704,7 @@ export class AppModel {
       this.setDialog({
         kind: "confirm",
         title: `${what} 닫을까?`,
-        body: `${[...new Set(busy)].join(", ")} 가 돌고 있다. 닫으면 그 세션이 끝난다.`,
+        body: `${[...new Set(busy)].join(", ")}가 돌고 있다. 닫으면 그 세션이 끝난다.`,
         action: "닫기",
         run,
       });
@@ -1034,7 +1034,7 @@ export class AppModel {
       if (s.running && pick.running === "move") {
         const stopped = await host.stopClaudeSession(s.session_id).then(
           () => true,
-          (e) => (failed.push(`${s.title || s.session_id}: Orca 쪽 claude 를 끄지 못했다 (${e})`), false),
+          (e) => (failed.push(`${s.title || s.session_id}: Orca 쪽 claude를 끄지 못했다 (${e})`), false),
         );
         if (!stopped) continue;
       }
@@ -1045,8 +1045,8 @@ export class AppModel {
       );
     }
     if (names || parents) await this.refreshWorkspace();
-    const done = `Orca 에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, 하위 워크트리 ${parents}개, claude 세션 ${sessions}개`;
-    if (failed.length) this.fail(`${done}. 못 가져온 것: ${failed.join(" · ")}`);
+    const done = `Orca에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, 하위 워크트리 ${parents}개, claude 세션 ${sessions}개`;
+    if (failed.length) this.fail(`${done}. 못 가져온 것: ${failed.join(" / ")}`);
     else this.notice(done);
   };
 

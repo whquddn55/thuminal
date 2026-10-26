@@ -153,7 +153,7 @@ function Shell() {
         <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
           <TabBar ws={active} windowDrag className="h-full flex-1">
             {inWorktree && (
-              <PanelButton on={!!panel} label="오른쪽 사이드바 — 파일 · 변경 · 검색 (⌘L)" onClick={() => model.toggleRight()}>
+              <PanelButton on={!!panel} label="오른쪽 사이드바: 파일, 변경, 검색 (⌘L)" onClick={() => model.toggleRight()}>
                 {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
                 <SidebarSimpleIcon className="-scale-x-100" />
               </PanelButton>
