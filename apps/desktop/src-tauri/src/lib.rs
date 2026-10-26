@@ -135,7 +135,13 @@ async fn detach(state: State<'_, AppState>, id: SessionId) -> CmdResult<()> {
 
 #[tauri::command]
 async fn input(state: State<'_, AppState>, id: SessionId, data: Vec<u8>) -> CmdResult<()> {
-    state.client().await?.input(id, data).await.map_err(err)
+    let c = state.client().await?;
+    // 이 연결에서 붙지 않은 세션에는 넣지 않는다. 데몬이 다시 뜨면 세션 번호를 다시 쓰므로, 화면이 새로 붙기 전의
+    // 입력(옛 프로그램이 켠 마우스 모드로 만든 보고 등)이 새로 뜬 셸에 글자로 들어갔다
+    if !state.attachments.lock().await.contains_key(&id) {
+        return Ok(());
+    }
+    c.input(id, data).await.map_err(err)
 }
 
 #[tauri::command]
@@ -297,11 +303,11 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::default());
             app.set_menu(app_menu(app.handle())?)?;
-            // 데몬이 내려가거나 다시 뜨면 2초 안에 다시 붙는다
+            // 데몬이 내려가거나 다시 뜨면 0.5초 안에 다시 붙는다 (화면이 옛 세션 상태로 오래 남지 않게)
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let state = handle.state::<AppState>();
                     let closed = state.client.lock().await.as_ref().is_some_and(|c| c.is_closed());
                     if closed {

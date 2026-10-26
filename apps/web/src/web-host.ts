@@ -241,6 +241,9 @@ export class WebHostApi implements HostApi {
   async input(id: SessionId, bytes: Uint8Array): Promise<void> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // 이 연결에서 붙지 않은 세션에는 넣지 않는다. 데몬이 다시 뜨면 세션 번호를 다시 쓰므로, 화면이 새로 붙기 전의
+    // 입력(옛 프로그램이 켠 마우스 모드로 만든 보고 등)이 새로 뜬 셸에 글자로 들어갔다
+    if (!this.outputs.has(id)) return;
     const frame = new Uint8Array(9 + bytes.length);
     frame[0] = 2;
     new DataView(frame.buffer).setBigUint64(1, BigInt(id));
