@@ -64,6 +64,16 @@ describe("입력과 고르기", () => {
     expect(dec(e.input.wheel(-1, { x: 0, y: 0 }))).toBe("\x1b[M`!!");
   });
 
+  it("동기 출력(모드 2026) 중에는 반쪽 화면을 넘기지 않고, 끝나면 넘긴다", () => {
+    const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
+    const sink: CellSink = { cell: () => {} };
+    e.scan(sink);
+    e.feed(enc("\x1b[?2026hab"));
+    expect(e.scan(sink)).toBe(false);
+    e.feed(enc("cd\x1b[?2026l"));
+    expect(row(e, 0, 4).map((c) => String.fromCodePoint(c.cp))).toEqual(["a", "b", "c", "d"]);
+  });
+
   it("커서를 숨긴 프로그램(claude 등)에서도 조합 중인 글자를 커서 자리에 그린다", () => {
     const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
     e.feed(enc("\x1b[?25l> "));

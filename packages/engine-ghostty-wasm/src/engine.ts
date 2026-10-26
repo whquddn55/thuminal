@@ -37,6 +37,9 @@ const MODE_ALT_SCROLL = 1007;
 const MODE_ALT_SCREEN_LEGACY = 47;
 const MODE_ALT_SCREEN = 1047;
 const MODE_ALT_SCREEN_SAVE = 1049;
+const MODE_SYNC_OUTPUT = 2026;
+/** 동기 출력이 끝나지 않아도 이만큼 지나면 그린다 (Ghostty 와 같다) */
+const SYNC_OUTPUT_TIMEOUT_MS = 1000;
 const RS_DIRTY = 3;
 const RS_ROW_ITERATOR = 4;
 const RS_COLOR_BACKGROUND = 5;
@@ -144,6 +147,8 @@ export class GhosttyWasmEngine implements TerminalEngine {
   private readonly cellsSlot: number;
   private readonly encoder: number;
   private forceFull = true;
+  /** 동기 출력이 켜진 때 (꺼져 있으면 null) */
+  private syncSince: number | null = null;
   private cursorState: CursorState = { x: 0, y: 0, visible: true };
   private lastCursorRow = -1;
   private lastCursorColor = -1;
@@ -254,6 +259,13 @@ export class GhosttyWasmEngine implements TerminalEngine {
     const { w } = this;
     const ex = w.ex;
     const tmp = w.tmp;
+    // 동기 출력(모드 2026) 중에는 프로그램이 화면 하나를 다 쓰기 전이라 그리지 않는다. claude 는 화면마다 이것으로 감싸는데,
+    // 출력이 여러 조각(macOS PTY 는 1KB씩)으로 오므로 중간에 그리면 위에서부터 줄줄이 바뀌는 반쪽 화면이 보인다
+    if (this.mode(MODE_SYNC_OUTPUT)) {
+      const now = performance.now();
+      this.syncSince ??= now;
+      if (now - this.syncSince < SYNC_OUTPUT_TIMEOUT_MS) return false;
+    } else this.syncSince = null;
     ex.ghostty_render_state_update(this.rs, this.term);
     ex.ghostty_render_state_get(this.rs, RS_COLOR_BACKGROUND, tmp + T_BG);
     ex.ghostty_render_state_get(this.rs, RS_COLOR_FOREGROUND, tmp + T_FG);
