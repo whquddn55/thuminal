@@ -49,6 +49,29 @@ describe("입력과 고르기", () => {
     e.setPreedit(null);
     expect(row(e, 0, 5)[2].cp).toBe(0);
   });
+
+  it("휠: 마우스를 받으면 휠 버튼, 대체 화면이면 방향키, 아니면 앱이 스크롤백을 움직인다", () => {
+    const e = factory.create({ cols: 20, rows: 5, scrollback: 100 });
+    expect(e.input.wheel(-1, { x: 0, y: 0 })).toBeNull();
+    e.feed(enc("\x1b[?1049h"));
+    expect(dec(e.input.wheel(-2, { x: 0, y: 0 }))).toBe("\x1b[A\x1b[A");
+    e.feed(enc("\x1b[?1h"));
+    expect(dec(e.input.wheel(1, { x: 0, y: 0 }))).toBe("\x1bOB");
+    e.feed(enc("\x1b[?1000h\x1b[?1006h"));
+    expect(dec(e.input.wheel(-1, { x: 3, y: 2 }))).toBe("\x1b[<64;4;3M");
+    expect(dec(e.input.wheel(2, { x: 3, y: 2 }))).toBe("\x1b[<65;4;3M\x1b[<65;4;3M");
+    e.feed(enc("\x1b[?1006l"));
+    expect(dec(e.input.wheel(-1, { x: 0, y: 0 }))).toBe("\x1b[M`!!");
+  });
+
+  it("커서를 숨긴 프로그램(claude 등)에서도 조합 중인 글자를 커서 자리에 그린다", () => {
+    const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
+    e.feed(enc("\x1b[?25l> "));
+    e.setPreedit("ㅎ");
+    const r = row(e, 0, 5);
+    expect(r[2].cp).toBe("ㅎ".codePointAt(0));
+    expect(r[2].flags & CellFlags.Underline).toBeTruthy();
+  });
 });
 
 describe("⌥ 조합", () => {

@@ -278,7 +278,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
               {paired.urls.length ? (
                 paired.urls.map((u) => (
                   <div key={u} className="flex items-center gap-1">
-                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{u}</code>
+                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] select-all">{u}</code>
                     <CopyButton text={u} />
                   </div>
                 ))
@@ -294,7 +294,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
             <div className="flex min-w-0 flex-col gap-1 text-xs">
               <div>안드로이드 앱 내려받기 (폰이 Tailscale 에 붙어 있어야 한다)</div>
               <div className="flex items-center gap-1">
-                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{apkUrl}</code>
+                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] select-all">{apkUrl}</code>
                 <CopyButton text={apkUrl} />
               </div>
             </div>
@@ -336,7 +336,7 @@ export function SettingsDialog() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && model.setDialog(null)}>
-      <DialogContent className="flex h-[min(640px,85vh)] flex-col gap-4 sm:max-w-[780px]">
+      <DialogContent className="flex h-[min(640px,85vh)] flex-col gap-4 select-text sm:max-w-[780px]">
         <DialogHeader>
           <DialogTitle>설정</DialogTitle>
           <DialogDescription>

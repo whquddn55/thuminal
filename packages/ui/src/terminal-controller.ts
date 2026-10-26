@@ -193,7 +193,18 @@ export class TerminalController {
     this.send(bytes ?? null);
   }
 
-  private cellAt(ev: MouseEvent): CellPoint | null {
+  /**
+   * 휠·손가락 끌기로 움직인 줄 수. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은
+   * 스크롤백이 없어 그 프로그램에 넘기고, 아니면 스크롤백을 움직인다
+   */
+  private wheel(lines: number, at: CellPoint | null) {
+    if (!this.engine) return;
+    const bytes = this.engine.input.wheel(lines, at ?? { x: 0, y: 0 });
+    if (bytes) this.send(bytes);
+    else this.engine.scroll(lines);
+  }
+
+  private cellAt(ev: { clientX: number; clientY: number }): CellPoint | null {
     if (!this.host || !this.renderer) return null;
     const r = this.host.getBoundingClientRect();
     const { width, height } = this.renderer.metrics;
@@ -209,11 +220,12 @@ export class TerminalController {
     on(host, "wheel", (ev) => {
       if (!this.engine || !this.renderer) return;
       ev.preventDefault();
-      this.wheelAcc += ev.deltaY;
+      // 줄 단위(deltaMode 1)로 오는 휠도 있다
+      this.wheelAcc += ev.deltaMode === 1 ? ev.deltaY * this.renderer.metrics.height : ev.deltaY;
       const lines = Math.trunc(this.wheelAcc / this.renderer.metrics.height);
       if (lines) {
         this.wheelAcc -= lines * this.renderer.metrics.height;
-        this.engine.scroll(lines);
+        this.wheel(lines, this.cellAt(ev));
       }
     });
     // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
@@ -227,14 +239,14 @@ export class TerminalController {
     on(host, "touchmove", (ev) => {
       if (touchY === null || !this.engine || !this.renderer || ev.touches.length !== 1) return;
       ev.preventDefault();
-      const y = ev.touches[0].clientY;
-      this.wheelAcc += touchY - y;
-      touchY = y;
+      const t = ev.touches[0];
+      this.wheelAcc += touchY - t.clientY;
+      touchY = t.clientY;
       const lines = Math.trunc(this.wheelAcc / this.renderer.metrics.height);
       if (lines) {
         touchMoved = true;
         this.wheelAcc -= lines * this.renderer.metrics.height;
-        this.engine.scroll(lines);
+        this.wheel(lines, this.cellAt(t));
       }
     });
     on(host, "touchend", (ev) => {

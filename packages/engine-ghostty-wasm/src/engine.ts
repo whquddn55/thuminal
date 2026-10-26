@@ -25,7 +25,18 @@ const OPT_SELECTION = 21;
 const OPT_SCROLLBACK_MAX_BYTES = 27;
 const OPT_SCROLLBACK_MAX_LINES = 28;
 const TERM_DATA_MODE = 37;
-const MODE_BRACKETED_PASTE = 2004; // DEC 모드라 ANSI 비트(15)는 0
+// DEC 모드라 ANSI 비트(15)는 0
+const MODE_BRACKETED_PASTE = 2004;
+const MODE_MOUSE_X10 = 9;
+const MODE_MOUSE_NORMAL = 1000;
+const MODE_MOUSE_BUTTON = 1002;
+const MODE_MOUSE_ANY = 1003;
+const MODE_MOUSE_SGR = 1006;
+const MODE_MOUSE_URXVT = 1015;
+const MODE_ALT_SCROLL = 1007;
+const MODE_ALT_SCREEN_LEGACY = 47;
+const MODE_ALT_SCREEN = 1047;
+const MODE_ALT_SCREEN_SAVE = 1049;
 const RS_DIRTY = 3;
 const RS_ROW_ITERATOR = 4;
 const RS_COLOR_BACKGROUND = 5;
@@ -156,7 +167,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.iterSlot = w.slot((pp) => ex.ghostty_render_state_row_iterator_new(0, pp), "row_iterator_new");
     this.cellsSlot = w.slot((pp) => ex.ghostty_render_state_row_cells_new(0, pp), "row_cells_new");
     this.encoder = w.create((pp) => ex.ghostty_key_encoder_new(0, pp), "key_encoder_new");
-    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t) };
+    this.input = { key: (k) => this.encodeKey(k), paste: (t) => this.encodePaste(t), wheel: (n, at) => this.encodeWheel(n, at) };
   }
 
   feed(bytes: Uint8Array): void {
@@ -274,13 +285,17 @@ export class GhosttyWasmEngine implements TerminalEngine {
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VIEWPORT_X, tmp + T_A + 2);
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VIEWPORT_Y, tmp + T_A + 4);
     let dv = w.dv();
-    const visible = dv.getUint8(tmp + T_A) !== 0 && dv.getUint8(tmp + T_A + 1) !== 0;
+    const inView = dv.getUint8(tmp + T_A + 1) !== 0;
+    const visible = dv.getUint8(tmp + T_A) !== 0 && inView;
     this.cursorState = { x: dv.getUint16(tmp + T_A + 2, true), y: dv.getUint16(tmp + T_A + 4, true), visible };
     const cursorY = visible ? this.cursorState.y : -1;
+    // 조합 중인 글자는 커서를 숨겨도 커서 자리에 그린다. claude 같은 TUI 는 커서를 숨기고 제 커서를 그리지만
+    // 입력기를 위해 숨긴 커서를 입력 자리에 옮겨 둔다
+    const preY = this.preedit.length && inView ? this.cursorState.y : -1;
 
     // 조합 중인 글자를 놓을 칸: 커서 자리부터, 두 칸 글자는 두 칸씩 (뒤 칸은 비운다)
     const pre = new Map<number, { cp: number; wide: boolean }>();
-    if (this.preedit.length && cursorY >= 0) {
+    if (preY >= 0) {
       let px = this.cursorState.x;
       for (const cp of this.preedit) {
         const wide = isWide(cp);
@@ -298,7 +313,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
       ex.ghostty_render_state_row_get(iter, ROW_DIRTY, tmp + T_A);
       const rowDirty = w.u8()[tmp + T_A] !== 0;
       // 커서가 떠난 줄과 들어온 줄도 다시 그린다 (렌더러가 커서를 칸 색으로 그린다)
-      if (!full && !rowDirty && y !== this.lastCursorRow && y !== cursorY) continue;
+      if (!full && !rowDirty && y !== this.lastCursorRow && y !== cursorY && y !== preY) continue;
 
       // 이 줄의 선택 구간 (없으면 NO_VALUE)
       w.dv().setUint32(tmp + T_A + 8, 8, true);
@@ -342,7 +357,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
         // 같은 색은 일부러 숨긴 글자로 보고 두고, 흐린 글자는 보정한 뒤 배경 쪽으로 반만 섞는다
         if (minContrast > 1 && fg !== bg) fg = this.readableFg(fg, bg, minContrast);
         if (faint) fg = mix(fg, bg, 0.5);
-        const p = y === cursorY ? pre.get(x) : undefined;
+        const p = y === preY ? pre.get(x) : undefined;
         if (p) {
           // 조합 중인 글자는 기본색에 밑줄만 긋는다 (커서는 그리지 않는다)
           sink.cell(x, y, p.cp, minContrast > 1 ? this.readableFg(defFg, defBg, minContrast) : defFg, defBg, p.cp ? CellFlags.Underline | (p.wide ? CellFlags.Wide : 0) : 0);
@@ -508,19 +523,49 @@ export class GhosttyWasmEngine implements TerminalEngine {
     }
   }
 
-  private bracketedPaste(): boolean {
+  private mode(mode: number): boolean {
     const { w } = this;
     const p = w.tmp + T_A;
-    w.dv().setUint16(p, MODE_BRACKETED_PASTE, true);
+    w.dv().setUint16(p, mode, true);
     w.dv().setUint8(p + 2, 0);
     if (w.ex.ghostty_terminal_get(this.term, TERM_DATA_MODE, p) !== SUCCESS) return false;
     return w.dv().getUint8(p + 2) !== 0;
   }
 
+  /**
+   * 휠을 프로그램에 넘길 바이트. 마우스를 받는 프로그램(claude, vim 등)에는 휠 버튼(위 64, 아래 65)을,
+   * 마우스를 받지 않는 대체 화면 프로그램(less 등)에는 방향키를 줄 수만큼 보낸다 (alternate scroll, 모드 1007)
+   */
+  private encodeWheel(lines: number, at: CellPoint): Uint8Array | null {
+    if (!lines) return null;
+    const n = Math.min(Math.abs(lines), 50);
+    const up = lines < 0;
+    if ([MODE_MOUSE_X10, MODE_MOUSE_NORMAL, MODE_MOUSE_BUTTON, MODE_MOUSE_ANY].some((m) => this.mode(m))) {
+      const b = up ? 64 : 65;
+      const x = Math.max(0, Math.min(this.cols - 1, at.x)) + 1;
+      const y = Math.max(0, Math.min(this.rows - 1, at.y)) + 1;
+      let one: string;
+      if (this.mode(MODE_MOUSE_SGR)) one = `\x1b[<${b};${x};${y}M`;
+      else if (this.mode(MODE_MOUSE_URXVT)) one = `\x1b[${32 + b};${x};${y}M`;
+      else one = `\x1b[M${String.fromCharCode(32 + b, 32 + Math.min(x, 223), 32 + Math.min(y, 223))}`;
+      return new TextEncoder().encode(one.repeat(n));
+    }
+    const alt = this.mode(MODE_ALT_SCREEN_SAVE) || this.mode(MODE_ALT_SCREEN) || this.mode(MODE_ALT_SCREEN_LEGACY);
+    if (alt && this.mode(MODE_ALT_SCROLL)) {
+      const arrow = up ? "ArrowUp" : "ArrowDown";
+      const one = this.encodeKey({ key: arrow, code: arrow, ctrl: false, alt: false, shift: false, meta: false });
+      if (!one) return null;
+      const out = new Uint8Array(one.length * n);
+      for (let i = 0; i < n; i++) out.set(one, i * one.length);
+      return out;
+    }
+    return null;
+  }
+
   private encodePaste(text: string): Uint8Array {
     const { w } = this;
     const data = new TextEncoder().encode(text);
-    const bracketed = this.bracketedPaste();
+    const bracketed = this.mode(MODE_BRACKETED_PASTE);
     // data 와 결과를 한 덩어리에 둔다: [data][결과 버퍼]
     const cap = data.length + 16;
     const base = w.scratchFor(data.length + cap);
