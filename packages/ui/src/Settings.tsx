@@ -1,11 +1,12 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 터미널 글꼴, 에이전트 띄우는 옵션, 알림, 원격 접속.
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 터미널 글꼴, 에이전트 띄우는 옵션, 알림, 원격 접속,
+// 원격 컴퓨터(다른 컴퓨터 데몬 등록).
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
 import { CheckIcon, CopyIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { renderSVG } from "uqr";
 
-import type { AgentSettings, RemoteApi, RemoteStatus } from "@thuminal/term-core";
+import type { AgentSettings, RemoteApi, RemoteHost, RemoteHostsApi, RemoteStatus } from "@thuminal/term-core";
 import { type TerminalTheme, themes } from "@thuminal/themes";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
@@ -422,6 +423,128 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
   );
 }
 
+const HOST_STATE: Record<RemoteHost["state"], string> = {
+  connecting: "붙는 중",
+  connected: "붙음",
+  disconnected: "끊김",
+  unauthorized: "토큰이 맞지 않음",
+  version_mismatch: "판이 다름",
+};
+
+/** 원격 컴퓨터: 다른 컴퓨터의 thuminal 데몬을 등록한다. 목록은 이 앱(hosts.json)에 남고, 끊기면 스스로 다시 붙는다 */
+function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
+  const model = useModel();
+  const [list, setList] = useState<RemoteHost[]>([]);
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => hosts.onChange(setList), [hosts]);
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await hosts.add(url, name.trim() || undefined);
+      setUrl("");
+      setName("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        <div className="text-sm font-medium">원격 컴퓨터 등록</div>
+        <p className="text-xs text-muted-foreground">
+          원격 컴퓨터의 thuminal 설정 → 원격 접속에서 [기기 등록]을 누르거나 <code className="rounded bg-muted px-1 font-mono">thuminal remote pair 이름</code>{" "}
+          으로 주소를 만들어 여기에 붙여 넣는다. 길을 Tailscale이 암호화하므로 Tailscale 주소(100.x.y.z)만 받는다.
+        </p>
+        <input
+          className="h-8 min-w-0 rounded border bg-background px-2 font-mono text-xs"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && url.trim() && !busy && void add()}
+          placeholder="http://100.x.y.z:6780/#token=…"
+        />
+        <div className="flex items-center gap-2">
+          <input
+            className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && url.trim() && !busy && void add()}
+            placeholder="이름 (예: 작업 맥). 비우면 주소"
+          />
+          <button
+            className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            disabled={!url.trim() || busy}
+            onClick={() => void add()}
+          >
+            {busy ? "붙어 보는 중…" : "등록"}
+          </button>
+        </div>
+        {error && <div className="text-xs whitespace-pre-wrap text-destructive">{error}</div>}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="text-sm font-medium">등록한 원격 컴퓨터</div>
+        {list.length === 0 && <div className="text-xs text-muted-foreground">없다</div>}
+        {list.map((h) => (
+          <div key={h.id} className="flex flex-col gap-0.5 rounded-md border px-3 py-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  h.state === "connected"
+                    ? "bg-agent-done"
+                    : h.state === "connecting"
+                      ? "bg-agent-working"
+                      : h.state === "disconnected"
+                        ? "bg-muted-foreground/40"
+                        : "bg-destructive",
+                )}
+              />
+              <span className="min-w-0 truncate font-medium">{h.name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{h.address}</span>
+              <span className={cn(h.state === "unauthorized" || h.state === "version_mismatch" ? "text-destructive" : "text-muted-foreground")}>
+                {HOST_STATE[h.state]}
+                {h.state === "disconnected" && h.retryInMs ? ` · ${Math.ceil(h.retryInMs / 1000)}초 뒤 다시` : ""}
+              </span>
+              {h.daemonVersion && (
+                <span className="text-muted-foreground" title="데몬 판 · 프로토콜 판">
+                  {h.daemonVersion}
+                  {h.protocol ? ` (${h.protocol[0]}.${h.protocol[1]})` : ""}
+                </span>
+              )}
+              {h.state !== "connected" && (
+                <button className="rounded px-2 py-0.5 hover:bg-accent" onClick={() => void hosts.reconnect(h.id).catch(model.fail)}>
+                  다시 붙기
+                </button>
+              )}
+              <button
+                className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
+                onClick={() =>
+                  confirm(`${h.name} 을(를) 지울까? 그 컴퓨터에 남은 이 기기 등록은 그 컴퓨터의 설정 → 원격 접속에서 지운다`) &&
+                  void hosts.remove(h.id).catch(model.fail)
+                }
+              >
+                지우기
+              </button>
+            </div>
+            {h.warning && <div className="text-agent-attention">{h.warning}</div>}
+            {h.state !== "connected" && h.error && <div className="whitespace-pre-wrap text-muted-foreground">{h.error}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 설정 창의 칸. "원격 컴퓨터" 는 데스크톱 껍데기에만 있다 */
+type Section = SettingsSection | "hosts";
+
 export function SettingsDialog() {
   const model = useModel();
   const open = useApp((s) => s.dialog?.kind === "settings");
@@ -430,12 +553,13 @@ export function SettingsDialog() {
   const systemDark = useApp((s) => s.systemDark);
   const now = currentTheme(theme, systemDark);
   const [editing, setEditing] = useState<"dark" | "light">(now.scheme);
-  const [section, setSection] = useState<SettingsSection>("theme");
+  const [section, setSection] = useState<Section>("theme");
   // 칸을 정해 열면 (새 탭 메뉴의 "에이전트 설정…") 그 칸으로 간다
   useEffect(() => {
     if (open && want) setSection(want);
   }, [open, want]);
   const remote = model.services.host.remote;
+  const hosts = model.services.host.hosts;
   const picked = themes.find((t) => t.id === theme[editing]) ?? now;
 
   return (
@@ -452,6 +576,8 @@ export function SettingsDialog() {
                 ? "에이전트를 띄울 때 붙일 옵션이다. 누르면 바로 저장된다."
                 : section === "remote"
                   ? "폰·다른 컴퓨터에서 Tailscale로 붙는다. 설정은 데몬에 남는다."
+                  : section === "hosts"
+                  ? "다른 컴퓨터의 thuminal에 Tailscale로 붙는다. 목록은 이 앱에 남고, 끊기면 스스로 다시 붙는다."
                   : "언제 알릴지 고른다. 누르면 바로 저장된다."}
           </DialogDescription>
         </DialogHeader>
@@ -464,12 +590,15 @@ export function SettingsDialog() {
               ["agent", "에이전트"],
               ["notify", "알림"],
               ...(remote ? ([["remote", "원격 접속"]] as ["remote", string][]) : []),
+              ...(hosts ? ([["hosts", "원격 컴퓨터"]] as ["hosts", string][]) : []),
             ]}
             onChange={setSection}
           />
         </div>
         {section === "remote" && remote ? (
           <RemoteSection remote={remote} />
+        ) : section === "hosts" && hosts ? (
+          <HostsSection hosts={hosts} />
         ) : section === "font" ? (
           <FontSection />
         ) : section === "agent" ? (

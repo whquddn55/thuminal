@@ -101,6 +101,49 @@ export interface RemoteApi {
   removeDevice(id: string): Promise<RemoteStatus>;
 }
 
+/** 원격 호스트 연결 상태 */
+export type RemoteHostState = "connecting" | "connected" | "disconnected" | "unauthorized" | "version_mismatch";
+
+/** 등록한 원격 호스트(다른 컴퓨터의 thuminal 데몬) 하나. 토큰은 껍데기만 들고 화면에는 오지 않는다 */
+export interface RemoteHost {
+  /** 껍데기가 정한 호스트 id (8자리 16진수). 세션·칸 번호와 워크트리 경로는 호스트마다 따로라 이것으로 가른다 */
+  id: string;
+  name: string;
+  /** `100.x.y.z:6780` */
+  address: string;
+  state: RemoteHostState;
+  /** 마지막 실패 까닭 */
+  error: string | null;
+  /** 붙은 데몬의 판 (붙은 적이 있으면 마지막 것) */
+  daemonVersion: string | null;
+  /** 프로토콜 [주 판, 부 판] */
+  protocol: [number, number] | null;
+  /** 부 판이 달라 알릴 글 (주 판이 다르면 state 가 version_mismatch) */
+  warning: string | null;
+  /** 끊겼을 때 다시 붙기까지 남은 시간 */
+  retryInMs: number | null;
+}
+
+/**
+ * 원격 호스트 관리 (데스크톱 껍데기만). 원격 컴퓨터에서 `thuminal remote pair <이름>` 이 찍는 주소를 붙여 넣어 등록한다.
+ * 껍데기가 호스트마다 연결을 들고 끊기면 스스로 다시 붙는다
+ */
+export interface RemoteHostsApi {
+  list(): Promise<RemoteHost[]>;
+  /** 짝짓기 주소(`http://100.x.y.z:6780/#token=…`)로 등록한다. Tailscale 주소만 받고, 붙어 보고 되면 남긴다. 같은 주소면 이름·토큰을 바꾼다 */
+  add(url: string, name?: string): Promise<RemoteHost>;
+  remove(id: string): Promise<void>;
+  /** 기다리는 중이면 바로 다시 붙어 본다 */
+  reconnect(id: string): Promise<void>;
+  /** 목록이나 연결 상태가 바뀔 때마다 목록 전체. 구독하자마자 지금 목록을 한 번 준다 */
+  onChange(cb: (hosts: RemoteHost[]) => void): () => void;
+  /**
+   * 그 호스트 데몬으로 보내는 HostApi (`isRemote` true, `hostId` 가 id). 같은 id 면 같은 것을 돌려준다.
+   * 이벤트(`onEvent`)는 그 호스트 것만 오고, 다시 붙으면 `daemon_reconnected` 가 온다
+   */
+  forHost(id: string): HostApi;
+}
+
 export interface Attachment {
   session: SessionInfo;
   format: SnapshotFormat;
@@ -203,8 +246,12 @@ export interface HostApi {
   onNotificationClick?(cb: (session: number) => void): () => void;
   /** 원격 접속 설정 (데스크톱 껍데기만) */
   readonly remote?: RemoteApi;
-  /** 원격으로 붙은 껍데기(웹)인지. 화면이 운영체제 기능(폴더 고르기 등)을 대신할 때 본다 */
+  /** 원격 호스트 관리 (데스크톱 껍데기의 로컬 HostApi 만) */
+  readonly hosts?: RemoteHostsApi;
+  /** 원격으로 붙은 껍데기(웹)나 원격 호스트 HostApi 인지. 화면이 운영체제 기능(폴더 고르기 등)을 대신할 때 본다 */
   readonly isRemote?: boolean;
+  /** 원격 호스트 HostApi 면 그 호스트 id (`RemoteHost.id`). 로컬과 웹은 없다 */
+  readonly hostId?: string;
   /** Dock 배지 숫자 (0 이면 지운다) */
   setBadge?(count: number): Promise<void>;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */

@@ -98,6 +98,17 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - **세션 크기**: 마지막으로 입력한(누른) 화면 크기를 따른다 (tmux `window-size latest`). 다른 화면이 크기를 가져가면 데스크톱 칸 오른쪽 위에 "다른 기기 크기로 그려지는 중 · 되돌리기"가 뜬다.
 - **안드로이드 앱**(`apps/android`, Java, 의존성은 Play 서비스 QR 찍기 하나): WebView 로 웹 화면을 띄우는 얇은 껍데기다. QR 찍기·주소 붙여 넣기·`thuminal://open?url=…` 로 주소를 받아 남기고, 뒤로 가기·클립보드·접속 정보 지우기를 `window.ThuminalApp` 으로 이어 준다. Orca 는 Expo(React Native) 앱이지만 터미널은 그 안 WebView 의 xterm.js 이고 화면 일부도 데스크톱이 내는 웹 묶음을 WebView 로 그린다. thuminal 은 그 웹 부분만 남겨 데스크톱이 화면을 모두 내게 했다 (앱을 다시 깔지 않아도 화면이 바뀐다). `scripts/build-android.sh` 가 만들어 `apps/web/public/download/thuminal.apk` 에 두고, 데몬이 `/download/thuminal.apk` 로 낸다.
 
+### 원격 호스트 (데스크톱 앱이 다른 컴퓨터 데몬에 붙기)
+
+데스크톱 앱이 Tailscale 로 다른 맥의 데몬에 붙는다. 폰 웹 화면과 같은 `/ws` 와 토큰을 쓴다 (원격 컴퓨터에서 이 앱을 기기로 등록한다).
+
+- **전송**: `thuminal-client` 의 `Client::connect_ws(base, token)` 가 웹소켓 메시지를 바이트 줄(duplex)로 바꿔 유닉스 소켓과 같은 `Client` 를 만든다 (`client/src/ws.rs`). 데몬 핑이 60초 동안 없으면 끊는다. hello 에서 주 판이 다르면 거절(`VersionMismatch`), 부 판이 다르면 `version_warning`.
+- **다시 붙기**: `link::Link` 가 호스트마다 감독 작업을 돌린다. 0.25초에서 30초까지 두 배씩 기다리며 다시 붙고, 토큰이 틀리면(401) 멈추고, 주 판이 다르면 30초마다 본다. 붙을 때마다 `generation` 이 는다.
+- **등록**: 원격의 짝짓기 주소(`http://100.x.y.z:6780/#token=…`)를 설정 창 · 원격 컴퓨터에 붙여 넣는다. Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)와 시험용 127.0.0.1 만 받는다 (`ws::parse_pair_url`). 붙어 보고 되면 데이터 폴더 `hosts.json`(0600)에 id·이름·주소·토큰을 남긴다.
+- **Tauri**: `AppState` 가 로컬 `Client` 와 원격 호스트 id → `Link` 맵을 든다. 데몬에 닿는 명령은 `host`(없으면 로컬)를 받고, 붙기·이벤트 채널도 호스트마다 따로다. 원격이 다시 붙으면 그 호스트 채널에 `daemon_reconnected` 를 보낸다. 호스트 관리는 `hosts_list|subscribe|add|remove|reconnect`.
+- **화면 쪽 API**: 로컬 `TauriHostApi` 의 `hosts`(term-core `RemoteHostsApi`)가 목록·등록·지우기·상태를 맡고, `hosts.forHost(id)` 가 그 호스트로 보내는 `HostApi`(`isRemote` true, `hostId`)를 준다. 원격이면 Finder·기본 앱·폴더 고르기는 오류이고, 터미널 색은 보내지 않는다 (원격 설정 그대로). 알림·배지·글꼴·배율·파일 끌어 놓기·브라우저 칸은 창 하나의 기능이라 로컬과 같다.
+- 세션·칸·탭 번호와 워크트리 경로는 호스트마다 따로 세므로, 한 창에 여러 호스트를 섞을 때 화면 상태는 호스트 id 로 키를 나눠야 한다 (다음 단계).
+
 ## 데이터 폴더
 
 `~/Library/Application Support/thuminal/` (환경 변수 `THUMINAL_HOME` 으로 바꿀 수 있다. 시험은 임시 폴더를 쓴다).
@@ -113,6 +124,7 @@ layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 �
 terminal-colors.json 터미널 기본색 (앱 테마)
 agent-settings.json  에이전트를 띄울 때 붙일 옵션 (설정 창 · 에이전트)
 remote.json         원격 접속 설정과 등록한 기기 토큰 (0600)
+hosts.json          데스크톱 앱이 붙는 원격 호스트 id·이름·주소·토큰 (0600, 앱이 쓴다)
 shell/              셸 통합 파일, claude 실행기(claude-launch), 에이전트 팀용 가짜 tmux(teams-bin/tmux)
 ```
 

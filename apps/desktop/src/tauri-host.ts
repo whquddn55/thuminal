@@ -1,4 +1,8 @@
 // term-core HostApi 의 Tauri 구현. src-tauri/src/lib.rs 의 명령을 부른다.
+//
+// 한 클래스로 로컬과 원격 호스트를 같이 맡는다. `new TauriHostApi()` 는 로컬 데몬, `hosts.forHost(id)` 는 그 원격 호스트 데몬으로
+// 보낸다 (데몬에 닿는 명령마다 `host` 인자를 싣는다. 없으면 로컬). 알림·배지·글꼴·배율·파일 끌어 놓기·브라우저 칸은 창 하나의
+// 기능이라 원격 HostApi 에서도 로컬 것과 같다. Finder·기본 앱·폴더 고르기처럼 로컬 경로를 쓰는 것은 원격이면 오류다.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -26,6 +30,8 @@ import type {
   OrcaScan,
   RemoteApi,
   RemoteDevice,
+  RemoteHost,
+  RemoteHostsApi,
   RemoteStatus,
   RepoGroup,
   RepoIcon,
@@ -39,13 +45,90 @@ import type {
   WorktreeInfo,
 } from "@thuminal/term-core";
 
-/** 데몬 요청을 그대로 넘긴다 (src-tauri daemon_request). 응답은 `{ type, ... }` 모양이다 */
-async function req<T>(request: Record<string, unknown>, pick: (r: Record<string, unknown>) => unknown = () => undefined): Promise<T> {
-  const r = await invoke<Record<string, unknown>>("daemon_request", { request });
-  return pick(r) as T;
+const remoteOnly = (what: string) => Promise.reject(new Error(`원격 컴퓨터에서는 아직 ${what}을(를) 할 수 없다`));
+
+/** 원격 호스트 관리 (src-tauri hosts_* 명령). 호스트마다 HostApi 를 하나씩 만들어 둔다 */
+class TauriHosts implements RemoteHostsApi {
+  private apis = new Map<string, TauriHostApi>();
+  private listeners = new Set<(hosts: RemoteHost[]) => void>();
+  private last: RemoteHost[] | null = null;
+  private subscribed: Promise<void> | null = null;
+
+  list(): Promise<RemoteHost[]> {
+    return invoke("hosts_list");
+  }
+
+  add(url: string, name?: string): Promise<RemoteHost> {
+    return invoke("hosts_add", { url, name: name ?? null });
+  }
+
+  remove(id: string): Promise<void> {
+    this.apis.delete(id);
+    return invoke("hosts_remove", { id });
+  }
+
+  reconnect(id: string): Promise<void> {
+    return invoke("hosts_reconnect", { id });
+  }
+
+  onChange(cb: (hosts: RemoteHost[]) => void): () => void {
+    this.listeners.add(cb);
+    if (this.last) cb(this.last);
+    this.subscribed ??= (async () => {
+      const channel = new Channel<RemoteHost[]>();
+      channel.onmessage = (hosts) => {
+        this.last = hosts;
+        for (const l of this.listeners) l(hosts);
+      };
+      await invoke("hosts_subscribe", { channel });
+    })().catch((e) => {
+      this.subscribed = null;
+      console.warn("원격 호스트 목록을 구독하지 못했다", e);
+    });
+    return () => this.listeners.delete(cb);
+  }
+
+  forHost(id: string): HostApi {
+    let api = this.apis.get(id);
+    if (!api) {
+      api = new TauriHostApi(id);
+      this.apis.set(id, api);
+    }
+    return api;
+  }
 }
 
 export class TauriHostApi implements HostApi {
+  readonly isRemote: boolean;
+  readonly hosts?: RemoteHostsApi;
+  readonly remote?: RemoteApi;
+
+  /** hostId 를 비우면 로컬 데몬. 원격은 `hosts.forHost(id)` 로 만든다 */
+  constructor(readonly hostId?: string) {
+    this.isRemote = hostId !== undefined;
+    if (!this.isRemote) {
+      this.hosts = new TauriHosts();
+      // 원격 접속 설정은 이 컴퓨터 데몬 것만 (원격 연결은 데몬이 받지 않는다)
+      this.remote = {
+        status: () => this.req<RemoteStatus>({ type: "get_remote" }, (r) => r.remote),
+        set: (c) => this.req<RemoteStatus>({ type: "set_remote", enabled: c.enabled ?? null, port: c.port ?? null, lan: c.lan ?? null }, (r) => r.remote),
+        pair: (name) => this.req({ type: "pair_remote", name }, (r) => ({ device: r.device as RemoteDevice, urls: r.urls as string[] })),
+        removeDevice: (id) => this.req<RemoteStatus>({ type: "remove_remote_device", id }, (r) => r.remote),
+      };
+    }
+  }
+
+  /** 이 호스트 데몬으로 가는 Tauri 명령. `host` 가 undefined 면 JSON 에서 빠져 로컬이 된다 */
+  private call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+    return invoke<T>(cmd, { ...args, host: this.hostId });
+  }
+
+  /** 데몬 요청을 그대로 넘긴다 (src-tauri daemon_request). 응답은 `{ type, ... }` 모양이다 */
+  private async req<T>(request: Record<string, unknown>, pick: (r: Record<string, unknown>) => unknown = () => undefined): Promise<T> {
+    const r = await this.call<Record<string, unknown>>("daemon_request", { request });
+    return pick(r) as T;
+  }
+
   /** 앱 화면 배율. 브라우저 칸(네이티브 웹뷰)은 창 좌표로 놓으므로 DOM 좌표에 곱한다 */
   private uiZoom = 1;
   private readonly at = (r: { x: number; y: number; width: number; height: number }) => {
@@ -54,23 +137,23 @@ export class TauriHostApi implements HostApi {
   };
 
   readonly git: GitApi = {
-    status: (worktree) => req<GitStatus>({ type: "git_status", worktree }, (r) => r.status),
-    diff: (worktree, file, staged) => req<string>({ type: "git_diff", worktree, file, staged }, (r) => r.text),
-    stage: (worktree, files) => req({ type: "git_stage", worktree, files }),
-    unstage: (worktree, files) => req({ type: "git_unstage", worktree, files }),
-    discard: (worktree, files) => req({ type: "git_discard", worktree, files }),
-    commit: (worktree, message, all) => req<string>({ type: "git_commit", worktree, message, all }, (r) => r.text),
-    push: (worktree) => req<string>({ type: "git_push", worktree }, (r) => r.text),
-    branches: (repo) => req<BranchList>({ type: "list_branches", repo }, (r) => r.branches),
-    lineCounts: (worktree) => req<LineCount[]>({ type: "git_line_counts", worktree }, (r) => r.counts),
+    status: (worktree) => this.req<GitStatus>({ type: "git_status", worktree }, (r) => r.status),
+    diff: (worktree, file, staged) => this.req<string>({ type: "git_diff", worktree, file, staged }, (r) => r.text),
+    stage: (worktree, files) => this.req({ type: "git_stage", worktree, files }),
+    unstage: (worktree, files) => this.req({ type: "git_unstage", worktree, files }),
+    discard: (worktree, files) => this.req({ type: "git_discard", worktree, files }),
+    commit: (worktree, message, all) => this.req<string>({ type: "git_commit", worktree, message, all }, (r) => r.text),
+    push: (worktree) => this.req<string>({ type: "git_push", worktree }, (r) => r.text),
+    branches: (repo) => this.req<BranchList>({ type: "list_branches", repo }, (r) => r.branches),
+    lineCounts: (worktree) => this.req<LineCount[]>({ type: "git_line_counts", worktree }, (r) => r.counts),
   };
 
   readonly files: FilesApi = {
-    list: (worktree, dir) => req<DirEntry[]>({ type: "list_dir", worktree, dir }, (r) => r.entries),
-    read: (worktree, file) => req<FileContent>({ type: "read_file", worktree, file }, (r) => r.file),
+    list: (worktree, dir) => this.req<DirEntry[]>({ type: "list_dir", worktree, dir }, (r) => r.entries),
+    read: (worktree, file) => this.req<FileContent>({ type: "read_file", worktree, file }, (r) => r.file),
     search: (worktree, query, caseSensitive) =>
-      req({ type: "search_text", worktree, query, case_sensitive: caseSensitive }, (r) => ({ hits: r.hits as SearchHit[], truncated: !!r.truncated })),
-    all: (worktree) => req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
+      this.req({ type: "search_text", worktree, query, case_sensitive: caseSensitive }, (r) => ({ hits: r.hits as SearchHit[], truncated: !!r.truncated })),
+    all: (worktree) => this.req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
   };
 
   readonly browser: BrowserHost = {
@@ -94,12 +177,6 @@ export class TauriHostApi implements HostApi {
     },
   };
 
-  readonly remote: RemoteApi = {
-    status: () => req<RemoteStatus>({ type: "get_remote" }, (r) => r.remote),
-    set: (c) => req<RemoteStatus>({ type: "set_remote", enabled: c.enabled ?? null, port: c.port ?? null, lan: c.lan ?? null }, (r) => r.remote),
-    pair: (name) => req({ type: "pair_remote", name }, (r) => ({ device: r.device as RemoteDevice, urls: r.urls as string[] })),
-    removeDevice: (id) => req<RemoteStatus>({ type: "remove_remote_device", id }, (r) => r.remote),
-  };
 
   openUrl(url: string): Promise<void> {
     return openUrl(url);
@@ -110,16 +187,20 @@ export class TauriHostApi implements HostApi {
   private info: Promise<DaemonInfo> | null = null;
 
   daemon(): Promise<DaemonInfo> {
-    this.info ??= invoke<DaemonInfo>("daemon_info");
+    // 실패(원격이 끊겨 있다)는 남기지 않는다
+    this.info ??= this.call<DaemonInfo>("daemon_info").catch((e) => {
+      this.info = null;
+      throw e;
+    });
     return this.info;
   }
 
   listSessions(): Promise<SessionInfo[]> {
-    return invoke("list_sessions");
+    return this.call("list_sessions");
   }
 
   createSession(req: CreateSession): Promise<SessionInfo> {
-    return invoke("create_session", { req });
+    return this.call("create_session", { req });
   }
 
   async attach(id: SessionId, format: SnapshotFormat, onOutput: (bytes: Uint8Array) => void): Promise<Attachment> {
@@ -137,148 +218,153 @@ export class TauriHostApi implements HostApi {
         onOutput(bytes);
       }
     };
-    const r = await invoke<{ session: SessionInfo; format: SnapshotFormat }>("attach", { id, format, channel });
+    const r = await this.call<{ session: SessionInfo; format: SnapshotFormat }>("attach", { id, format, channel });
     await gotSnapshot;
     return {
       session: r.session,
       format: r.format,
       snapshot: snapshot!,
-      detach: () => invoke("detach", { id }),
+      detach: () => this.call("detach", { id }),
     };
   }
 
   input(id: SessionId, bytes: Uint8Array): Promise<void> {
-    return invoke("input", { id, data: Array.from(bytes) });
+    return this.call("input", { id, data: Array.from(bytes) });
   }
 
   resize(id: SessionId, cols: number, rows: number): Promise<void> {
-    return invoke("resize", { id, cols, rows });
+    return this.call("resize", { id, cols, rows });
   }
 
   setLabels(id: SessionId, labels: Record<string, string>): Promise<void> {
-    return invoke("set_labels", { id, labels });
+    return this.call("set_labels", { id, labels });
   }
 
   kill(id: SessionId): Promise<void> {
-    return invoke("kill", { id });
+    return this.call("kill", { id });
   }
 
   remove(id: SessionId): Promise<void> {
-    return invoke("remove", { id });
+    return this.call("remove", { id });
   }
 
   listRepos(): Promise<RepoInfo[]> {
-    return invoke("list_repos");
+    return this.call("list_repos");
   }
 
   addRepo(path: string): Promise<RepoInfo> {
-    return invoke("add_repo", { path });
+    return this.call("add_repo", { path });
   }
 
   removeRepo(repo: string): Promise<void> {
-    return invoke("remove_repo", { repo });
+    return this.call("remove_repo", { repo });
   }
 
   repoIcon(repo: string): Promise<RepoIcon | null> {
-    return req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
+    return this.req({ type: "repo_icon", repo }, (r) => r.icon ?? null);
   }
 
   listGroups(): Promise<RepoGroup[]> {
-    return req<RepoGroup[]>({ type: "list_groups" }, (r) => r.groups);
+    return this.req<RepoGroup[]>({ type: "list_groups" }, (r) => r.groups);
   }
 
   setGroups(groups: RepoGroup[]): Promise<RepoGroup[]> {
-    return req<RepoGroup[]>({ type: "set_groups", groups }, (r) => r.groups);
+    return this.req<RepoGroup[]>({ type: "set_groups", groups }, (r) => r.groups);
   }
 
   listWorktrees(): Promise<WorktreeInfo[]> {
-    return invoke("list_worktrees");
+    return this.call("list_worktrees");
   }
 
   createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo> {
-    return req<WorktreeInfo>(
+    return this.req<WorktreeInfo>(
       { type: "create_worktree", repo, branch, base: opts?.base ?? null, name: opts?.name ?? null, parent: opts?.parent ?? null },
       (r) => r.worktree,
     );
   }
 
   addRepos(path: string): Promise<RepoInfo[]> {
-    return req<RepoInfo[]>({ type: "add_repos", path }, (r) => r.repos);
+    return this.req<RepoInfo[]>({ type: "add_repos", path }, (r) => r.repos);
   }
 
   updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void> {
     // 데몬은 빈 글을 "부모에서 떼기" 로 받는다
     const parent = change.parent === undefined ? null : (change.parent ?? "");
-    return req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent });
+    return this.req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent });
   }
 
   getLayout(workspace?: string): Promise<WorkspaceLayout[]> {
-    return req<WorkspaceLayout[]>({ type: "get_layout", workspace: workspace ?? null }, (r) => r.layouts);
+    return this.req<WorkspaceLayout[]>({ type: "get_layout", workspace: workspace ?? null }, (r) => r.layouts);
   }
 
   layout(op: LayoutOp): Promise<LayoutResult> {
-    return req<LayoutResult>({ type: "layout", op }, (r) => ({ layouts: r.layouts, created: r.created }));
+    return this.req<LayoutResult>({ type: "layout", op }, (r) => ({ layouts: r.layouts, created: r.created }));
   }
 
   layoutBatch(ops: LayoutOp[]): Promise<LayoutResult> {
-    return req<LayoutResult>({ type: "layout_batch", ops }, (r) => ({ layouts: r.layouts, created: r.created }));
+    return this.req<LayoutResult>({ type: "layout_batch", ops }, (r) => ({ layouts: r.layouts, created: r.created }));
   }
 
   getTerminalColors(): Promise<TerminalColors | null> {
-    return req<TerminalColors | null>({ type: "get_terminal_colors" }, (r) => r.colors ?? null);
+    return this.req<TerminalColors | null>({ type: "get_terminal_colors" }, (r) => r.colors ?? null);
   }
 
   setTerminalColors(colors: TerminalColors): Promise<void> {
-    return req({ type: "set_terminal_colors", colors });
+    // 원격 터미널 색은 원격 설정 그대로 둔다 (그 컴퓨터 앱의 테마와 다투지 않는다)
+    if (this.isRemote) return Promise.resolve();
+    return this.req({ type: "set_terminal_colors", colors });
   }
 
   scanOrca(): Promise<OrcaScan> {
-    return req<OrcaScan>({ type: "scan_orca" }, (r) => r.scan);
+    return this.req<OrcaScan>({ type: "scan_orca" }, (r) => r.scan);
   }
 
   stopClaudeSession(sessionId: string): Promise<void> {
-    return req({ type: "stop_claude_session", session_id: sessionId });
+    return this.req({ type: "stop_claude_session", session_id: sessionId });
   }
 
   getAgentSettings(): Promise<AgentSettings> {
-    return req<AgentSettings>({ type: "get_agent_settings" }, (r) => r.settings);
+    return this.req<AgentSettings>({ type: "get_agent_settings" }, (r) => r.settings);
   }
 
   setAgentSettings(settings: AgentSettings): Promise<AgentSettings> {
-    return req<AgentSettings>({ type: "set_agent_settings", settings }, (r) => r.settings);
+    return this.req<AgentSettings>({ type: "set_agent_settings", settings }, (r) => r.settings);
   }
 
   openPath(path: string): Promise<void> {
+    if (this.isRemote) return remoteOnly("기본 앱으로 열기");
     return openPath(path);
   }
 
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null> {
-    return req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
+    return this.req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
   }
 
   savePasteImage(data: string, ext: string): Promise<string> {
-    return req({ type: "save_paste_image", data, ext }, (r) => String(r.path));
+    return this.req({ type: "save_paste_image", data, ext }, (r) => String(r.path));
   }
 
   runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]> {
-    return req({ type: "running_agents", sessions, names }, (r) => r.found);
+    return this.req({ type: "running_agents", sessions, names }, (r) => r.found);
   }
 
   findCommands(names: string[]): Promise<string[]> {
-    return req<string[]>({ type: "find_commands", names }, (r) => r.found);
+    return this.req<string[]>({ type: "find_commands", names }, (r) => r.found);
   }
 
   async pickFolder(): Promise<string | null> {
+    if (this.isRemote) return remoteOnly("폴더 고르기");
     const r = await openDialog({ directory: true, multiple: false, title: "프로젝트 폴더 고르기" });
     return typeof r === "string" ? r : null;
   }
 
   reveal(path: string): Promise<void> {
+    if (this.isRemote) return remoteOnly("Finder 에서 보기");
     return revealItemInDir(path);
   }
 
   removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string> {
-    return invoke("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch, forceBranch: opts.forceBranch ?? false });
+    return this.call("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch, forceBranch: opts.forceBranch ?? false });
   }
 
   async setUiZoom(scale: number): Promise<void> {
@@ -340,8 +426,11 @@ export class TauriHostApi implements HostApi {
       channel.onmessage = (e) => {
         for (const l of this.listeners) l(e);
       };
-      await invoke("subscribe_events", { channel });
-    })();
+      await this.call("subscribe_events", { channel });
+    })().catch((e) => {
+      this.subscribed = null;
+      console.warn("데몬 이벤트를 구독하지 못했다", this.hostId ?? "로컬", e);
+    });
     return () => this.listeners.delete(cb);
   }
 }
