@@ -87,7 +87,7 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
     .await;
     assert!(screen.contains("Z:1111 zd=unset"), "zsh 사용자 설정을 다 읽지 않았다:\n{screen}");
     assert!(
-        screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions --settings {{\"wheelScrollAccelerationEnabled\":false}} --user-alias hello")),
+        screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions --user-alias hello")),
         "zsh 의 claude 에 플러그인이 붙지 않았다:\n{screen}"
     );
 
@@ -95,7 +95,7 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
     let screen = run_in_shell(&c, "/bin/bash", "echo \"B:$MARK_PROFILE$MARK_RC\"; claude hi", "FAKE-CLAUDE").await;
     assert!(screen.contains("B:11"), "bash 사용자 설정을 다 읽지 않았다:\n{screen}");
     assert!(
-        screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions --settings {{\"wheelScrollAccelerationEnabled\":false}} --user-alias hi")),
+        screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions --user-alias hi")),
         "bash 의 claude 에 플러그인이 붙지 않았다:\n{screen}"
     );
 
@@ -105,5 +105,5 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
         .await
         .unwrap();
     let screen = wait_screen(&c, s.id, "FAKE-CLAUDE").await;
-    assert!(screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions --settings {{\"wheelScrollAccelerationEnabled\":false}} direct")), "{screen}");
+    assert!(screen.contains(&format!("FAKE-CLAUDE --plugin-dir {plugin_s} --dangerously-skip-permissions direct")), "{screen}");
 }

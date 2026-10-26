@@ -6,9 +6,6 @@
 //! 실행기는 에이전트 설정(`agent-settings.json`)이 바뀔 때마다 다시 쓴다. 함수가 부를 때마다 실행기를 돌리므로
 //! 설정을 바꾸면 이미 뜬 셸에서 치는 `claude` 에도 바로 들어간다.
 //! - 권한: `--dangerously-skip-permissions`
-//! - 휠 가속 끄기: 앱이 휠 이벤트 하나에 휠 신호 하나를 보내므로(xterm.js 와 같다) claude 가 더 가속하지 않게 한다.
-//!   claude 는 xterm.js(Orca)에서는 가속하지 않는데, thuminal 은 일반 터미널로 보고 신호마다 최대 6줄까지 가속해
-//!   한 번 쓸면 Orca 의 열 배 넘게 날아갔다
 //! - 에이전트 팀: 팀 환경 변수를 켜고, 가짜 `tmux`(`shell/teams-bin/tmux` → `thuminal tmux`)를 claude 에게만 보인다.
 //!   claude 가 tmux 안이라고 믿고 팀원 칸을 나누려 하면 데몬이 팀원 세션을 띄운다 (`teams.rs`).
 //!
@@ -123,7 +120,6 @@ impl ShellIntegration {
         let mut out = String::from(
             "#!/bin/sh\n# thuminal 이 에이전트 설정(agent-settings.json)으로 만든 claude 실행기 (데몬이 만든 파일이다. 고치지 않는다)\n",
         );
-        out.push_str(&format!("set -- --settings {} \"$@\"\n", sh_quote(r#"{"wheelScrollAccelerationEnabled":false}"#)));
         if s.claude.skip_permissions {
             out.push_str("set -- --dangerously-skip-permissions \"$@\"\n");
         }
@@ -293,20 +289,19 @@ mod launcher_tests {
         shell.install();
         let p = plugin.to_string_lossy().into_owned();
         let in_session = [("THUMINAL_SESSION_ID", "7"), ("THUMINAL_CLI", "/x/thuminal")];
-        const W: &str = r#"--settings {"wheelScrollAccelerationEnabled":false}"#;
 
         // 기본: 권한 확인 없이 + 팀 (세션 안에서만 tmux 흉내)
         assert_eq!(
             run(&shell, home.path(), &in_session),
-            format!("--plugin-dir {p} --teammate-mode auto --dangerously-skip-permissions {W} --resume x | TMUX_PANE=%7 TEAMS=1")
+            format!("--plugin-dir {p} --teammate-mode auto --dangerously-skip-permissions --resume x | TMUX_PANE=%7 TEAMS=1")
         );
-        assert_eq!(run(&shell, home.path(), &[]), format!("--plugin-dir {p} --dangerously-skip-permissions {W} --resume x | TMUX_PANE= TEAMS=1"));
+        assert_eq!(run(&shell, home.path(), &[]), format!("--plugin-dir {p} --dangerously-skip-permissions --resume x | TMUX_PANE= TEAMS=1"));
 
         let mut off = AgentSettings::default();
         off.claude.skip_permissions = false;
         off.claude.teams = false;
         shell.set_settings(off.clone());
-        assert_eq!(run(&shell, home.path(), &in_session), format!("--plugin-dir {p} {W} --resume x | TMUX_PANE= TEAMS="));
+        assert_eq!(run(&shell, home.path(), &in_session), format!("--plugin-dir {p} --resume x | TMUX_PANE= TEAMS="));
         // 데몬이 다시 떠도 남는다
         assert_eq!(ShellIntegration::new(home.path(), None).settings(), off);
     }

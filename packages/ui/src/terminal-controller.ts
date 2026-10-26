@@ -12,9 +12,12 @@ import type { Services } from "./services";
 
 const enc = new TextEncoder();
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn", "Process", "Unidentified"]);
-/** 마우스를 받는 프로그램에 마우스 휠 한 칸으로 보내는 줄 수: 쉬었다 굴린 한 칸, 이어서 굴리는 동안 한 칸 (Orca 는 3·1 인데 답답했다) */
-const WHEEL_NOTCH_LINES = 5;
-const WHEEL_NOTCH_RAPID_LINES = 2;
+/**
+ * 마우스를 받는 프로그램에 마우스 휠 한 칸으로 보내는 휠 신호 수: 쉬었다 굴린 한 칸, 이어서 굴리는 동안 한 칸.
+ * 빨리 굴릴 때의 가속은 프로그램이 한다 (claude 는 40ms 안에 이어 오는 신호를 최대 6배까지 키운다)
+ */
+const WHEEL_NOTCH_REPORTS = 5;
+const WHEEL_NOTCH_RAPID_REPORTS = 3;
 
 export class TerminalController {
   engine: TerminalEngine | null = null;
@@ -206,10 +209,9 @@ export class TerminalController {
    * 마우스 휠 이벤트 하나. claude·vim·less 처럼 마우스를 받거나 대체 화면을 쓰는 프로그램은 스크롤백이 없어
    * 그 프로그램에 넘기고, 아니면 스크롤백을 픽셀만큼 움직인다.
    *
-   * 프로그램에 넘길 때는 Orca(xterm.js + claude) 와 같게 움직인다: 줄 수는 xterm.js 처럼 세되(작은 움직임은 0.3배)
-   * 이벤트 하나에 한 번만 움직인다. 그 한 번이 40ms 넘게 쉬었다 온 것이면 3줄, 이어서 오면 1줄로 보낸다
-   * (claude 가 xterm.js 에서 쓰는 규칙이다. thuminal 의 claude 는 실행기가 가속을 꺼 신호 하나가 1줄이다).
-   * 마우스 휠 한 칸은 이보다 많이 보낸다 (WHEEL_NOTCH_LINES)
+   * 프로그램에 넘길 때는 줄 수를 xterm.js 처럼 세되(작은 움직임은 0.3배) 이벤트 하나에 한 번만 움직인다.
+   * 마우스 휠 한 칸은 휠 신호 여럿(WHEEL_NOTCH_REPORTS), 트랙패드 이벤트는 하나를 보낸다. 빨리 굴릴 때의 가속은
+   * 프로그램에 맡긴다. 픽셀만큼 신호를 몰아 보내면 claude 가 신호마다 가속해 트랙패드로 한 번 쓸어도 천 줄씩 날아갔다
    */
   private onWheel(ev: WheelEvent) {
     if (!this.engine || !this.renderer) return;
@@ -236,7 +238,7 @@ export class TerminalController {
     this.wheelPartial %= 1;
     const now = performance.now();
     const rested = now - this.lastWheelReport > 40;
-    const n = notch ? (rested ? WHEEL_NOTCH_LINES : WHEEL_NOTCH_RAPID_LINES) : rested ? 3 : 1;
+    const n = notch ? (rested ? WHEEL_NOTCH_REPORTS : WHEEL_NOTCH_RAPID_REPORTS) : 1;
     this.lastWheelReport = now;
     const out = new Uint8Array(one.length * n);
     for (let i = 0; i < n; i++) out.set(one, i * one.length);
