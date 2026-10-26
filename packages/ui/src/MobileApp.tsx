@@ -11,15 +11,18 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpIcon,
+  CaretDownIcon,
   CaretRightIcon,
   ClipboardTextIcon,
   DotsThreeVerticalIcon,
+  GitForkIcon,
   KeyboardIcon,
   PaperPlaneRightIcon,
   PlusIcon,
   TerminalWindowIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import type { Renderer, SessionId, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
 
@@ -27,10 +30,11 @@ import { AgentIcon } from "./agent-icons";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { panesOf } from "./layout";
+import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
 import type { Services } from "./services";
 import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
-import { AppModel, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
+import { AppModel, type AppState, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
 import { rendererOptions } from "./terminal-font";
 import "./styles.css";
 
@@ -198,6 +202,9 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
   const layouts = useApp((s) => s.layouts);
   const sessions = useApp((s) => s.sessions);
   const model = useModel();
+  // 접은 하위 워크트리 (데스크톱 사이드바와 같은 모음에 남는다)
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const toggle = (key: string) => setCollapsed(toggleCollapsed(collapsed, key));
 
   // 에이전트가 든 터미널: 급한 것부터
   const agents = Object.values(sessions)
@@ -231,23 +238,12 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
         {repos.map((r) => {
           const list = worktrees.filter((w) => w.repo === r.id);
           if (!list.length) return null;
+          const { roots, kids } = worktreeForest(list);
           return (
             <Section key={r.id} title={r.name}>
-              {list.map((w) => {
-                const ids = terminalsOf(layouts[w.path]);
-                const st = statusOf(ids.flatMap((id) => (sessions[id] ? [sessions[id]] : [])));
-                return (
-                  <Row key={w.path} onClick={() => go({ kind: "ws", ws: w.path })}>
-                    <StatusIndicator status={st} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px]">{worktreeTitle(w)}</div>
-                      <div className="truncate text-[11px] text-muted-foreground">{w.branch || "(브랜치 없음)"}</div>
-                    </div>
-                    {ids.length > 0 && <span className="text-[11px] text-muted-foreground">{ids.length}</span>}
-                    <CaretRightIcon className="size-4 text-muted-foreground" />
-                  </Row>
-                );
-              })}
+              {roots.map((w) => (
+                <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
+              ))}
             </Section>
           );
         })}
@@ -266,6 +262,100 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
         {!repos.length && !extra.length && <p className="p-6 text-center text-[13px] text-muted-foreground">데스크톱에 등록한 프로젝트가 없다</p>}
       </div>
     </>
+  );
+}
+
+/** 워크트리 세션들의 상태 (탭 차례, 팀원 빼고) */
+function useWorktreeStatus(path: string): { status: Status; terminals: number } {
+  return useApp(
+    useShallow((s: AppState) => {
+      const ids = terminalsOf(s.layouts[path]);
+      return { status: statusOf(ids.flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))), terminals: ids.length };
+    }),
+  );
+}
+
+/**
+ * 워크트리 한 줄과 그 밑의 하위 워크트리. 데스크톱 사이드바처럼 자식은 세로 안내선과 함께 들여 그리고,
+ * 부모 줄 밑 "⑂ N개 하위" 단추로 접는다 (접어도 하위 상태 개수가 보인다)
+ */
+function WorktreeBranch({
+  w,
+  kids,
+  collapsed,
+  onToggle,
+  go,
+  depth = 0,
+}: {
+  w: WorktreeInfo;
+  kids: Map<string, WorktreeInfo[]>;
+  collapsed: Set<string>;
+  onToggle: (key: string) => void;
+  go: (s: Screen) => void;
+  depth?: number;
+}) {
+  const { status, terminals } = useWorktreeStatus(w.path);
+  const mine = kids.get(w.path) ?? [];
+  const key = lineageKey(w.path);
+  const open = !collapsed.has(key);
+  // 안쪽 단계는 줄 왼쪽 여백을 줄여 들여쓴 만큼 폭을 덜 잃는다
+  const pad = depth > 0 ? "pl-3" : undefined;
+  return (
+    <>
+      <Row className={pad} onClick={() => go({ kind: "ws", ws: w.path })}>
+        <StatusIndicator status={status} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px]">{worktreeTitle(w)}</div>
+          <div className="truncate text-[11px] text-muted-foreground">{w.branch || "(브랜치 없음)"}</div>
+        </div>
+        {terminals > 0 && <span className="text-[11px] text-muted-foreground">{terminals}</span>}
+        <CaretRightIcon className="size-4 text-muted-foreground" />
+      </Row>
+      {mine.length > 0 && (
+        <LineageToggle nested={depth > 0} paths={descendantsOf(w.path, kids).map((d) => d.path)} count={mine.length} open={open} onToggle={() => onToggle(key)} />
+      )}
+      {mine.length > 0 && open && (
+        <div className={cn("flex flex-col border-l border-border", depth > 0 ? "ml-[18px]" : "ml-[22px]")}>
+          {mine.map((c) => (
+            <WorktreeBranch key={c.path} w={c} kids={kids} collapsed={collapsed} onToggle={onToggle} go={go} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 부모 줄 밑 "⑂ 3개 하위 · 상태별 개수 ▾" 단추. 워크트리 이름 줄에 맞춰 들이고, 누를 곳은 44px 높이로 잡는다 */
+function LineageToggle({ paths, count, open, onToggle, nested }: { paths: string[]; count: number; open: boolean; onToggle: () => void; nested?: boolean }) {
+  const statuses = useApp(
+    useShallow((s: AppState) => paths.map((p) => statusOf(terminalsOf(s.layouts[p]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))))),
+  );
+  const counts = lineageCounts(statuses);
+  return (
+    <button
+      className={cn("-mt-1 flex min-h-11 w-full items-center pr-4 text-left active:bg-accent", nested ? "pl-[34px]" : "pl-[38px]")}
+      aria-expanded={open}
+      aria-label={open ? "하위 워크트리 접기" : "하위 워크트리 펴기"}
+      onClick={onToggle}
+    >
+      <span className="flex h-7 items-center gap-1.5 rounded-md border px-2 text-[12px] text-muted-foreground">
+        <GitForkIcon className="size-3.5" />
+        <span>
+          <span className="tabular-nums">{count}</span>개 하위
+        </span>
+        {counts.length > 0 && (
+          <span className="flex items-center gap-1.5 border-l pl-1.5">
+            {counts.map(([st, n]) => (
+              <span key={st} className="flex items-center gap-0.5 tabular-nums">
+                <StatusIndicator status={st} />
+                {n}
+              </span>
+            ))}
+          </span>
+        )}
+        <CaretDownIcon className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
+      </span>
+    </button>
   );
 }
 

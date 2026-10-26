@@ -41,6 +41,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { useDrag } from "./dnd";
 import { paneOfSession, sessionsOf } from "./layout";
+import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
 import { type AppState, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 
@@ -142,17 +143,11 @@ export function Sidebar() {
   const width = useApp((s) => s.sidebarWidth);
   const hasOther = useApp((s) => (s.layouts[OTHER_WORKSPACE]?.tabs.length ?? 0) > 0);
   // 접은 묶음(저장소, 고정, 기타)과 접은 하위 워크트리(`lineage:<경로>`). 다시 켜도 남는다
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]));
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
   const pinned = worktrees.filter((w) => w.pinned);
   const order = (list: WorktreeInfo[]) => [...list].sort((a, b) => Number(b.is_main) - Number(a.is_main));
 
-  const toggle = (key: string) => {
-    const next = new Set(collapsed);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    setCollapsed(next);
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-  };
+  const toggle = (key: string) => setCollapsed(toggleCollapsed(collapsed, key));
 
   return (
     <aside className="relative flex min-h-0 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }}>
@@ -382,26 +377,9 @@ function useWorkspaceSessions(ws: WorkspaceId): SessionInfo[] {
   return useApp(useShallow((s: AppState) => sessionsOf(s.layouts[ws]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))));
 }
 
-const COLLAPSED_KEY = "thuminal.sidebarCollapsed";
-
-/** 저장소 안 워크트리를 부모 → 자식으로 늘어놓는다. 부모가 목록에 없으면(지웠거나 고정했으면) 맨 위로 올린다 */
+/** 저장소 안 워크트리를 부모 → 자식으로 늘어놓는다 (`worktreeForest`) */
 function WorktreeTree({ list, collapsed, onToggle }: { list: WorktreeInfo[]; collapsed: Set<string>; onToggle: (key: string) => void }) {
-  const paths = new Set(list.map((w) => w.path));
-  const kids = new Map<string, WorktreeInfo[]>();
-  const roots: WorktreeInfo[] = [];
-  for (const w of list) {
-    if (w.parent && w.parent !== w.path && paths.has(w.parent)) kids.set(w.parent, [...(kids.get(w.parent) ?? []), w]);
-    else roots.push(w);
-  }
-  // 부모가 돌고 도는 고리(데몬이 막지만 혹시)는 빠지지 않게 맨 위로 올린다
-  const seen = new Set<string>();
-  const walk = (w: WorktreeInfo) => {
-    if (seen.has(w.path)) return;
-    seen.add(w.path);
-    for (const k of kids.get(w.path) ?? []) walk(k);
-  };
-  roots.forEach(walk);
-  for (const w of list) if (!seen.has(w.path)) (roots.push(w), walk(w));
+  const { roots, kids } = worktreeForest(list);
   return (
     <>
       {roots.map((w) => (
@@ -411,13 +389,9 @@ function WorktreeTree({ list, collapsed, onToggle }: { list: WorktreeInfo[]; col
   );
 }
 
-function descendantsOf(path: string, kids: Map<string, WorktreeInfo[]>): WorktreeInfo[] {
-  return (kids.get(path) ?? []).flatMap((k) => [k, ...descendantsOf(k.path, kids)]);
-}
-
 function WorktreeBranch({ w, kids, collapsed, onToggle }: { w: WorktreeInfo; kids: Map<string, WorktreeInfo[]>; collapsed: Set<string>; onToggle: (key: string) => void }) {
   const mine = kids.get(w.path) ?? [];
-  const key = `lineage:${w.path}`;
+  const key = lineageKey(w.path);
   const open = !collapsed.has(key);
   return (
     <>
@@ -440,8 +414,7 @@ function LineageToggle({ paths, count, open, onToggle }: { paths: string[]; coun
   const statuses = useApp(
     useShallow((s: AppState) => paths.map((p) => statusOf(sessionsOf(s.layouts[p]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))))),
   );
-  const shown: Status[] = ["attention", "error", "working", "done"];
-  const counts = shown.map((st) => [st, statuses.filter((x) => x === st).length] as const).filter(([, n]) => n > 0);
+  const counts = lineageCounts(statuses);
   return (
     <div className="mb-0.5 ml-6 flex">
       <button
