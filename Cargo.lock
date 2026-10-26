@@ -4274,6 +4274,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
  "thuminal-client",
  "thuminal-protocol",
  "tokio",
