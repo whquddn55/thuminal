@@ -3,6 +3,7 @@
 //! 엔진과 PTY 는 [`DaemonConfig`] 로 받는다. 어떤 어댑터를 끼울지는 실행 파일
 //! (`thuminald`) 이 정한다.
 
+pub mod browser_proxy;
 pub mod images;
 pub mod interrupt;
 pub mod layout;

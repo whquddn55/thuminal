@@ -309,6 +309,7 @@ impl Server {
                 Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
                 Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
             },
+            Request::BrowserProxy { url } => Ok(Response::BrowserProxy { port: self.remote.browser_proxy(&url) }),
             Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings(), skills: m.plugin_skills() }),
             Request::SetAgentSettings { settings } => {
                 m.set_agent_settings(settings.clone());
@@ -580,6 +581,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::PairRemote { .. } => "pair_remote",
         Request::RemoveRemoteDevice { .. } => "remove_remote_device",
         Request::StopClaudeSession { .. } => "stop_claude_session",
+        Request::BrowserProxy { .. } => "browser_proxy",
         Request::GetAgentSettings => "get_agent_settings",
         Request::SetAgentSettings { .. } => "set_agent_settings",
     }

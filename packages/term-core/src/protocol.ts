@@ -182,6 +182,9 @@ export interface FileContent {
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 파일 쓰기(`write_file`) · 바이트 읽기(`read_file_bytes`)가 된다 */
 export const FILES_PROTOCOL_MINOR = 5;
 
+/** 데몬 프로토콜 부 판이 이 값 이상이어야 원격 기기용 브라우저 칸 대리(`browser_proxy`)가 된다 */
+export const BROWSER_PROXY_PROTOCOL_MINOR = 6;
+
 /** 세션 꼬리표 중 워크트리 경로를 담는 키 (데몬이 시작 폴더로 채운다) */
 export const WORKTREE_LABEL = "worktree";
 

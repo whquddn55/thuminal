@@ -8,10 +8,11 @@ import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import type { Bounds } from "@thuminal/term-core";
+import { BROWSER_PROXY_PROTOCOL_MINOR, type Bounds, type HostApi } from "@thuminal/term-core";
 
 import { pageKey, pageStore, setPage } from "./browser-state";
 import { useDrag } from "./dnd";
+import { useDaemonSupports } from "./file-features";
 import { cn } from "./lib/utils";
 import { useApp, useModel } from "./store";
 
@@ -118,7 +119,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
     });
   }, [model, paneId, focused, shown]);
 
-  if (!browser) return <div className="grid h-full place-content-center text-muted-foreground">이 껍데기는 브라우저 칸을 지원하지 않는다</div>;
+  if (!browser) return <FramePane paneId={paneId} url={url} focused={focused} />;
 
   const go = (text: string) => {
     const next = toUrl(text);
@@ -166,7 +167,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
         <button className={btn} title="개발자 도구" onClick={() => void browser.devtools(paneId)}>
           <BugIcon />
         </button>
-        <button className={btn} title="시스템 브라우저로 열기" onClick={() => void model.services.host.openUrl?.(shown)}>
+        <button className={btn} title="시스템 브라우저로 열기" onClick={() => void openOutside(model.services.host, shown).catch(model.fail)}>
           <ArrowSquareOutIcon />
         </button>
       </div>
@@ -180,3 +181,102 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
     </div>
   );
 }
+
+/** 시스템 브라우저로 연다. 원격 컴퓨터 칸의 `localhost` 는 그 데몬의 대리 주소로 바꿔 연다 */
+async function openOutside(host: HostApi, url: string) {
+  const view = (await host.browserProxyUrl?.(url).catch(() => null)) ?? url;
+  if (host.openUrl) await host.openUrl(view);
+  else window.open(view, "_blank", "noopener");
+}
+
+/**
+ * 진짜 웹뷰를 얹지 못하는 껍데기(원격 접속 웹 · 폰)의 브라우저 칸: 칸 자리에 iframe 으로 띄운다.
+ * 데몬 컴퓨터의 `localhost` 개발 서버는 데몬이 대신 받아 넘기는 주소로 연다 (daemon `browser_proxy.rs`).
+ * 다른 출처의 iframe 이라 안에서 옮겨 간 주소 · 뒤로 · 앞으로는 알 수 없다. 주소 칸에서 고친 주소는 배치에 남긴다
+ */
+export function FramePane({ paneId, url, focused }: { paneId: number; url: string; focused: boolean }) {
+  const model = useModel();
+  const host = model.services.host;
+  const supported = useDaemonSupports(host, BROWSER_PROXY_PROTOCOL_MINOR);
+  const [view, setView] = useState<{ for: string; src: string | null; error?: string } | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
+  const local = /^http:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/|$)/i.test(url);
+
+  useEffect(() => {
+    let alive = true;
+    if (!/^https?:/i.test(url)) {
+      setView({ for: url, src: null, error: "이 주소는 데스크톱 브라우저 칸에서만 열린다" });
+      return;
+    }
+    if (!local) {
+      setView({ for: url, src: url });
+      return;
+    }
+    if (supported === null) return;
+    if (!supported || !host.browserProxyUrl) {
+      setView({ for: url, src: null, error: "데몬이 옛 판이라 이 컴퓨터의 개발 서버를 대신 보여 줄 수 없다. 데몬을 다시 띄우면 여기서 보인다" });
+      return;
+    }
+    host.browserProxyUrl(url).then(
+      (p) => alive && setView(p ? { for: url, src: p } : { for: url, src: null, error: "데몬 원격 접속이 꺼져 있어 대신 보여 줄 수 없다" }),
+      (e) => alive && setView({ for: url, src: null, error: String(e) }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [host, url, local, supported]);
+
+  const go = (text: string) => {
+    const next = toUrl(text);
+    setEditing(null);
+    if (next === url) setReloads((n) => n + 1);
+    else void model.op({ op: "update_doc", pane: { by: "id", value: paneId }, doc: { kind: "browser", url: next } }).catch(model.fail);
+  };
+  const btn = "flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground [&>svg]:size-3.5";
+  const ready = view?.for === url ? view : null;
+
+  return (
+    <div className="absolute inset-0 flex flex-col bg-background" onPointerDown={() => !focused && model.focusPane(paneId)}>
+      <div className="flex h-8 shrink-0 items-center gap-0.5 border-b bg-card px-1.5">
+        <button className={btn} title="새로 고침" onClick={() => setReloads((n) => n + 1)}>
+          <ArrowClockwiseIcon />
+        </button>
+        <div className="mx-1 flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md border bg-background px-2">
+          <GlobeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <input
+            className="h-full min-w-0 flex-1 bg-transparent text-xs outline-none"
+            value={editing ?? url}
+            spellCheck={false}
+            onFocus={(e) => {
+              setEditing(url);
+              e.currentTarget.select();
+            }}
+            onChange={(e) => setEditing(e.target.value)}
+            onBlur={() => setEditing(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") go(e.currentTarget.value);
+              else if (e.key === "Escape") {
+                setEditing(null);
+                e.currentTarget.blur();
+              }
+            }}
+          />
+        </div>
+        <button className={btn} title="새 탭으로 열기 (칸 안에 안 보이는 사이트)" onClick={() => void openOutside(host, url).catch(model.fail)}>
+          <ArrowSquareOutIcon />
+        </button>
+      </div>
+      <div className="relative min-h-0 flex-1 bg-white">
+        {ready?.src ? (
+          <iframe key={`${ready.src}#${reloads}`} src={ready.src} title={url} className="absolute inset-0 size-full border-0" allow="clipboard-read; clipboard-write; fullscreen" />
+        ) : (
+          <div className="absolute inset-0 grid place-content-center gap-2 bg-muted p-4 text-center text-xs text-muted-foreground">
+            {ready?.error ?? "여는 중…"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

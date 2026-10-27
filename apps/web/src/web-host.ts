@@ -38,7 +38,7 @@ import type {
 } from "@thuminal/term-core";
 
 const PROTOCOL_MAJOR = 1;
-const PROTOCOL_MINOR = 5;
+const PROTOCOL_MINOR = 6;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -214,6 +214,20 @@ export class WebHostApi implements HostApi {
     mediaUrl: (worktree, file) =>
       `${this.base}/api/file?token=${encodeURIComponent(this.token)}&worktree=${encodeURIComponent(worktree)}&file=${encodeURIComponent(file)}`,
   };
+
+  async browserProxyUrl(url: string): Promise<string | null> {
+    const port = await this.req<number | null>({ type: "browser_proxy", url }, (r) => r.port ?? null);
+    if (port == null) return null;
+    // 데몬 대리 포트는 이 웹 화면이 붙은 데몬 호스트에서 연다. 처음 열 때 토큰을 실어 쿠키로 바꾼다
+    const view = new URL(this.base);
+    const orig = new URL(url);
+    view.port = String(port);
+    view.pathname = orig.pathname;
+    view.search = orig.search;
+    view.hash = orig.hash;
+    view.searchParams.append("thuminal_proxy", this.token);
+    return view.toString();
+  }
 
   async daemon(): Promise<DaemonInfo> {
     await this.connect();

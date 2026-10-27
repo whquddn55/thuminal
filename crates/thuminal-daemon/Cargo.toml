@@ -22,6 +22,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 fontdb = "0.24.0"
 base64 = "0.22"
+# 원격 기기용 브라우저 칸 대리 (browser_proxy.rs): 개발 서버에 붙는 http1 클라이언트 · 업그레이드
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 memchr = "2"
 # 붙인 그림 썸네일 (claude 기록의 png · jpeg)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

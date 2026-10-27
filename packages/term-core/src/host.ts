@@ -221,6 +221,11 @@ export interface HostApi {
   reveal(path: string): Promise<void>;
   /** 시스템 브라우저로 열기 */
   openUrl?(url: string): Promise<void>;
+  /**
+   * 브라우저 칸 주소를 이 화면에서 열 주소로 바꾼다. 데몬 컴퓨터의 `localhost` 개발 서버면 데몬 대리 주소(토큰 포함)를,
+   * 바꿀 필요가 없으면(같은 컴퓨터, 공개 주소) null 을 준다. 데몬 부 판 `BROWSER_PROXY_PROTOCOL_MINOR` 부터 된다
+   */
+  browserProxyUrl?(url: string): Promise<string | null>;
   /** 파일·폴더를 그 종류의 기본 앱으로 열기 (데스크톱만) */
   openPath?(path: string): Promise<void>;
   /**

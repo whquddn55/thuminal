@@ -174,11 +174,41 @@ export class TauriHostApi implements HostApi {
    * 브라우저 칸. 칸 번호는 호스트마다 따로라 웹뷰 이름·이벤트에 호스트를 싣는다 (src-tauri browser.rs).
    * 웹뷰 자체는 이 컴퓨터에 뜨므로 원격 칸에서 연 localhost 는 원격이 아니라 이 컴퓨터를 가리킨다
    */
+  /** 원격 호스트 브라우저 칸: 대리 주소의 origin → 원래 주소의 origin (웹뷰가 알리는 주소를 원래 주소로 되돌린다) */
+  private proxyOrigins = new Map<string, string>();
+
+  browserProxyUrl(url: string): Promise<string | null> {
+    // 이 컴퓨터 데몬이면 웹뷰가 같은 컴퓨터라 바꿀 필요가 없다
+    if (!this.hostId) return Promise.resolve(null);
+    return this.call<string | null>("browser_proxy_url", { url }).catch(() => null);
+  }
+
+  /** 원격 호스트 칸이면 `localhost` 주소를 그 데몬의 대리 주소로 바꿔 웹뷰에 연다 */
+  private async viewUrl(url: string): Promise<string> {
+    const p = await this.browserProxyUrl(url);
+    if (!p) return url;
+    this.proxyOrigins.set(new URL(p).origin, new URL(url).origin);
+    return p;
+  }
+
+  /** 웹뷰가 알린 주소가 대리 주소면 원래 주소로 (칸 주소 줄 · 배치에 남길 주소) */
+  private realUrl(url: string): string {
+    try {
+      const u = new URL(url);
+      const orig = this.proxyOrigins.get(u.origin);
+      if (!orig) return url;
+      u.searchParams.delete("thuminal_proxy");
+      return `${orig}${u.pathname}${u.search}${u.hash}`;
+    } catch {
+      return url;
+    }
+  }
+
   readonly browser: BrowserHost = {
-    open: (id, url, at) => this.call("browser_open", { id, url, ...this.at(at) }),
+    open: async (id, url, at) => this.call("browser_open", { id, url: await this.viewUrl(url), ...this.at(at) }),
     setBounds: (id, at) => this.call("browser_bounds", { id, ...this.at(at) }),
     setVisible: (id, visible) => this.call("browser_visible", { id, visible }),
-    navigate: (id, url) => this.call("browser_navigate", { id, url }),
+    navigate: async (id, url) => this.call("browser_navigate", { id, url: await this.viewUrl(url) }),
     go: (id, delta) => this.call("browser_go", { id, delta }),
     reload: (id) => this.call("browser_reload", { id }),
     focus: (id) => this.call("browser_focus", { id }),
@@ -188,7 +218,9 @@ export class TauriHostApi implements HostApi {
       let stop: (() => void) | null = null;
       let cancelled = false;
       const name = this.hostId ? `thuminal://browser/${this.hostId}` : "thuminal://browser";
-      void listen<BrowserEvent>(name, (e) => cb(e.payload)).then((un) => (cancelled ? un() : (stop = un)));
+      // 원격 호스트 칸은 웹뷰가 대리 주소를 알리므로 원래 주소로 되돌려 넘긴다
+      const fix = (e: BrowserEvent): BrowserEvent => (e.type === "load" || e.type === "new_window" ? { ...e, url: this.realUrl(e.url) } : e);
+      void listen<BrowserEvent>(name, (e) => cb(fix(e.payload))).then((un) => (cancelled ? un() : (stop = un)));
       return () => {
         cancelled = true;
         stop?.();

@@ -499,6 +499,9 @@ pub enum Request {
     ReadFile { worktree: String, file: String },
     /// 파일 바이트를 `offset` 부터 `len` 만큼 (그림 · 영상). `len` 은 데몬이 `MAX_READ_BYTES` 로 줄인다 (minor 5)
     ReadFileBytes { worktree: String, file: String, offset: u64, len: u64 },
+    /// 브라우저 칸 주소를 원격 기기에서 열 수 있게 대리 포트를 연다 (minor 6). 이 컴퓨터의 http `localhost` 개발 서버
+    /// 주소면 대리 포트를, 아니면(공개 주소 · 원격 접속이 꺼짐) None 을 준다. 보는 기기는 자기가 붙은 데몬 호스트의 그 포트로 연다
+    BrowserProxy { url: String },
     /// 글자 파일을 통째로 쓴다. 답은 `File` (글은 빼고 새 크기 · 바뀐 때). `expect_modified` 를 주면
     /// 파일이 그때 그대로일 때만 쓰고, 그사이 바뀌었으면 `Conflict` 로 거절한다 (minor 5)
     WriteFile {
@@ -621,6 +624,7 @@ pub enum Response {
     Dir { entries: Vec<DirEntry> },
     File { file: FileContent },
     FileBytes { bytes: FileBytes },
+    BrowserProxy { port: Option<u16> },
     SearchHits { hits: Vec<SearchHit>, truncated: bool },
     FileList { files: Vec<String>, truncated: bool },
     LineCounts { counts: Vec<LineCount> },

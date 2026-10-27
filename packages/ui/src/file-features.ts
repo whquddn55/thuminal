@@ -1,20 +1,20 @@
-// 파일 칸이 데몬 새 기능(파일 쓰기 · 바이트 읽기)을 써도 되는지, 파일이 그림 · 영상 · 소리인지.
+// 화면이 데몬 새 기능(파일 쓰기 · 바이트 읽기, 브라우저 칸 대리 …)을 써도 되는지, 파일이 그림 · 영상 · 소리인지.
 //
-// 옛 데몬은 모르는 요청을 받으면 연결을 끊는다. 그래서 데몬 부 판이 `FILES_PROTOCOL_MINOR` 이상일 때만 새 요청을 보낸다.
+// 옛 데몬은 모르는 요청을 받으면 연결을 끊는다. 그래서 데몬 부 판이 그 기능이 생긴 판 이상일 때만 새 요청을 보낸다.
 // 데몬을 다시 띄우면 `daemon_reconnected` 가 오고 판을 다시 본다.
 
 import { useEffect, useState } from "react";
 
 import { FILES_PROTOCOL_MINOR, type HostApi } from "@thuminal/term-core";
 
-/** 이 호스트 데몬이 파일 쓰기 · 바이트 읽기를 아는지. 모르는 동안(묻는 중)은 null */
-export function useFilesSupported(host: HostApi): boolean | null {
+/** 이 호스트 데몬의 프로토콜 부 판이 `minor` 이상인지. 모르는 동안(묻는 중)은 null */
+export function useDaemonSupports(host: HostApi, minor: number): boolean | null {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
     let alive = true;
     const check = () =>
       void host.daemon().then(
-        (d) => alive && setOk((d.protocol?.[1] ?? 0) >= FILES_PROTOCOL_MINOR && (d.protocol?.[0] ?? 0) >= 1),
+        (d) => alive && setOk((d.protocol?.[1] ?? 0) >= minor && (d.protocol?.[0] ?? 0) >= 1),
         () => alive && setOk(false),
       );
     check();
@@ -23,8 +23,13 @@ export function useFilesSupported(host: HostApi): boolean | null {
       alive = false;
       stop();
     };
-  }, [host]);
+  }, [host, minor]);
   return ok;
+}
+
+/** 이 호스트 데몬이 파일 쓰기 · 바이트 읽기를 아는지. 모르는 동안(묻는 중)은 null */
+export function useFilesSupported(host: HostApi): boolean | null {
+  return useDaemonSupports(host, FILES_PROTOCOL_MINOR);
 }
 
 export type MediaKind = "image" | "video" | "audio";

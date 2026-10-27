@@ -354,6 +354,33 @@ async fn remove_worktree(
 
 /// 데몬 요청을 그대로 넘긴다 (git, 파일, 워크트리 정보 등). 화면 쪽이 프로토콜 모양대로 요청을 만든다.
 /// 요청마다 명령을 따로 만들지 않아 껍데기가 얇게 남는다.
+/// 원격 호스트의 브라우저 칸 주소를 이 컴퓨터에서 열 주소로 바꾼다. 원격 데몬이 `localhost` 개발 서버를 대리하면
+/// `http://<원격 호스트>:<대리 포트><경로>?thuminal_proxy=<기기 토큰>` 을, 대리할 주소가 아니거나 데몬이 옛 판(부 판 6 미만)이면
+/// None 을 준다 (옛 데몬은 모르는 요청을 받으면 연결을 끊으므로 보내지 않는다). 토큰은 화면에 주지 않고 주소에만 싣는다
+#[tauri::command]
+async fn browser_proxy_url(state: State<'_, AppState>, host: Option<String>, url: String) -> CmdResult<Option<String>> {
+    let Some(id) = host else { return Ok(None) };
+    let (link, record) = {
+        let remotes = state.remotes.lock().unwrap();
+        let r = remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터다: {id}"))?;
+        (r.link.clone(), r.record.clone())
+    };
+    if link.current().protocol.is_none_or(|(_, minor)| minor < 6) {
+        return Ok(None);
+    }
+    let c = state.client(Some(&id)).await?;
+    let Response::BrowserProxy { port: Some(port) } = c.request(Request::BrowserProxy { url: url.clone() }).await.map_err(err)? else { return Ok(None) };
+    let (Ok(mut view), Ok(orig)) = (tauri::Url::parse(&record.base), tauri::Url::parse(&url)) else { return Ok(None) };
+    if view.set_port(Some(port)).is_err() {
+        return Ok(None);
+    }
+    view.set_path(orig.path());
+    view.set_query(orig.query());
+    view.set_fragment(orig.fragment());
+    view.query_pairs_mut().append_pair("thuminal_proxy", &record.token);
+    Ok(Some(view.to_string()))
+}
+
 #[tauri::command]
 async fn daemon_request(state: State<'_, AppState>, host: Option<String>, request: Request) -> CmdResult<Response> {
     state.client(host.as_deref()).await?.request(request).await.map_err(err)
@@ -595,6 +622,7 @@ pub fn run() {
             create_worktree,
             remove_worktree,
             daemon_request,
+            browser_proxy_url,
             hosts_list,
             hosts_subscribe,
             hosts_add,

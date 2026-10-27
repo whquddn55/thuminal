@@ -28,3 +28,6 @@ apps/android/build/
 apps/android/app/build/
 apps/android/local.properties
 apps/web/public/download/
+
+# 에이전트가 쓰는 git worktree (Claude Code)
+.claude/worktrees/

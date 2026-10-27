@@ -86,6 +86,8 @@ pub struct Remote {
     reconcile_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
     reconcile_rx: Mutex<Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>>>,
     fonts: Mutex<Option<Fonts>>,
+    /// 원격 기기용 브라우저 칸 대리 (browser_proxy.rs)
+    proxies: crate::browser_proxy::Proxies,
 }
 
 impl Remote {
@@ -104,6 +106,7 @@ impl Remote {
             reconcile_tx,
             reconcile_rx: Mutex::new(Some(rx)),
             fonts: Mutex::new(None),
+            proxies: Default::default(),
         })
     }
 
@@ -165,6 +168,7 @@ impl Remote {
         }
         if enabled == Some(false) {
             self.kick_all();
+            self.proxies.close_all();
         }
         self.reconcile().await;
         Ok(self.status())
@@ -217,7 +221,16 @@ impl Remote {
     }
 
     /// 토큰에 맞는 기기 id
-    fn device_for(&self, token: &str) -> Option<String> {
+    /// 브라우저 칸 주소의 대리 포트 (원격 기기가 이 컴퓨터의 `localhost` 개발 서버를 보게). 대리할 주소가 아니거나
+    /// 원격 접속이 꺼져 있으면 None
+    pub fn browser_proxy(self: &Arc<Self>, url: &str) -> Option<u16> {
+        let target = crate::browser_proxy::local_target(url)?;
+        let ips: BTreeSet<IpAddr> = self.wanted().into_iter().map(|a| a.ip()).collect();
+        let port = self.state.lock().unwrap().port;
+        self.proxies.ensure(self, target, ips, port)
+    }
+
+    pub(crate) fn device_for(&self, token: &str) -> Option<String> {
         let st = self.state.lock().unwrap();
         st.devices.iter().find(|d| same(d.token.as_bytes(), token.as_bytes())).map(|d| d.id.clone())
     }

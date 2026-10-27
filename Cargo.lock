@@ -4319,6 +4319,8 @@ dependencies = [
  "base64 0.22.1",
  "fontdb",
  "futures-util",
+ "hyper",
+ "hyper-util",
  "image",
  "libc",
  "memchr",

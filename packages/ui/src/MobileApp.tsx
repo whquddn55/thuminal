@@ -16,6 +16,7 @@ import {
   ClipboardTextIcon,
   DotsThreeVerticalIcon,
   GitForkIcon,
+  GlobeIcon,
   KeyboardIcon,
   PaperPlaneRightIcon,
   PlusIcon,
@@ -28,6 +29,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { Renderer, SessionId, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
+import { FramePane } from "./BrowserPane";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { groupKey, normalizeGroups } from "./groups";
@@ -61,7 +63,7 @@ export interface RemoteConnection {
   reconnectNow(): void;
 }
 
-type Screen = { kind: "home" } | { kind: "ws"; ws: WorkspaceId } | { kind: "term"; ws: WorkspaceId; session: SessionId };
+type Screen = { kind: "home" } | { kind: "ws"; ws: WorkspaceId } | { kind: "term"; ws: WorkspaceId; session: SessionId } | { kind: "web"; ws: WorkspaceId; pane: number };
 
 const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
 const FONT_KEY = "thuminal.mobileFontSize";
@@ -156,6 +158,7 @@ function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => voi
       {screen.kind === "home" && <Home go={go} menu={menu} />}
       {screen.kind === "ws" && <WorkspaceScreen ws={screen.ws} go={go} back={back} menu={menu} />}
       {screen.kind === "term" && <TerminalScreen key={screen.session} ws={screen.ws} session={screen.session} go={go} back={back} />}
+      {screen.kind === "web" && <WebScreen key={screen.pane} ws={screen.ws} pane={screen.pane} back={back} />}
     </div>
   );
 }
@@ -182,6 +185,25 @@ function Header({ title, sub, back, right }: { title: React.ReactNode; sub?: Rea
 /** 워크스페이스의 터미널 세션들 (탭 차례, 팀원 빼고) */
 function terminalsOf(layout: { tabs: { root: Parameters<typeof panesOf>[0] }[] } | undefined): SessionId[] {
   return (layout?.tabs ?? []).flatMap((t) => panesOf(t.root).flatMap((p) => (p.type === "terminal" ? [p.session] : [])));
+}
+
+/** 워크스페이스의 브라우저 칸 (칸 번호 · 주소) */
+function browsersOf(layout: { tabs: { root: Parameters<typeof panesOf>[0] }[] } | undefined): { id: number; url: string }[] {
+  return (layout?.tabs ?? []).flatMap((t) => panesOf(t.root).flatMap((p) => (p.type === "doc" && p.doc.kind === "browser" ? [{ id: p.id, url: p.doc.url ?? "about:blank" }] : [])));
+}
+
+/** 브라우저 칸 하나를 폰 화면 가득 (데몬 대리 주소를 iframe 으로, BrowserPane `FramePane`) */
+function WebScreen({ ws, pane, back }: { ws: WorkspaceId; pane: number; back: () => void }) {
+  const worktrees = useApp((s) => s.worktrees);
+  const url = useApp((s) => browsersOf(s.layouts[ws]).find((w) => w.id === pane)?.url);
+  return (
+    <>
+      <Header title="브라우저" sub={wsTitle(ws, worktrees)} back={back} />
+      <div className="relative min-h-0 flex-1">
+        {url ? <FramePane paneId={pane} url={url} focused /> : <p className="p-6 text-center text-[13px] text-muted-foreground">칸이 닫혔다</p>}
+      </div>
+    </>
+  );
 }
 
 function wsTitle(ws: WorkspaceId, worktrees: WorktreeInfo[]): string {
@@ -409,6 +431,7 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
   const agents = useApp((s) => s.agents);
   const w = worktrees.find((x) => x.path === ws);
   const ids = terminalsOf(layout);
+  const webs = browsersOf(layout);
   const [busy, setBusy] = useState(false);
 
   /** 새 탭을 띄우고 그 터미널로 간다 */
@@ -430,7 +453,7 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
     <>
       <Header title={wsTitle(ws, worktrees)} sub={w?.branch} back={back} right={menu} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {ids.length === 0 && <p className="p-6 text-center text-[13px] text-muted-foreground">열린 터미널이 없다</p>}
+        {ids.length === 0 && webs.length === 0 && <p className="p-6 text-center text-[13px] text-muted-foreground">열린 터미널이 없다</p>}
         {ids.map((id) => {
           const s = sessions[id];
           const mates = Object.values(sessions).filter((m) => m.labels[TEAM_LEADER_LABEL] === String(id));
@@ -456,6 +479,16 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
             </div>
           );
         })}
+        {webs.map((w) => (
+          <Row key={`web-${w.id}`} onClick={() => go({ kind: "web", ws, pane: w.id })}>
+            <GlobeIcon className="size-4 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14px]">브라우저</div>
+              <div className="truncate text-[11px] text-muted-foreground">{w.url}</div>
+            </div>
+            <CaretRightIcon className="size-4 text-muted-foreground" />
+          </Row>
+        ))}
       </div>
       <div className="flex shrink-0 gap-2 border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <button disabled={busy} className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border text-[14px] active:bg-accent disabled:opacity-50" onClick={() => void launch()}>
