@@ -40,8 +40,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 앱 crate 를 컴파일하려면 화면 빌드 결과(apps/desktop/dist)와 사이드카 자리가 있어야 한다
+      # 앱 crate 를 컴파일하려면 화면 빌드 결과(apps/desktop/dist), 번들 리소스인 원격 웹 화면(apps/web/dist),
+      # 사이드카 자리가 있어야 한다
       - run: pnpm -C apps/desktop build:web
+      - run: pnpm -C apps/web build
       - run: scripts/prepare-sidecars.sh debug
       - run: cargo test --workspace
         env:
