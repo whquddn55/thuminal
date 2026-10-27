@@ -178,7 +178,6 @@ export function Sidebar() {
   // 이름을 고치는 워크스페이스 (막 만든 것 포함)
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
   const remoteHosts = useApp((s) => s.remoteHosts);
-  const showGroups = groups.length > 1 || remoteHosts.length > 0;
   const repoById = new Map(repos.map((r) => [r.id, r]));
 
   /** 새 워크스페이스를 만들고(프로젝트 `move` 를 옮겨 넣고) 바로 이름을 고치게 한다 */
@@ -209,7 +208,7 @@ export function Sidebar() {
         </Tooltip>
       </div>
       <div className="flex h-7 shrink-0 items-center gap-1 pr-2 pl-3">
-        <span className="flex-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{showGroups ? "워크스페이스" : "프로젝트"}</span>
+        <span className="flex-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">프로젝트</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="워크스페이스 만들기" onClick={() => void newGroup()}>
@@ -244,8 +243,7 @@ export function Sidebar() {
             ))}
           </Group>
         )}
-        {showGroups
-          ? groups.map((g, gi) => (
+        {groups.map((g, gi) => (
               <GroupSection
                 key={g.id}
                 id={g.id}
@@ -277,8 +275,7 @@ export function Sidebar() {
               >
                 {projects(g)}
               </GroupSection>
-            ))
-          : groups.map(projects)}
+            ))}
         {remoteHosts.map((h) => {
           const m = model.hostModel(h.id);
           return m ? (
@@ -363,7 +360,7 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
         }
       >
         {pinned.length > 0 && (
-          <Group label="고정" icon={<PushPinIcon className="size-3" />} collapsed={mine.has("@pinned")} onToggle={() => toggle("@pinned")}>
+          <Group nested label="고정" icon={<PushPinIcon className="size-3" />} collapsed={mine.has("@pinned")} onToggle={() => toggle("@pinned")}>
             {pinned.map((w) => (
               <WorktreeCard key={`pin:${w.path}`} w={w} />
             ))}
@@ -374,7 +371,7 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
           return r ? <ProjectGroup key={r.id} r={r} group="" index={index} groups={[]} collapsed={mine} onToggle={toggle} /> : null;
         })}
         {hasOther && (
-          <Group label="기타" icon={<TerminalWindowIcon className="size-3.5" />} collapsed={mine.has("@other")} onToggle={() => toggle("@other")}>
+          <Group nested label="기타" icon={<TerminalWindowIcon className="size-3.5" />} collapsed={mine.has("@other")} onToggle={() => toggle("@other")}>
             <WorkspaceCard ws={OTHER_WORKSPACE} title="워크트리 밖 터미널" subtitle="홈 폴더 등" />
           </Group>
         )}
@@ -416,6 +413,7 @@ function ProjectGroup({
   const others = groups.filter((g) => g.id !== group);
   return (
     <Group
+      nested
       label={r.name}
       title={r.path}
       icon={<RepoMark repo={r.id} name={r.name} />}
@@ -504,6 +502,7 @@ function Group({
   onNew,
   menu,
   drag,
+  nested,
   children,
 }: {
   label: string;
@@ -517,6 +516,8 @@ function Group({
   menu?: React.ReactNode;
   /** 프로젝트 머리면 끌어 옮길 수 있다: 저장소 id, 든 워크스페이스, 그 안 자리 */
   drag?: { repo: string; group: string; index: number };
+  /** 워크스페이스 안에 든다: 스크롤하면 워크스페이스 머리 밑에 쌓여 붙는다 */
+  nested?: boolean;
   children: React.ReactNode;
 }) {
   const model = useModel();
@@ -534,7 +535,8 @@ function Group({
         data-group={drag?.group}
         data-index={drag?.index}
         className={cn(
-          "group sticky top-0 z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2",
+          "group sticky z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2",
+          nested ? "top-7" : "top-0",
           line === "before" && "shadow-[inset_0_2px_0_var(--color-drop)]",
           line === "after" && "shadow-[inset_0_-2px_0_var(--color-drop)]",
         )}

@@ -251,8 +251,6 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
               </Section>,
             ];
           });
-          // 기본 하나뿐이면 머리 없이 프로젝트만 (데스크톱 사이드바와 같다)
-          if (groups.length === 1) return projects;
           const key = groupKey(g.id);
           const open = !collapsed.has(key);
           return (

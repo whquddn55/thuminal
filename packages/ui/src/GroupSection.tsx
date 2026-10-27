@@ -82,7 +82,8 @@ export function GroupSection({
         role="button"
         tabIndex={0}
         title={remote?.title}
-        className="group flex h-7 cursor-pointer items-center gap-1 rounded-md bg-sidebar-accent/50 pr-1 pl-1.5 select-none hover:bg-sidebar-accent"
+        // 스크롤해도 맨 위에 붙어 있고, 그 밑에 프로젝트 머리가 쌓인다 (Sidebar Group 의 nested). 밑 글자가 비치지 않게 바탕을 칠한다
+        className="group sticky top-0 z-[3] flex h-7 cursor-pointer items-center gap-1 rounded-md bg-[color-mix(in_oklab,var(--sidebar-accent)_50%,var(--sidebar))] pr-1 pl-1.5 select-none hover:bg-sidebar-accent"
         onClick={() => !renaming && onToggle()}
         onKeyDown={(e) => {
           if (!renaming && (e.key === "Enter" || e.key === " ")) {
