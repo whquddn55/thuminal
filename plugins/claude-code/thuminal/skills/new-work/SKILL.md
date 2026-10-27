@@ -154,7 +154,7 @@ T="$THUMINAL_CLI"; "$T" wt new "$BRANCH" --repo "$REPO_ID" --base "$BASE" --name
 **DEVELOP_BASE 면 위 명령 대신 아래 세 단계** (2026-10-01 사용자 지시 — 로컬 develop 이
 낡았어도 항상 최신 origin/develop 기준):
 
-1. origin 의 develop 을 먼저 받는다. `git -C "$MAIN_REPO" fetch origin develop` 로 받는다.
+1. origin 의 develop 을 먼저 받는다: `git -C "$MAIN_REPO" fetch origin develop`.
    **fetch 가 실패하면 낡은 develop 으로 대신 만들지 말고 중단 후 보고한다** (VPN 등).
 2. 받은 `origin/develop` 에서 따고, 기준 커밋을 **BASE_SHA** 로 기록한다:
 
