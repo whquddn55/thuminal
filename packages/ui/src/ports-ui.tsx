@@ -1,15 +1,14 @@
-// 포트 표시와 동작: 탭의 포트 표시, 워크트리 카드의 포트 수, 브라우저로 열기 · 주소 복사.
-//
-// 탭 표시는 탭 줄이 좁아지지 않게 작게 그린다: 포트가 하나면 `:3000`, 둘 이상이면 플러그 아이콘 + 개수.
-// 누르면 그 탭 세션들의 포트 목록(포트 · 프로세스 · pid)과 [브라우저로 열기] · [주소 복사] 를 작은 메뉴로 보인다.
+// 포트 표시와 동작: 세션 아이콘(탭 · 칸 머리 · 사이드바 세션 줄)에 마우스를 올리거나 우클릭하면 그 세션이 연 포트 팝업.
+// 포트마다 [브라우저로 열기] · [주소 복사] · [프로세스 멈추기]. 워크트리 밖 포트(밖)는 화면 어디에도 보이지 않는다.
 
-import { CopyIcon, GlobeIcon, PlugIcon } from "@phosphor-icons/react";
-import { useMemo } from "react";
+import { CopyIcon, GlobeIcon, StopCircleIcon } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ListenPort, SessionId } from "@thuminal/term-core";
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
-import { BACKGROUND_POLL_MS, portsOfSessions, portsOfWorktree, portUrl, useProcesses } from "./processes";
+import { Popover, PopoverAnchor, PopoverContent } from "./components/ui/popover";
+import { cn } from "./lib/utils";
+import { BACKGROUND_POLL_MS, portsOfSessions, portUrl, processesOf, programName, useProcesses } from "./processes";
 import { type AppModel, FLOATING_WORKSPACE, useModel } from "./store";
 
 /** 원격 컴퓨터 포트면 그 컴퓨터 이름 (주소에 쓴다). 이 컴퓨터면 null */
@@ -54,84 +53,116 @@ export function copyPort(model: AppModel, p: ListenPort) {
   void navigator.clipboard.writeText(portAddress(model, p)).catch(() => undefined);
 }
 
-/** 탭 줄의 포트 표시. 포트가 없으면 그리지 않는다 */
-export function TabPorts({ sessions }: { sessions: SessionId[] }) {
+/**
+ * 세션 아이콘을 감싼다. 그 세션들이 연 포트가 있으면 아이콘에 마우스를 올리거나(잠깐 머물면) 우클릭하면 포트 팝업을 연다.
+ * 포트가 없으면 아이콘만 그린다. `marked` 면 포트가 있을 때 아이콘을 밝게 칠한다 (일반 터미널 아이콘)
+ */
+export function SessionPorts({ sessions, children, marked }: { sessions: SessionId[]; children: React.ReactNode; marked?: boolean }) {
   const model = useModel();
   const { report } = useProcesses(model.services.host, BACKGROUND_POLL_MS);
   // sessions 는 그릴 때마다 새 배열이라 글로 바꿔 본다
   const key = sessions.join(",");
   const ports = useMemo(() => portsOfSessions(report, key ? key.split(",").map(Number) : []), [report, key]);
-  if (!ports.length) return null;
-  const one = ports.length === 1 ? ports[0] : null;
+  const [open, setOpen] = useState(false);
+  const timer = useRef(0);
+  const later = (v: boolean, ms: number) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(v), ms);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  if (!ports.length) return <>{children}</>;
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="flex h-4 shrink-0 items-center gap-0.5 rounded bg-foreground/10 px-1 font-mono text-[10px] leading-none tabular-nums text-muted-foreground hover:bg-foreground/15 hover:text-foreground"
-          title={ports.map((p) => `:${p.port} ${p.process} (pid ${p.pid})`).join("\n")}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <span
+          className={cn("inline-flex shrink-0 items-center gap-1", marked && "text-foreground")}
+          onMouseEnter={() => later(true, 300)}
+          onMouseLeave={() => later(false, 200)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.clearTimeout(timer.current);
+            setOpen(true);
+          }}
         >
-          {one ? (
-            `:${one.port}`
-          ) : (
-            <>
-              <PlugIcon className="size-2.5" />
-              {ports.length}
-            </>
-          )}
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64" onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuLabel className="text-2xs font-normal text-muted-foreground">이 탭이 연 포트 · ⇧⌘클릭은 시스템 브라우저</DropdownMenuLabel>
-        {ports.map((p) => (
-          <PortMenuItem key={`${p.pid}:${p.port}`} p={p} />
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function PortMenuItem({ p }: { p: ListenPort }) {
-  const model = useModel();
-  return (
-    <DropdownMenuItem
-      className="group/port gap-1.5 text-xs"
-      title={`${portAddress(model, p)}\n${p.command}`}
-      onClick={(e) => openPort(model, p, e.metaKey && e.shiftKey)}
-    >
-      <GlobeIcon className="size-3.5" />
-      <span className="w-12 shrink-0 font-mono tabular-nums">:{p.port}</span>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">{p.process}</span>
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">{p.pid}</span>
-      <button
-        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-        title="주소 복사"
-        onClick={(e) => {
-          e.stopPropagation();
-          copyPort(model, p);
-        }}
-        onPointerUp={(e) => e.stopPropagation()}
+          {children}
+        </span>
+      </PopoverAnchor>
+      <PopoverContent
+        align="start"
+        className="w-72 p-1"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onMouseEnter={() => window.clearTimeout(timer.current)}
+        onMouseLeave={() => later(false, 200)}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <CopyIcon className="size-3" />
-      </button>
-    </DropdownMenuItem>
+        <div className="px-1.5 pt-1 pb-0.5 text-2xs text-muted-foreground">열린 포트 · ⇧⌘클릭은 시스템 브라우저</div>
+        {ports.map((p) => (
+          <PortRow key={`${p.pid}:${p.port}`} p={p} />
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
-/** 워크트리 카드 브랜치 줄 오른쪽의 포트 수 */
-export function WorktreePortCount({ worktree }: { worktree: string }) {
+/** 포트 한 줄: 포트 · 프로세스 · pid, [브라우저로 열기] · [주소 복사] · [프로세스 멈추기] */
+export function PortRow({ p }: { p: ListenPort }) {
   const model = useModel();
-  const { report } = useProcesses(model.services.host, BACKGROUND_POLL_MS);
-  const ports = useMemo(() => portsOfWorktree(report, worktree), [report, worktree]);
-  if (!ports.length) return null;
+  const host = model.services.host;
+  const [stopping, setStopping] = useState(false);
+  const stop = () => {
+    setStopping(true);
+    const poller = processesOf(host);
+    void host
+      .stopProcess(p.pid, p.port)
+      .then(
+        () => {
+          void poller.refresh();
+          setTimeout(() => void poller.refresh(), 500);
+        },
+        (e) => model.fail(e),
+      )
+      .finally(() => setStopping(false));
+  };
   return (
-    <span
-      className="ml-auto flex shrink-0 items-center gap-0.5 text-[10px] leading-none tabular-nums text-muted-foreground/80"
-      title={ports.map((p) => `:${p.port} ${p.process} (pid ${p.pid})`).join("\n")}
+    <div className="group flex h-6 items-center gap-1.5 rounded px-1.5 text-xs hover:bg-accent/60" title={`${portAddress(model, p)}\n${p.command}${p.cwd ? `\n폴더: ${p.cwd}` : ""}`}>
+      <span className="w-14 shrink-0 font-mono tabular-nums">:{p.port}</span>
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {p.process}
+        <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{p.pid}</span>
+      </span>
+      <PortButton title="브라우저로 열기 (⇧⌘클릭은 시스템 브라우저)" onClick={(e) => openPort(model, p, e.metaKey && e.shiftKey)}>
+        <GlobeIcon className="size-3.5" />
+      </PortButton>
+      <PortButton title="주소 복사" onClick={() => copyPort(model, p)}>
+        <CopyIcon className="size-3.5" />
+      </PortButton>
+      {!isDaemon(p) && (
+        <PortButton title="프로세스 멈추기 (SIGTERM)" onClick={stop} disabled={stopping} danger>
+          <StopCircleIcon className="size-3.5" />
+        </PortButton>
+      )}
+    </div>
+  );
+}
+
+/** thuminal 데몬(개발 데몬 등)은 그 밑 터미널이 모두 끝나므로 멈추지 않는다 (데몬도 거절한다) */
+const isDaemon = (p: ListenPort) => p.process === "thuminald" || programName(p.command) === "thuminald";
+
+function PortButton({ title, onClick, disabled, danger, children }: { title: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      className={cn(
+        "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-40",
+        danger && "hover:bg-destructive/15 hover:text-destructive",
+      )}
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
     >
-      <PlugIcon className="size-2.5" />
-      {ports.length}
-    </span>
+      {children}
+    </button>
   );
 }

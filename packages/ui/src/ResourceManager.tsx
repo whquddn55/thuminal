@@ -1,27 +1,22 @@
 // 리소스 관리자 (Orca 와 같다 + 세션 펼치기). 사이드바 맨 아래 [리소스] 단추가 연다.
 //
-// - 위: LISTEN 포트. 워크트리별로 묶고, 밖 포트는 접히는 구역에 둔다. 포트마다 [브라우저로 열기] · [주소 복사] · [프로세스 멈추기].
-//   멈추기는 데몬이 다시 읽어 아직 LISTEN 이고 워크트리 · 세션 것일 때만 그 pid 하나에 SIGTERM 을 보낸다. 끝나면 바로, 0.5초 뒤 다시 읽는다.
-// - 아래: 저장소 → 워크트리 → 세션 트리에 CPU · 메모리(RSS). 이름 · CPU · 메모리로 정렬한다 (기본 메모리 내림차순).
-//   세션을 펼치면 그 밑 프로세스(pid · 명령 · CPU · 메모리 · 연 포트)가 나온다. 세션을 누르면 그 칸으로 간다.
+// - 리소스만 본다: 저장소 → 워크트리 → 세션 트리에 CPU · 메모리(RSS). 이름 · CPU · 메모리로 정렬한다 (기본 메모리 내림차순).
+//   세션을 펼치면 그 밑 프로세스(pid · 명령 · CPU · 메모리)가 나온다. 세션을 누르면 그 칸으로 간다.
+// - 포트는 여기 두지 않는다. 세션 아이콘(탭 · 칸 머리 · 사이드바)에 마우스를 올리거나 우클릭하면 뜬다 (ports-ui.tsx).
 //   [세션 끝내기] 는 탭에 묶였거나 에이전트가 떠 있으면 묻는다.
 // - 열려 있는 동안 2초마다 다시 읽는다.
 
 import {
   CaretDownIcon,
   CaretRightIcon,
-  CopyIcon,
   GaugeIcon,
-  GlobeIcon,
-  PlugIcon,
   SortAscendingIcon,
   SortDescendingIcon,
-  StopCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 
-import type { ListenPort, ProcessInfo, SessionInfo, SessionProcesses } from "@thuminal/term-core";
+import type { ProcessInfo, SessionInfo, SessionProcesses } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
 import { AGENTS } from "./agents";
@@ -30,8 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { paneOfSession } from "./layout";
 import { cn } from "./lib/utils";
-import { copyPort, openPort, portAddress } from "./ports-ui";
-import { BACKGROUND_POLL_MS, formatBytes, formatCpu, OPEN_POLL_MS, processesOf, programName, useProcesses, VIA_LABEL } from "./processes";
+import { BACKGROUND_POLL_MS, formatBytes, formatCpu, OPEN_POLL_MS, processesOf, programName, useProcesses } from "./processes";
 import { ModelContext, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
 
 /** 사이드바 맨 아래 줄 단추: 메모리 합계 · 세션 수. 누르면 리소스 관리자 */
@@ -225,7 +219,6 @@ function ResourceManager({ onClose }: { onClose: () => void }) {
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto thm-scroll">
-        <PortsSection ports={report.ports} error={report.ports_error} truncated={report.ports_truncated} />
         <div className="sticky top-0 z-[1] flex h-7 items-center gap-1 border-y bg-popover px-3 text-2xs text-muted-foreground">
           <SortButton label="이름" k="name" sort={sort} onClick={toggleSort} className="flex-1 justify-start" />
           <SortButton label="CPU" k="cpu" sort={sort} onClick={toggleSort} className="w-14 justify-end" />
@@ -317,7 +310,6 @@ function Row({ depth, name, title, cpu, rss, className }: { depth: number; name:
 }
 
 function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNode; expanded: boolean; onToggle: () => void; onReveal: () => void; onKill: () => void }) {
-  const ports = n.sp.processes.flatMap((p) => p.ports);
   return (
     <>
       <div className="group flex h-6 cursor-pointer items-center gap-1 rounded px-1.5 text-xs hover:bg-accent" onClick={onReveal} title={`s${n.sp.session} · 셸 pid ${n.sp.pid}\n누르면 그 칸으로 가요`}>
@@ -335,12 +327,6 @@ function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNod
           {n.agent && <AgentIcon kind={n.agent} className="size-3 shrink-0" />}
           <span className="min-w-0 truncate">{n.name}</span>
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">s{n.sp.session}</span>
-          {ports.length > 0 && (
-            <span className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-muted-foreground">
-              <PlugIcon className="size-2.5" />
-              {ports.length === 1 ? `:${ports[0]}` : ports.length}
-            </span>
-          )}
         </span>
         <span className="w-14 shrink-0 text-right tabular-nums">{formatCpu(n.cpu)}</span>
         <span className="w-[4.5rem] shrink-0 text-right tabular-nums">{formatBytes(n.rss)}</span>
@@ -364,11 +350,6 @@ function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNod
               <span className="flex min-w-0 flex-1 items-center gap-1.5" style={{ paddingLeft: 40 + p.depth * 10 }}>
                 <span className="w-12 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">{p.pid}</span>
                 <span className="min-w-0 truncate font-mono text-[10.5px]">{p.command}</span>
-                {p.ports.map((port) => (
-                  <span key={port} className="shrink-0 rounded bg-foreground/10 px-1 font-mono text-[10px]">
-                    :{port}
-                  </span>
-                ))}
               </span>
               <span className="w-14 shrink-0 text-right tabular-nums">{formatCpu(p.cpu)}</span>
               <span className="w-[4.5rem] shrink-0 text-right tabular-nums">{formatBytes(p.rss)}</span>
@@ -382,113 +363,4 @@ function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNod
   );
 }
 
-function PortsSection({ ports, error, truncated }: { ports: ListenPort[]; error: string | null; truncated: boolean }) {
-  const worktrees = useApp((s) => s.worktrees);
-  const [showExternal, setShowExternal] = useState(false);
-  const mine = ports.filter((p) => p.via !== "external");
-  const external = ports.filter((p) => p.via === "external");
-  const groups = new Map<string, ListenPort[]>();
-  for (const p of mine) {
-    const k = p.worktree ?? "";
-    groups.set(k, [...(groups.get(k) ?? []), p]);
-  }
-  const titleOf = (path: string) => {
-    if (!path) return "워크트리 밖 세션";
-    const w = worktrees.find((x) => x.path === path);
-    return w ? worktreeTitle(w) : (path.split("/").pop() ?? path);
-  };
-  return (
-    <div className="px-1.5 pt-2 pb-2">
-      <div className="flex items-baseline gap-2 px-1.5 pb-1">
-        <span className="text-xs font-semibold">포트</span>
-        <span className="text-2xs text-muted-foreground tabular-nums">
-          워크트리 포트 {mine.length}개 · 밖 {external.length}개
-        </span>
-      </div>
-      {error && <p className="px-1.5 py-1 text-xs text-muted-foreground">{error}</p>}
-      {!error && mine.length === 0 && <p className="px-1.5 py-1 text-xs text-muted-foreground">워크트리 포트가 없어요</p>}
-      {[...groups.entries()].map(([path, list]) => (
-        <div key={path} className="pb-1">
-          <div className="truncate px-1.5 pt-1 text-2xs text-muted-foreground" title={path || undefined}>
-            {titleOf(path)}
-          </div>
-          {list.map((p) => (
-            <PortRow key={`${p.pid}:${p.port}`} p={p} />
-          ))}
-        </div>
-      ))}
-      {external.length > 0 && (
-        <div className="pt-1">
-          <button className="flex h-6 w-full items-center gap-1 rounded px-1.5 text-2xs text-muted-foreground hover:bg-accent/60" onClick={() => setShowExternal((v) => !v)}>
-            {showExternal ? <CaretDownIcon className="size-3" /> : <CaretRightIcon className="size-3" />}밖 포트 {external.length}개
-          </button>
-          {showExternal && external.map((p) => <PortRow key={`${p.pid}:${p.port}`} p={p} />)}
-        </div>
-      )}
-      {truncated && <p className="px-1.5 pt-1 text-2xs text-muted-foreground/70">포트가 많아 앞부분만 보여요</p>}
-    </div>
-  );
-}
-
-function PortRow({ p }: { p: ListenPort }) {
-  const model = useModel();
-  const host = model.services.host;
-  const [stopping, setStopping] = useState(false);
-  const stop = () => {
-    setStopping(true);
-    const poller = processesOf(host);
-    void host
-      .stopProcess(p.pid, p.port)
-      .then(
-        () => {
-          void poller.refresh();
-          setTimeout(() => void poller.refresh(), 500);
-        },
-        (e) => model.fail(e),
-      )
-      .finally(() => setStopping(false));
-  };
-  return (
-    <div className="group flex h-6 items-center gap-1.5 rounded px-1.5 text-xs hover:bg-accent/60" title={`${portAddress(model, p)}\n${p.command}${p.cwd ? `\n폴더: ${p.cwd}` : ""}\n${VIA_LABEL[p.via]}`}>
-      <span className="w-14 shrink-0 font-mono tabular-nums">:{p.port}</span>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-        {p.process}
-        <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{p.pid}</span>
-        {p.session !== null && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">s{p.session}</span>}
-        {(p.via === "cwd" || p.via === "command") && <span className="ml-1.5 text-[10px] text-muted-foreground/70">{p.via === "cwd" ? "폴더" : "명령줄"}</span>}
-      </span>
-      <PortButton title="브라우저로 열기 (⇧⌘클릭은 시스템 브라우저)" onClick={(e) => openPort(model, p, e.metaKey && e.shiftKey)}>
-        <GlobeIcon className="size-3.5" />
-      </PortButton>
-      <PortButton title="주소 복사" onClick={() => copyPort(model, p)}>
-        <CopyIcon className="size-3.5" />
-      </PortButton>
-      {p.via !== "external" && !isDaemon(p) && (
-        <PortButton title="프로세스 멈추기 (SIGTERM)" onClick={stop} disabled={stopping} danger>
-          <StopCircleIcon className="size-3.5" />
-        </PortButton>
-      )}
-    </div>
-  );
-}
-
-/** thuminal 데몬(개발 데몬 등)은 그 밑 터미널이 모두 끝나므로 멈추지 않는다 (데몬도 거절한다) */
-const isDaemon = (p: ListenPort) => p.process === "thuminald" || programName(p.command) === "thuminald";
-
-function PortButton({ title, onClick, disabled, danger, children }: { title: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
-  return (
-    <button
-      className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-40",
-        danger && "hover:bg-destructive/15 hover:text-destructive",
-      )}
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
 

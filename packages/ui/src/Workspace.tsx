@@ -35,7 +35,7 @@ import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { GalleryButton } from "./ImagePanel";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { SizeTakenOverlay } from "./size-overlay";
-import { TabPorts } from "./ports-ui";
+import { SessionPorts } from "./ports-ui";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
 
 type Surface = "main" | "floating";
@@ -119,6 +119,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
       {tabs.map((t, i) => {
         const agent = tabAgent(t, sessions);
         const panes = panesOf(t.root);
+        const terms = panes.flatMap((p) => (p.type === "terminal" ? [p.session] : []));
         const exited = panes.every((p) => p.type === "terminal" && sessions[p.session]?.state.state === "exited");
         const isActive = t.id === active?.id;
         const title = tabTitle(t, sessions, pages, model.hostKey);
@@ -149,7 +150,13 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
               >
                 <span className="text-[10px] tabular-nums text-muted-foreground/70">{i + 1}</span>
                 {agent ? (
-                  <StatusIndicator status={agent} className="size-2.5" />
+                  <SessionPorts sessions={terms}>
+                    <StatusIndicator status={agent} className="size-2.5" />
+                  </SessionPorts>
+                ) : panes[0]?.type === "terminal" ? (
+                  <SessionPorts sessions={terms} marked>
+                    <TerminalWindowIcon className="size-3.5 shrink-0" />
+                  </SessionPorts>
                 ) : panes[0]?.type === "doc" ? (
                   panes[0].doc.kind === "browser" ? (
                     <GlobeIcon className="size-3.5 shrink-0" />
@@ -177,7 +184,6 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 ) : (
                   <span className="min-w-0 truncate">{title}</span>
                 )}
-                <TabPorts sessions={panes.flatMap((p) => (p.type === "terminal" ? [p.session] : []))} />
                 {panes.length > 1 && <span className="rounded bg-foreground/10 px-1 text-[10px] tabular-nums">{panes.length}</span>}
                 <button
                   className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-foreground/10"
@@ -392,11 +398,17 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             beginDrag(e, model, { kind: "pane", pane: pane.id, tab: tab.id, workspace: ws, title });
           }}
         >
-          {session?.agent && (
-            <>
+          {session?.agent ? (
+            <SessionPorts sessions={[session.id]}>
               <StatusIndicator status={agentStatus(session.agent)} className="size-2.5" />
               <AgentIcon kind={session.agent.kind} className="size-3" />
-            </>
+            </SessionPorts>
+          ) : (
+            pane.type === "terminal" && (
+              <SessionPorts sessions={[pane.session]} marked>
+                <TerminalWindowIcon className="size-3 shrink-0" />
+              </SessionPorts>
+            )
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
           {pane.type === "terminal" && <GalleryButton session={pane.session} />}

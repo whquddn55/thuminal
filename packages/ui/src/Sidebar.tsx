@@ -69,7 +69,7 @@ import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
 import { RepoMark } from "./repo-icon";
-import { WorktreePortCount } from "./ports-ui";
+import { SessionPorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
 import { type AppState, FLOATING_WORKSPACE, HOST_STATE_LABEL, ModelContext, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 
@@ -849,7 +849,6 @@ function WorkspaceCard({
           </div>
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{subtitle}</span>
-            {ws.startsWith("/") && <WorktreePortCount worktree={ws} />}
           </div>
           {agents.length > 0 && (
             <div className="-ml-2 flex w-[calc(100%+0.5rem)] flex-col gap-0.5">
@@ -886,8 +885,10 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
         model.focusPane(hit.pane.id);
       }}
     >
-      <StatusIndicator status={agentStatus(agent)} className="size-2.5" />
-      <AgentIcon kind={agent.kind} className="size-[13px]" />
+      <SessionPorts sessions={[s.id]}>
+        <StatusIndicator status={agentStatus(agent)} className="size-2.5" />
+        <AgentIcon kind={agent.kind} className="size-[13px]" />
+      </SessionPorts>
       <span className="min-w-0 flex-1 truncate">
         <span className="text-muted-foreground/90">{lead}</span>
         {trail && <span className="text-muted-foreground/60"> - {trail}</span>}
