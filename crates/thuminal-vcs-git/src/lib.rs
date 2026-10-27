@@ -383,6 +383,8 @@ mod tests {
         let root = canonical(&dir.path().join("proj").to_string_lossy());
         std::fs::create_dir_all(&root).unwrap();
         git(&root, &["init", "-q", "-b", "main"]).unwrap();
+        // Windows git 은 기본으로 core.autocrlf=true 라 꺼내는 파일이 CRLF 가 된다. 시험은 줄바꿈을 그대로 둔다
+        git(&root, &["config", "core.autocrlf", "false"]).unwrap();
         git(&root, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]).unwrap();
         (dir, canonical(&root.to_string_lossy()))
     }

@@ -45,7 +45,7 @@ jobs:
       - run: pnpm -C apps/desktop build:web
       - run: pnpm -C apps/web build
       - run: scripts/prepare-sidecars.sh debug
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
         env:
           RUST_BACKTRACE: 1
 
