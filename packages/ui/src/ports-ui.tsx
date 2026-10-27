@@ -1,4 +1,5 @@
 // 포트 표시와 동작: 세션 아이콘(탭 · 칸 머리 · 사이드바 세션 줄)에 마우스를 올리거나 우클릭하면 그 세션이 연 포트 팝업.
+// 같은 워크트리에서 어느 세션에도 붙지 않은 포트(셸에서 떨어져 나간 서버)도 그 워크트리 세션 팝업에 함께 보인다.
 // 포트마다 [브라우저로 열기] · [주소 복사] · [프로세스 멈추기]. 워크트리 밖 포트(밖)는 화면 어디에도 보이지 않는다.
 
 import { CopyIcon, GlobeIcon, StopCircleIcon } from "@phosphor-icons/react";
@@ -8,8 +9,8 @@ import type { ListenPort, SessionId } from "@thuminal/term-core";
 
 import { Popover, PopoverAnchor, PopoverContent } from "./components/ui/popover";
 import { cn } from "./lib/utils";
-import { BACKGROUND_POLL_MS, portsOfSessions, portUrl, processesOf, programName, useProcesses } from "./processes";
-import { type AppModel, FLOATING_WORKSPACE, useModel } from "./store";
+import { BACKGROUND_POLL_MS, portsOfSessions, portUrl, processesOf, programName, strayPortsOfWorktree, useProcesses } from "./processes";
+import { type AppModel, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel } from "./store";
 
 /** 원격 컴퓨터 포트면 그 컴퓨터 이름 (주소에 쓴다). 이 컴퓨터면 null */
 export function remoteHostname(model: AppModel): string | null {
@@ -54,8 +55,8 @@ export function copyPort(model: AppModel, p: ListenPort) {
 }
 
 /**
- * 세션 아이콘을 감싼다. 그 세션들이 연 포트가 있으면 아이콘에 마우스를 올리거나(잠깐 머물면) 우클릭하면 포트 팝업을 연다.
- * 포트가 없으면 아이콘만 그린다. `marked` 면 포트가 있을 때 아이콘을 밝게 칠한다 (일반 터미널 아이콘)
+ * 세션 아이콘을 감싼다. 그 세션들이 연 포트나 그 워크트리의 세션 밖 포트가 있으면, 아이콘에 마우스를 올리거나(잠깐 머물면)
+ * 우클릭하면 포트 팝업을 연다. 포트가 없으면 아이콘만 그린다. `marked` 면 포트가 있을 때 아이콘을 밝게 칠한다 (일반 터미널 아이콘)
  */
 export function SessionPorts({ sessions, children, marked }: { sessions: SessionId[]; children: React.ReactNode; marked?: boolean }) {
   const model = useModel();
@@ -63,6 +64,8 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
   // sessions 는 그릴 때마다 새 배열이라 글로 바꿔 본다
   const key = sessions.join(",");
   const ports = useMemo(() => portsOfSessions(report, key ? key.split(",").map(Number) : []), [report, key]);
+  const ws = useApp(() => (sessions[0] === undefined ? null : model.workspaceOf(sessions[0])));
+  const stray = useMemo(() => (ws && ws !== FLOATING_WORKSPACE && ws !== OTHER_WORKSPACE ? strayPortsOfWorktree(report, ws) : []), [report, ws]);
   const [open, setOpen] = useState(false);
   const timer = useRef(0);
   const later = (v: boolean, ms: number) => {
@@ -70,7 +73,7 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
     timer.current = window.setTimeout(() => setOpen(v), ms);
   };
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  if (!ports.length) return <>{children}</>;
+  if (!ports.length && !stray.length) return <>{children}</>;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
@@ -101,6 +104,14 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
         {ports.map((p) => (
           <PortRow key={`${p.pid}:${p.port}`} p={p} />
         ))}
+        {stray.length > 0 && (
+          <>
+            <div className={cn("px-1.5 pb-0.5 text-2xs text-muted-foreground", ports.length ? "mt-1 border-t pt-1.5" : "pt-0.5")}>이 워크트리 · 세션 밖에서 실행</div>
+            {stray.map((p) => (
+              <PortRow key={`${p.pid}:${p.port}`} p={p} />
+            ))}
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );

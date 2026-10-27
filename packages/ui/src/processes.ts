@@ -128,6 +128,15 @@ export function portsOfSessions(report: ProcessReport | null, sessions: SessionI
   return report.ports.filter((p) => p.session !== null && sessions.includes(p.session)).sort((a, b) => a.port - b.port);
 }
 
+/**
+ * 워크트리에 붙었지만 어느 세션에도 붙지 않은 포트 (작업 폴더 · 명령줄로 찾은 것).
+ * claude 가 백그라운드로 실행한 서버처럼 셸에서 떨어져 나간(부모가 launchd) 프로세스가 여기 든다
+ */
+export function strayPortsOfWorktree(report: ProcessReport | null, worktree: string): ListenPort[] {
+  if (!report) return [];
+  return report.ports.filter((p) => p.session === null && p.via !== "external" && p.worktree === worktree).sort((a, b) => a.port - b.port);
+}
+
 /** 워크트리에 붙은 포트 (세션 · 폴더 · 명령줄 어느 근거든) */
 export function portsOfWorktree(report: ProcessReport | null, worktree: string): ListenPort[] {
   if (!report) return [];
