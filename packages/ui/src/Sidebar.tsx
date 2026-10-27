@@ -538,7 +538,7 @@ function Group({
         data-group={drag?.group}
         data-index={drag?.index}
         className={cn(
-          "group sticky z-[2] flex h-7 cursor-pointer items-center gap-1.5 bg-sidebar pr-1 pl-2",
+          "group sticky z-[2] flex h-7 cursor-pointer items-center gap-2 bg-sidebar pr-1 pl-2",
           nested ? "top-7" : "top-0",
           line === "before" && "shadow-[inset_0_2px_0_var(--color-drop)]",
           line === "after" && "shadow-[inset_0_-2px_0_var(--color-drop)]",
@@ -547,8 +547,8 @@ function Group({
         onClick={drag ? undefined : onToggle}
         onPointerDown={drag ? (e) => beginDrag(e, model, { kind: "project", repo: drag.repo, title: label }, onToggle) : undefined}
       >
-        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-4">{label}</span>
+        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
+        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5">{label}</span>
         {count !== undefined && (
           <span className={cn("pr-1.5 text-[11px] tabular-nums text-muted-foreground/70 group-hover:hidden", menuOpen && "hidden")}>{count}</span>
         )}
