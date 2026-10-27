@@ -11,7 +11,7 @@ pub fn user_home() -> Option<PathBuf> {
 }
 
 /// 데이터 폴더. `THUMINAL_HOME` 이 있으면 그것을 쓴다 (시험, 여러 벌 띄우기).
-/// 없으면 macOS 는 `~/Library/Application Support/thuminal`, Windows 는 `%LOCALAPPDATA%\thuminal`,
+/// 없으면 macOS 는 `~/Library/Application Support/thuminal`, Windows 는 `%LOCALAPPDATA%\dev.thuminal.app`,
 /// 그 밖은 `$XDG_DATA_HOME/thuminal`(없으면 `~/.local/share/thuminal`)
 pub fn home() -> PathBuf {
     if let Some(p) = std::env::var_os("THUMINAL_HOME") {
@@ -20,7 +20,9 @@ pub fn home() -> PathBuf {
     if cfg!(windows)
         && let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())
     {
-        return PathBuf::from(local).join("thuminal");
+        // `%LOCALAPPDATA%\thuminal` 은 NSIS 설치본(사용자 설치)의 프로그램 폴더라 겹치지 않게 앱 식별자 폴더를 쓴다.
+        // 웹뷰 데이터(EBWebView)도 이 폴더에 있고, 지울 때 "앱 데이터 지우기" 를 고르면 함께 지워진다
+        return PathBuf::from(local).join("dev.thuminal.app");
     }
     let base = user_home().unwrap_or_else(std::env::temp_dir);
     if cfg!(target_os = "macos") {

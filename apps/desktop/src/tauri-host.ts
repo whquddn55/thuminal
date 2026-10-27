@@ -13,6 +13,7 @@ import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentImage,
+  AppUpdate,
   AgentSettings,
   AgentSettingsState,
   Attachment,
@@ -46,6 +47,7 @@ import type {
   SessionInfo,
   SnapshotFormat,
   TerminalColors,
+  UpdatesApi,
   WorkspaceLayout,
   WorktreeInfo,
 } from "@thuminal/term-core";
@@ -110,12 +112,17 @@ export class TauriHostApi implements HostApi {
   readonly isRemote: boolean;
   readonly hosts?: RemoteHostsApi;
   readonly remote?: RemoteApi;
+  readonly updates?: UpdatesApi;
 
   /** hostId 를 비우면 로컬 데몬. 원격은 `hosts.forHost(id)` 로 만든다 */
   constructor(readonly hostId?: string) {
     this.isRemote = hostId !== undefined;
     if (!this.isRemote) {
       this.hosts = new TauriHosts();
+      this.updates = {
+        check: () => invoke<AppUpdate | null>("update_check"),
+        install: () => invoke<void>("update_install"),
+      };
       // 원격 접속 설정은 이 컴퓨터 데몬 것만 (원격 연결은 데몬이 받지 않는다)
       this.remote = {
         status: () => this.req<RemoteStatus>({ type: "get_remote" }, (r) => r.remote),

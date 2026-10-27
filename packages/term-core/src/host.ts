@@ -301,6 +301,24 @@ export interface HostApi {
   readonly hostId?: string;
   /** Dock 배지 숫자 (0 이면 지운다) */
   setBadge?(count: number): Promise<void>;
+  /** 앱 업데이트 (데스크톱 껍데기의 로컬 HostApi 만) */
+  readonly updates?: UpdatesApi;
   /** 데몬 이벤트 구독. 돌려준 함수로 끊는다 */
   onEvent(cb: (e: DaemonEvent) => void): () => void;
+}
+
+/** 새 앱 버전 */
+export interface AppUpdate {
+  version: string;
+  /** 지금 버전 */
+  current: string;
+  notes: string | null;
+}
+
+/** 앱 업데이트: GitHub Release 의 latest.json 을 보고, 서명을 확인해 설치한다 */
+export interface UpdatesApi {
+  /** 새 버전이 있으면 그것, 없으면 null */
+  check(): Promise<AppUpdate | null>;
+  /** 확인한 새 버전을 내려받아 설치하고 앱을 다시 시작한다. 그 전에 데몬을 세션을 남긴 채 내린다 */
+  install(): Promise<void>;
 }

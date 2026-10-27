@@ -406,6 +406,13 @@ impl Server {
             | Request::SearchText { .. }
             | Request::ListFiles { .. }
             | Request::GitLineCounts { .. }) => self.workspace_request(req).await,
+            Request::Restart => {
+                // 종료 신호를 받았을 때와 같다: 세션 기록과 화면 저장본을 남기고 내려간다
+                info!(event = "restart_requested", conn);
+                *self.stop_mode.lock().unwrap() = StopMode::Keep;
+                self.shutdown.notify_waiters();
+                Ok(Response::Ok)
+            }
             Request::Shutdown => {
                 info!(event = "shutdown_requested", conn);
                 *self.stop_mode.lock().unwrap() = StopMode::Clear;
@@ -562,6 +569,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::Kill { .. } => "kill",
         Request::Remove { .. } => "remove",
         Request::Shutdown => "shutdown",
+        Request::Restart => "restart",
         Request::ListRepos => "list_repos",
         Request::ListGroups => "list_groups",
         Request::SetGroups { .. } => "set_groups",

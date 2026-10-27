@@ -8,6 +8,7 @@
 // 고른 카드는 전경색을 옅게 덮고 1px 테두리를 둔다 (styles.css 의 [data-card-active]).
 
 import {
+  ArrowCircleUpIcon,
   BellIcon,
   BellSimpleRingingIcon,
   CaretDownIcon,
@@ -170,6 +171,7 @@ export function Sidebar() {
   const repos = useApp((s) => s.repos);
   const worktrees = useApp((s) => s.worktrees);
   const savedGroups = useApp((s) => s.groups);
+  const update = useApp((s) => s.update);
   const groups = useMemo(() => normalizeGroups(savedGroups, repos), [savedGroups, repos]);
   const width = useApp((s) => s.sidebarWidth);
   const hasOther = useApp((s) => (s.layouts[OTHER_WORKSPACE]?.tabs.length ?? 0) > 0);
@@ -319,6 +321,12 @@ export function Sidebar() {
           <TooltipContent>설정 ({keyLabel("⌘,")})</TooltipContent>
         </Tooltip>
         <ResourceButton />
+        {update && (
+          <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1 px-2 text-xs text-primary" title={update.notes ?? undefined} onClick={() => model.confirmUpdate()}>
+            <ArrowCircleUpIcon className="size-4" />
+            업데이트 {update.version}
+          </Button>
+        )}
       </div>
       <SidebarResizer />
     </aside>

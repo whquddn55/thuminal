@@ -428,6 +428,9 @@ pub enum Request {
     Remove { session: SessionId },
     /// 모든 세션을 끝내고 데몬을 내린다
     Shutdown,
+    /// 세션 기록 · 화면 저장본을 남기고 데몬을 내린다. 다음에 뜬 데몬이 되살린다 (앱 업데이트 때 데몬을 새 버전으로 바꾼다).
+    /// 부 버전 7 부터
+    Restart,
     ListRepos,
     /// 사이드바 워크스페이스 목록. 기본 워크스페이스가 늘 들어 있고, 프로젝트마다 꼭 한 워크스페이스에 든다
     ListGroups,

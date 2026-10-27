@@ -10,6 +10,7 @@ mod browser;
 mod hosts;
 mod media;
 mod notify;
+mod update;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,6 +57,8 @@ struct AppState {
     attachments: Mutex<HashMap<(HostKey, SessionId), JoinHandle<()>>>,
     /// 호스트마다 화면으로 이벤트를 보내는 채널. 데몬에 다시 붙으면 새 연결의 이벤트를 여기로 잇는다
     events: Mutex<HashMap<HostKey, EventSink>>,
+    /// 업데이트를 설치하려고 로컬 데몬을 내렸다. 이때는 옛 데몬을 다시 띄우지 않는다
+    updating: std::sync::atomic::AtomicBool,
     /// 원격 호스트 목록이 바뀌거나 연결 상태가 바뀌면 목록을 통째로 보내는 채널들
     host_watchers: std::sync::Mutex<Vec<Channel<Vec<hosts::HostView>>>>,
 }
@@ -85,6 +88,9 @@ impl AppState {
         if let Some(c) = slot.as_ref().filter(|c| !c.is_closed()) {
             return Ok(c.clone());
         }
+        if self.updating.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("업데이트를 설치하는 중이에요".into());
+        }
         let reconnect = slot.is_some();
         let c = Arc::new(Client::connect_or_spawn(&Paths::default_home(), "desktop", &default_daemon_bin()).await.map_err(err)?);
         *slot = Some(c.clone());
@@ -94,6 +100,21 @@ impl AppState {
             self.reconnected(&None, &c, 0).await;
         }
         Ok(c)
+    }
+
+    /// 업데이트 전에 로컬 데몬을 세션을 남긴 채 내리고, 내려갈 때까지(최대 10초) 기다린다. 그 뒤로는 다시 띄우지 않는다
+    async fn stop_local_daemon(&self) {
+        self.updating.store(true, std::sync::atomic::Ordering::SeqCst);
+        let c = match self.client.lock().await.clone() {
+            Some(c) if !c.is_closed() => c,
+            _ => match Client::connect(&Paths::default_home(), "desktop").await {
+                Ok(c) => Arc::new(c),
+                Err(_) => return,
+            },
+        };
+        if c.restart_daemon().await.is_ok() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), c.closed()).await;
+        }
     }
 
     /// 데몬에 새로 붙었다: 그 호스트의 옛 붙기를 걷고, 이벤트를 새 연결에서 잇고, 화면에 다시 붙으라고 알린다
@@ -567,6 +588,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol(media::SCHEME, |ctx, req, responder| {
             let app = ctx.app_handle().clone();
             tauri::async_runtime::spawn(async move { responder.respond(media::serve(app, req).await) });
@@ -576,6 +598,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;
             notify::init(app.handle());
+            update::manage(app.handle());
             // 등록한 원격 호스트마다 연결을 띄운다 (끊겨 있으면 스스로 다시 붙는다)
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -635,6 +658,8 @@ pub fn run() {
             hosts_reconnect,
             notify::notify,
             notify::set_badge,
+            update::update_check,
+            update::update_install,
             browser::browser_open,
             browser::browser_bounds,
             browser::browser_visible,

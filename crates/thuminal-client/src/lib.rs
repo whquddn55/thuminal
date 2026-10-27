@@ -384,6 +384,11 @@ impl Client {
     pub async fn shutdown(&self) -> Result<()> {
         self.request(Request::Shutdown).await.map(|_| ())
     }
+
+    /// 세션을 남긴 채 데몬을 내린다. 다음에 띄운 데몬이 되살린다 (앱 업데이트)
+    pub async fn restart_daemon(&self) -> Result<()> {
+        self.request(Request::Restart).await.map(|_| ())
+    }
 }
 
 /// hello 응답을 본다. 주 판이 다르면 거절하고, 부 판이 다르면 알릴 글을 돌려준다

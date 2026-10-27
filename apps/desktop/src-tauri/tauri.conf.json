@@ -45,6 +45,18 @@
     "resources": {
       "../../../plugins/claude-code/thuminal/": "claude-plugin/",
       "../../web/dist/": "web/"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg5QzBGNTcxNDNCNTBDNjEKUldSaERMVkRjZlhBaWFsRWY3d3ZEMlVEVit0VHd3cmFZZC9SOWtkT1dpTStuamVGU1pBYk1jaVYK",
+      "endpoints": [
+        "https://github.com/whquddn55/thuminal/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

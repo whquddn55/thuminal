@@ -33,6 +33,7 @@ import {
   type WorktreeInfo,
 } from "@thuminal/term-core";
 
+import type { AppUpdate } from "@thuminal/term-core";
 import { AGENTS } from "./agents";
 import { pageKey, setPage } from "./browser-state";
 import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
@@ -157,6 +158,8 @@ export interface AppState {
   generation: number;
   error: string | null;
   notice: string | null;
+  /** 새 앱 버전 (데스크톱 껍데기만 확인한다) */
+  update: AppUpdate | null;
 }
 
 /** 에이전트 팀 팝업 (리더 세션마다). 목록 → 팀원 하나(터미널) → 뒤로 목록 */
@@ -228,6 +231,7 @@ export const WINDOW_KEYS = [
   "remoteHosts",
   "error",
   "notice",
+  "update",
 ] as const satisfies readonly (keyof AppState)[];
 const WINDOW_KEY_SET = new Set<string>(WINDOW_KEYS);
 
@@ -310,6 +314,7 @@ export class AppModel {
       generation: 0,
       error: null,
       notice: null,
+      update: null,
       ...(parent ? pickWindow(this.root.get()) : {}),
     }));
     if (parent) {
@@ -460,6 +465,11 @@ export class AppModel {
       } finally {
         this.loading = false;
       }
+    }
+    if (this.isRoot && host.updates) {
+      // 새 앱 버전: 시작하고 조금 뒤 한 번, 그 뒤로 6시간마다
+      this.timers.push(window.setTimeout(() => void this.checkUpdate(), 5000));
+      this.timers.push(window.setInterval(() => void this.checkUpdate(), 6 * 60 * 60 * 1000));
     }
     if (this.isRoot) {
       this.markSeen();
@@ -693,6 +703,39 @@ export class AppModel {
   notice = (text: string) => {
     this.set({ notice: text });
     window.setTimeout(() => this.get().notice === text && this.set({ notice: null }), 6000);
+  };
+
+  // ---- 앱 업데이트 ----
+
+  /** 새 앱 버전이 있는지 본다. quiet 가 아니면(설정에서 누른 것) 결과를 알린다 */
+  checkUpdate = async (quiet = true) => {
+    const updates = this.services.host.updates;
+    if (!updates) return;
+    try {
+      const found = await updates.check();
+      this.set({ update: found });
+      if (!quiet && !found) this.notice("최신 버전이에요");
+    } catch (e) {
+      if (quiet) console.warn("[thuminal] 업데이트 확인", e);
+      else this.fail(e);
+    }
+  };
+
+  /** 새 버전으로 업데이트할지 묻고 설치한다. 앱이 다시 시작된다 */
+  confirmUpdate = () => {
+    const update = this.get().update;
+    const updates = this.services.host.updates;
+    if (!update || !updates) return;
+    this.setDialog({
+      kind: "confirm",
+      title: `thuminal ${update.version}으로 업데이트할까요?`,
+      body: `지금 버전은 ${update.current}예요. 업데이트하면 앱이 다시 시작되고 터미널도 다시 열려요. 화면 내용과 claude 대화는 이어지지만, 터미널에서 실행 중이던 프로그램(개발 서버 등)은 다시 실행해야 해요.`,
+      action: "업데이트",
+      run: () => {
+        this.notice("업데이트를 내려받고 있어요. 끝나면 앱이 다시 시작돼요");
+        void updates.install().catch((e) => this.fail(e));
+      },
+    });
   };
 
   // ---- 터미널 ----

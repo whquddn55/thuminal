@@ -1,5 +1,6 @@
-# v 로 시작하는 태그를 올리면 세 OS 설치본을 만들어 초안 Release 에 올린다.
-# macOS: .app · .dmg (서명 · 공증 없음), Linux: .deb · .AppImage, Windows: NSIS 설치 파일
+# v 로 시작하는 태그를 올리면 세 OS 설치본을 만들어 초안 Release 에 올린다 (scripts/release.sh 로 버전을 올리고 태그를 단다).
+# macOS: .app · .dmg (서명 · 공증 없음), Linux: .deb · .AppImage, Windows: NSIS 설치 파일.
+# 업데이트용 파일(.app.tar.gz · .AppImage · NSIS 와 .sig)과 latest.json 도 함께 올린다. Linux 자동 업데이트는 AppImage 만 된다
 name: Release
 
 on:
@@ -51,11 +52,17 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 업데이트 파일 서명 (공개 키는 tauri.conf.json plugins.updater.pubkey)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: thuminal ${{ github.ref_name }}
+          # 초안으로 올린다. 게시해야 앱의 업데이트 확인(releases/latest/download/latest.json)에 잡힌다
           releaseDraft: true
+          # Windows 업데이트는 NSIS 설치 파일로 한다
+          updaterJsonPreferNsis: true
           # 태그 없이 손으로 돌리면 Release 대신 워크플로 결과물로 올린다
           uploadWorkflowArtifacts: true
           args: ${{ matrix.args }}
