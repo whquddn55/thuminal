@@ -1,5 +1,5 @@
 //! Windows 에서 데몬의 핵심 약속을 확인한다: named pipe 연결, ConPTY 세션, PowerShell 셸 통합(claude 함수 · 실행기),
-//! 데몬 하나만 뜨기. 환경 변수(PATH)를 바꾸므로 셸 통합 시험은 하나로 묶는다.
+//! 데몬 하나만 뜨기.
 #![cfg(windows)]
 
 use std::sync::Arc;
@@ -47,8 +47,10 @@ async fn pipe_conpty_and_powershell_integration() {
     let bin = root.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::write(bin.join("claude.cmd"), "@echo FAKE-CLAUDE %*\r\n").unwrap();
+    // portable-pty 는 Windows 셸 환경을 레지스트리(사용자 · 시스템 환경 변수)로 새로 만들어 이 프로세스의 PATH 를 물려주지 않는다.
+    // 그래서 세션을 만들 때 PATH 를 넘긴다
     let path = std::env::var_os("PATH").unwrap_or_default();
-    unsafe { std::env::set_var("PATH", std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&path))).unwrap()) };
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&path))).unwrap().to_string_lossy().into_owned();
 
     let d = Daemon::bind(config(&data, Some(plugin))).unwrap();
     tokio::spawn(d.run());
@@ -70,7 +72,7 @@ async fn pipe_conpty_and_powershell_integration() {
     wait_screen(&c, s.id, "hello-from-conpty").await;
 
     // 기본 셸은 PowerShell 이고, thuminal 의 claude 함수가 들어 있으며, 실행기가 플러그인 폴더를 붙인다
-    let s = c.create(CreateSession { cols: 200, rows: 20, ..Default::default() }).await.unwrap();
+    let s = c.create(CreateSession { cols: 200, rows: 20, env: [("PATH".to_string(), path)].into(), ..Default::default() }).await.unwrap();
     wait_screen(&c, s.id, "PS ").await;
     c.send_text(s.id, "(Get-Command claude).CommandType\r").await.unwrap();
     wait_screen(&c, s.id, "Function").await;
