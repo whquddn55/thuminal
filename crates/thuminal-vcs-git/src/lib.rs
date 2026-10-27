@@ -40,7 +40,7 @@ fn not_a_repo(path: &Path, e: VcsError) -> VcsError {
 
 /// git 이 돌려준 경로를 실제 경로로 맞춘다 (/tmp → /private/tmp 같은 차이를 없앤다)
 fn canonical(p: &str) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p))
+    dunce::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p))
 }
 
 fn kind(c: u8) -> Option<ChangeKind> {

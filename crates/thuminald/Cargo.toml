@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+dunce.workspace = true
 thuminal-daemon.workspace = true
 thuminal-protocol.workspace = true
 thuminal-engine-ghostty.workspace = true

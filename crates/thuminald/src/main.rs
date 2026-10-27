@@ -29,7 +29,7 @@ fn bundled_resource(exe_dir: &std::path::Path, name: &str, marker: &str) -> Opti
         .iter()
         .map(|base| exe_dir.join(base).join(name))
         .find(|p| p.join(marker).is_file())
-        .and_then(|p| std::fs::canonicalize(p).ok())
+        .and_then(|p| dunce::canonicalize(p).ok())
 }
 
 /// thuminal claude 플러그인 폴더를 찾는다.

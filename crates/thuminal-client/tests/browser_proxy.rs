@@ -1,4 +1,5 @@
 //! 원격 기기용 브라우저 칸 대리: 토큰을 쿠키로 바꿔 다시 보내고, Host 를 원래 주소로 바꿔 넘기고, 웹소켓 업그레이드를 잇는다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 

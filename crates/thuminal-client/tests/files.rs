@@ -1,4 +1,5 @@
 //! 파일 칸: 글자 파일 고쳐 쓰기(바뀐 때로 덮어쓰기 막기), 바이트 조각 읽기, 웹 화면의 `/api/file` (Range).
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 

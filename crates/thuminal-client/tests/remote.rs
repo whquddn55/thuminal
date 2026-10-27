@@ -1,4 +1,5 @@
 //! 원격 접속: 기기를 등록하고 웹소켓으로 붙어 데몬 프로토콜(hello, 세션 만들기, 입력·출력)을 그대로 쓰는지 본다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

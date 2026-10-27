@@ -2299,6 +2299,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "mac-notification-sys"
+version = "0.6.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd604973958ddcc11b561193c0fb96ba146506ef2f231ef2e7c35fd2cbc9beca"
+dependencies = [
+ "cc",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2462,6 +2476,20 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "notify-rust"
+version = "4.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4587364a9a0074333429b3df75a30a205340c56a536ca3eb6ca0e59b87bbf8af"
+dependencies = [
+ "futures-lite",
+ "log",
+ "mac-notification-sys",
+ "serde",
+ "tauri-winrt-notification",
+ "zbus",
 ]
 
 [[package]]
@@ -4265,6 +4293,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-winrt-notification"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f37a6c354fd28fc9e322ed9bd47e3959576dad28c9d58ea1cf888cce1c7ccb36"
+dependencies = [
+ "thiserror 2.0.21",
+ "windows",
+ "windows-version",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4340,6 +4379,7 @@ name = "thuminal-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dunce",
  "libc",
  "serde",
  "serde_json",
@@ -4378,6 +4418,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "dunce",
  "fontdb",
  "futures-util",
  "hyper",
@@ -4412,6 +4453,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "fontdb",
+ "notify-rust",
  "objc2",
  "objc2-foundation",
  "objc2-user-notifications",
@@ -4491,6 +4533,7 @@ dependencies = [
 name = "thuminal-vcs-git"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "tempfile",
  "thuminal-workspace",
 ]
@@ -4499,6 +4542,7 @@ dependencies = [
 name = "thuminal-workspace"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "serde",
  "serde_json",
  "tempfile",
@@ -4512,6 +4556,7 @@ name = "thuminald"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dunce",
  "thuminal-daemon",
  "thuminal-engine-ghostty",
  "thuminal-protocol",

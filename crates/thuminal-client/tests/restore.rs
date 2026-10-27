@@ -1,5 +1,6 @@
 //! 데몬이 종료 신호로 내려간 뒤 다시 뜨면 세션을 되살리는지 확인한다.
 //! 환경 변수를 바꾸므로 이 파일에는 시험을 하나만 둔다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

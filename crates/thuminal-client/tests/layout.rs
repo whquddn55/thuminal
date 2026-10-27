@@ -1,4 +1,5 @@
 //! 배치: 데몬이 세션을 칸에 넣고, op 로 칸을 만들고 닫고, 실패하면 되돌리는지 확인한다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

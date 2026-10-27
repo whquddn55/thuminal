@@ -1,5 +1,6 @@
 //! 데몬이 다시 뜨면 배치를 되살리고 세션 번호를 바꿔 끼우는지, `daemon stop` 뒤에는 지우는지 확인한다.
 //! 되살리기가 로그인 셸을 띄우므로 SHELL 을 바꾼다. 그래서 이 파일에는 시험을 하나만 둔다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 

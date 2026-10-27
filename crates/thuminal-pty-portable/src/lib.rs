@@ -146,7 +146,8 @@ mod coalesce {
     }
 }
 
-#[cfg(test)]
+// /bin/sh 로 시험한다
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::io::Read;

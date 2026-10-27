@@ -1,5 +1,6 @@
 //! 원격 호스트 연결: 웹소켓 전송 위의 Client 가 유닉스 소켓과 똑같이 말하는지, 틀린 토큰과 판 다름을 가르는지,
 //! 끊겼다가 다시 붙는지 본다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

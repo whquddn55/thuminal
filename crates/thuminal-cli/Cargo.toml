@@ -11,6 +11,7 @@ name = "thuminal"
 path = "src/main.rs"
 
 [dependencies]
+dunce.workspace = true
 thuminal-client.workspace = true
 thuminal-protocol.workspace = true
 thuminal-layout.workspace = true

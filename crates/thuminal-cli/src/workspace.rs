@@ -103,7 +103,7 @@ async fn repo_here(c: &Client) -> Res<RepoInfo> {
 /// 워크트리 경로나 브랜치 이름으로 워크트리를 찾는다. `nested` 면 워크트리 안 폴더도 받아 그것을 품는 가장 깊은 워크트리를 고른다
 pub async fn find_worktree(c: &Client, target: &str, nested: bool) -> Res<WorktreeInfo> {
     let all = c.worktrees(None).await?;
-    let abs = std::fs::canonicalize(target).ok();
+    let abs = dunce::canonicalize(target).ok();
     let abs_str = abs.as_ref().map(|p| p.to_string_lossy().into_owned());
     if let Some(w) = all.iter().find(|w| Some(&w.path) == abs_str.as_ref() || w.path == target || w.branch.as_deref() == Some(target)) {
         return Ok(w.clone());
@@ -129,7 +129,7 @@ pub async fn repo(c: &Client, cmd: RepoCmd) -> Res<()> {
     match cmd {
         RepoCmd::Add { path } => {
             let path = match path {
-                Some(p) => std::fs::canonicalize(p)?,
+                Some(p) => dunce::canonicalize(p)?,
                 None => std::env::current_dir()?,
             };
             let r = c.add_repo(path.to_string_lossy()).await?;
@@ -222,7 +222,7 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
             }
         }
         WtCmd::Status { path, json } => {
-            let here = std::fs::canonicalize(path.unwrap_or_else(|| ".".into()))?;
+            let here = dunce::canonicalize(path.unwrap_or_else(|| ".".into()))?;
             let all = c.worktrees(None).await?;
             // 가장 깊은(긴) 워크트리 경로가 지금 폴더를 품는 것을 고른다
             let w = all

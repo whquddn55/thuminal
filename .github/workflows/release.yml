@@ -1,0 +1,61 @@
+# v 로 시작하는 태그를 올리면 세 OS 설치본을 만들어 초안 Release 에 올린다.
+# macOS: .app · .dmg (서명 · 공증 없음), Linux: .deb · .AppImage, Windows: NSIS 설치 파일
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: 설치본 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --bundles app,dmg
+          - os: ubuntu-22.04
+            args: ""
+          - os: windows-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux 빌드 의존성
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev libdbus-1-dev
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 번들에 들어갈 데몬 · CLI 와 원격 접속 웹 화면
+      - run: scripts/prepare-sidecars.sh release
+      - run: pnpm -C apps/web build
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: thuminal ${{ github.ref_name }}
+          releaseDraft: true
+          # 태그 없이 손으로 돌리면 Release 대신 워크플로 결과물로 올린다
+          uploadWorkflowArtifacts: true
+          args: ${{ matrix.args }}

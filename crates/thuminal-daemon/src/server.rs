@@ -709,7 +709,7 @@ fn resolve_path(path: &str, bases: &[String]) -> Option<(std::path::PathBuf, boo
             }
         }
         let meta = std::fs::metadata(&clean).ok()?;
-        Some((std::fs::canonicalize(&clean).unwrap_or(clean), meta.is_dir()))
+        Some((dunce::canonicalize(&clean).unwrap_or(clean), meta.is_dir()))
     })
 }
 
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn resolve_path_tries_bases_and_folds_dots() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         std::fs::create_dir_all(root.join("a/src")).unwrap();
         std::fs::write(root.join("a/src/main.rs"), "fn main() {}").unwrap();
         let bases = vec!["/nope".to_string(), root.join("a").to_string_lossy().into_owned()];

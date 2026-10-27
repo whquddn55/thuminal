@@ -1,5 +1,6 @@
 //! 셸 통합: 사용자 설정을 그대로 읽고, `claude` 에만 `--plugin-dir` 과 에이전트 설정 옵션이 붙는지 확인한다.
 //! 환경 변수(HOME, SHELL, PATH)를 바꾸므로 이 파일에는 시험을 하나만 둔다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::path::Path;
 use std::sync::Arc;

@@ -351,7 +351,7 @@ fn shell_line(args: &[String]) -> Option<String> {
 }
 
 fn spawn(cwd: Option<String>, command: &[String]) -> Res<Spawn> {
-    let cwd = cwd.map(|d| std::fs::canonicalize(&d).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("{d}: {e}"))).transpose()?;
+    let cwd = cwd.map(|d| dunce::canonicalize(&d).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("{d}: {e}"))).transpose()?;
     Ok(Spawn { input: shell_line(command), cwd, ..Default::default() })
 }
 

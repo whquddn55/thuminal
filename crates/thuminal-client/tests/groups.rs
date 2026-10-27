@@ -1,4 +1,5 @@
 //! 사이드바 워크스페이스(프로젝트 묶음): 데몬이 목록을 맞춰 남기고, 바뀌면 `workspace_changed` 로 알리는지 확인한다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

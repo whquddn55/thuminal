@@ -1,4 +1,7 @@
-//! macOS 알림과 Dock 배지.
+//! 알림과 Dock 배지.
+//!
+//! Linux 는 D-Bus 알림(notify-rust), Windows 는 토스트(notify-rust, 설치본이 등록한 앱 id)로 보낸다. 둘 다 누르면 그 칸으로 간다.
+//! 아래는 macOS 이야기다.
 //!
 //! 앱이 macOS 알림 API(`UNUserNotificationCenter`)로 직접 보낸다. 이름 · 아이콘은 앱 번들 것이고, 누르면
 //! `thuminal://notification-click` 으로 화면에 세션 번호를 넘겨 그 칸으로 간다. 이 API 는 `.app` 번들 안에서 도는
@@ -16,30 +19,35 @@ type CmdResult<T> = Result<T, String>;
 /// 알림을 누르면 화면이 받는 이벤트 (`tauri-host.ts` `onNotificationClick`)
 const CLICK_EVENT: &str = "thuminal://notification-click";
 
+/// 알림을 눌렀다: 창을 앞으로 가져오고 화면에 세션 번호를 넘긴다
+fn clicked(app: &AppHandle, session: u64) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit(CLICK_EVENT, serde_json::json!({ "session": session }));
+}
+
 /// 알림 위임자를 단다 (앱 setup 에서 한 번)
 pub fn init(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
         let app = app.clone();
-        mac::init(Box::new(move |session| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-            let _ = app.emit(CLICK_EVENT, serde_json::json!({ "session": session }));
-        }));
+        mac::init(Box::new(move |session| clicked(&app, session)));
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app;
 }
 
 /// AppleScript 글자 따옴표
+#[cfg(target_os = "macos")]
 fn quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// 번들 밖에서 보낸다. 따로 띄운 프로세스가 알리므로 앱의 번들 정보는 건드리지 않는다
+#[cfg(target_os = "macos")]
 fn notify_osascript(title: &str, subtitle: Option<&str>, body: &str, sound: bool) -> CmdResult<()> {
     let mut script = format!("display notification {} with title {}", quote(body), quote(title));
     if let Some(s) = subtitle {
@@ -54,21 +62,78 @@ fn notify_osascript(title: &str, subtitle: Option<&str>, body: &str, sound: bool
 
 /// 알림을 띄운다. 누르면 `session` 이 화면으로 돌아온다
 #[tauri::command]
-pub async fn notify(title: String, subtitle: Option<String>, body: String, session: u64, sound: bool) -> CmdResult<()> {
+pub async fn notify(app: AppHandle, title: String, subtitle: Option<String>, body: String, session: u64, sound: bool) -> CmdResult<()> {
     #[cfg(target_os = "macos")]
-    if mac::bundled() {
-        mac::post(&title, subtitle.as_deref(), &body, session, sound);
-        return Ok(());
+    {
+        let _ = app;
+        if mac::bundled() {
+            mac::post(&title, subtitle.as_deref(), &body, session, sound);
+            return Ok(());
+        }
+        notify_osascript(&title, subtitle.as_deref(), &body, sound)
     }
-    let _ = session;
-    notify_osascript(&title, subtitle.as_deref(), &body, sound)
+    #[cfg(not(target_os = "macos"))]
+    desktop::post(app, &title, subtitle.as_deref(), &body, session, sound)
 }
 
-/// Dock 배지 숫자. 0 이면 지운다
+/// Dock 배지 숫자. 0 이면 지운다. 배지가 없는 곳(Windows, Unity 런처가 아닌 Linux)은 아무것도 하지 않는다
 #[tauri::command]
 pub async fn set_badge(app: AppHandle, count: u32) -> CmdResult<()> {
     let w = app.get_webview_window("main").ok_or("메인 창을 찾지 못했어요")?;
-    w.set_badge_count(if count == 0 { None } else { Some(count as i64) }).map_err(|e| e.to_string())
+    let r = w.set_badge_count(if count == 0 { None } else { Some(count as i64) }).map_err(|e| e.to_string());
+    if cfg!(target_os = "macos") { r } else { Ok(()) }
+}
+
+/// Linux · Windows 알림 (notify-rust). 누를 때까지 기다리는 일은 따로 띄운 스레드가 한다
+#[cfg(not(target_os = "macos"))]
+mod desktop {
+    use tauri::AppHandle;
+
+    use super::CmdResult;
+
+    pub fn post(app: AppHandle, title: &str, subtitle: Option<&str>, body: &str, session: u64, sound: bool) -> CmdResult<()> {
+        let mut n = notify_rust::Notification::new();
+        n.appname("thuminal").summary(title);
+        n.body(&match subtitle {
+            Some(s) => format!("{s}\n{body}"),
+            None => body.to_string(),
+        });
+        #[cfg(target_os = "windows")]
+        {
+            // NSIS 설치본이 시작 메뉴 바로 가기에 앱 id(번들 식별자)를 단다. 그래야 토스트에 thuminal 이름 · 아이콘이 나온다
+            n.app_id(&app.config().identifier);
+            if sound {
+                n.sound_name("Default");
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // 알림 몸통을 누르면 "default" 동작이 온다
+            n.action("default", "열기");
+            n.icon("thuminal");
+            if sound {
+                n.sound_name("message-new-instant");
+            }
+        }
+        let handle = n.show().map_err(|e| e.to_string())?;
+        std::thread::spawn(move || {
+            #[cfg(target_os = "windows")]
+            {
+                let _ = handle.wait_for_response(move |r: &notify_rust::NotificationResponse| {
+                    if matches!(r, notify_rust::NotificationResponse::Default) {
+                        super::clicked(&app, session);
+                    }
+                });
+            }
+            #[cfg(not(target_os = "windows"))]
+            handle.wait_for_action(|action| {
+                if action == "default" {
+                    super::clicked(&app, session);
+                }
+            });
+        });
+        Ok(())
+    }
 }
 
 /// `UNUserNotificationCenter` 로 보내고, 누르면 세션 번호를 넘긴다

@@ -2,6 +2,7 @@
 //!
 //! `/bin/cat` 세션에 질의를 보내면 cat 이 그대로 내보내 데몬 엔진이 답하고, 그 답은 tty 가 되울려
 //! `^[]11;rgb:…` 꼴로 화면에 남는다. 그 글자로 답을 확인한다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

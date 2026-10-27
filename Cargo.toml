@@ -36,6 +36,8 @@ tracing-appender = "0.2"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 tempfile = "3"
+# Windows 에서 canonicalize 가 \\?\ 를 붙이지 않게 한다 (유닉스에서는 std 와 같다)
+dunce = "1"
 
 [profile.release]
 lto = "thin"

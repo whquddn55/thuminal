@@ -34,5 +34,9 @@ objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSErr
 objc2-user-notifications = "0.3"
 block2 = "0.6"
 
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Linux(D-Bus) · Windows(토스트) 알림 (notify.rs). macOS 에서는 쓰지 않는다 (위 mac-notification-sys 와 같은 문제)
+notify-rust = "4"
+
 [dev-dependencies]
 tempfile.workspace = true

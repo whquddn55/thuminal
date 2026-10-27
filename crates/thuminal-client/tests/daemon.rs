@@ -1,4 +1,5 @@
 //! 데몬을 임시 폴더에 띄우고 클라이언트로 핵심 약속을 확인한다.
+#![cfg(unix)] // /tmp · /bin/sh · 유닉스 셸을 쓰는 시험이다. Windows 는 windows.rs
 
 use std::sync::Arc;
 use std::time::Duration;

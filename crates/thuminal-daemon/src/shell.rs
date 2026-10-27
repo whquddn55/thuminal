@@ -460,7 +460,8 @@ fn find_in_shell(names: &[&String]) -> Vec<String> {
     out.lines().filter_map(|l| l.strip_prefix("thuminal-found:")).filter(|n| names.iter().any(|x| x.as_str() == *n)).map(str::to_string).collect()
 }
 
-#[cfg(test)]
+// 유닉스 셸(sh · 실행 비트)을 쓰는 시험이다
+#[cfg(all(test, unix))]
 mod find_tests {
     #[test]
     fn finds_sh_but_not_nonsense() {
@@ -469,7 +470,8 @@ mod find_tests {
     }
 }
 
-#[cfg(test)]
+// 유닉스 셸(sh · 실행 비트)을 쓰는 시험이다
+#[cfg(all(test, unix))]
 mod launcher_tests {
     use super::*;
 

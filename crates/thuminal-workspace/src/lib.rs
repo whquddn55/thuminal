@@ -353,7 +353,7 @@ impl Workspace {
         info!(event = "worktree_created", repo, branch, path = %path.display(), parent = ?parent);
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
         if name.is_some() || parent.is_some() {
-            let canonical = std::fs::canonicalize(&path).unwrap_or(path.clone());
+            let canonical = dunce::canonicalize(&path).unwrap_or(path.clone());
             self.meta.lock().unwrap().insert(canonical, WorktreeMeta { name, pinned: false, parent });
             let repos = self.repos.lock().unwrap().clone();
             self.save(&repos)?;
@@ -429,7 +429,7 @@ impl Workspace {
 
     /// 등록한 저장소의 워크트리인지 확인하고 경로를 돌려준다
     fn known_worktree(&self, path: &str) -> Result<PathBuf, WorkspaceError> {
-        let p = std::fs::canonicalize(path).map_err(|_| WorkspaceError::Invalid(format!("폴더를 찾지 못했어요: {path}")))?;
+        let p = dunce::canonicalize(path).map_err(|_| WorkspaceError::Invalid(format!("폴더를 찾지 못했어요: {path}")))?;
         // 방금 확인한 목록에 있으면 git 을 다시 부르지 않는다. 없으면 목록을 새로 받아 본다 (막 만든 워크트리)
         if let Some((at, list)) = &*self.known.lock().unwrap()
             && at.elapsed() < KNOWN_WORKTREE_TTL
@@ -652,7 +652,7 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, WorkspaceError> {
         return Err(outside());
     }
     let joined = root.join(rel);
-    match std::fs::canonicalize(&joined) {
+    match dunce::canonicalize(&joined) {
         // 있는 경로는 실제 위치로 본다 (밖을 가리키는 심볼릭 링크를 막는다)
         Ok(real) if real.starts_with(root) => Ok(real),
         Ok(_) => Err(outside()),
@@ -709,9 +709,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn rejects_paths_outside_worktree() {
         let d = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(d.path()).unwrap();
+        let root = dunce::canonicalize(d.path()).unwrap();
         assert!(inside(&root, "../etc/passwd").is_err());
         assert!(inside(&root, "/etc/passwd").is_err());
         assert!(inside(&root, "src/main.rs").is_ok());
@@ -864,7 +865,7 @@ mod tests {
     /// 시험용 저장소 폴더 하나를 등록하고 (워크스페이스, 워크트리 경로) 를 돌려준다
     fn with_worktree() -> (tempfile::TempDir, Workspace, String) {
         let d = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(d.path()).unwrap().join("repo");
+        let root = dunce::canonicalize(d.path()).unwrap().join("repo");
         std::fs::create_dir_all(&root).unwrap();
         let ws = open(d.path());
         ws.add_repo(&root).unwrap();
