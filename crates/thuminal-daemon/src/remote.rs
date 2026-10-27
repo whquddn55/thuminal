@@ -616,12 +616,11 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// 토큰용 난수 (OS 난수: 유닉스 getrandom · urandom, Windows BCryptGenRandom).
+/// 난수를 얻지 못하면 약한 토큰을 내지 않고 멈춘다 (예전에는 /dev/urandom 이 없는 Windows 에서 0 으로만 채운 토큰이 나왔다)
 fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut buf);
-    }
+    getrandom::fill(&mut buf).expect("OS 난수를 얻지 못했다");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 

@@ -57,7 +57,7 @@ pub fn save(file: &Path, hosts: &[HostRecord]) -> std::io::Result<()> {
 /// 호스트 id: 8자리 16진수
 pub fn new_id() -> String {
     let mut b = [0u8; 4];
-    if std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b)).is_err() {
+    if getrandom::fill(&mut b).is_err() {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u32;
         b = t.to_be_bytes();
     }

@@ -7,6 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# 원격 접속 토큰 · 호스트 id 난수 (OS 난수 API. Windows 에는 /dev/urandom 이 없다)
+getrandom = "0.3"
 dunce.workspace = true
 thuminal-protocol.workspace = true
 thuminal-ipc.workspace = true

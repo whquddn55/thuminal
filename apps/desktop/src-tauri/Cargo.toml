@@ -14,6 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# 원격 접속 토큰 · 호스트 id 난수 (OS 난수 API. Windows 에는 /dev/urandom 이 없다)
+getrandom = "0.3"
 # unstable: 창 안에 자식 웹뷰를 얹는다 (브라우저 칸). devtools: 배포판에서도 브라우저 칸의 개발자 도구를 연다
 tauri = { version = "2", features = ["unstable", "devtools"] }
 thuminal-client.workspace = true
