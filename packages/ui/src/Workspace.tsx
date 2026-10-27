@@ -34,6 +34,7 @@ import { rendererOptions } from "./terminal-font";
 import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { GalleryButton } from "./ImagePanel";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
+import { SizeTakenOverlay } from "./size-overlay";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
 
 type Surface = "main" | "floating";
@@ -591,28 +592,14 @@ export function TerminalPane({
     else c.blur();
   }, [model, session, keyboard, generation]);
 
-  // 폰(원격 접속)이 세션 크기를 가져갔으면 알린다. 이 칸에서 입력하거나 누르면 이 칸 크기로 돌아온다
+  // 폰(원격 접속)이나 다른 창이 세션 크기를 가져갔으면 칸을 덮는다. [세션 가져오기] 를 눌러야 이 칸 크기로 돌아온다
   const info = useApp((s) => s.sessions[session]);
-  const [taken, setTaken] = useState(false);
-  useEffect(() => {
-    const t = window.setTimeout(() => setTaken(model.controller(session).sizeTaken), 600);
-    return () => window.clearTimeout(t);
-  }, [model, session, info?.cols, info?.rows]);
 
   return (
-    <div ref={ref} className="absolute inset-0">
-      {taken && (
-        <button
-          className="absolute top-1.5 right-1.5 z-[6] rounded-md border bg-popover/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:text-foreground"
-          onClick={() => {
-            model.controller(session).claimSize();
-            setTaken(false);
-          }}
-        >
-          다른 기기 크기({info?.cols}×{info?.rows})로 그려지는 중 · 되돌리기
-        </button>
-      )}
-    </div>
+    <>
+      <div ref={ref} className="absolute inset-0" />
+      <SizeTakenOverlay c={model.controller(session)} cols={info?.cols} rows={info?.rows} />
+    </>
   );
 }
 

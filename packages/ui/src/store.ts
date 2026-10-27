@@ -596,7 +596,7 @@ export class AppModel {
       case "session_updated": {
         const prev = this.get().sessions[e.session.id];
         this.set((s) => ({ sessions: { ...s.sessions, [e.session.id]: e.session } }));
-        // 다른 화면(폰 등)이 크기를 바꿨는지 컨트롤러가 알게 한다 (입력하면 이 화면 크기로 되돌린다)
+        // 다른 화면(폰 등)이 크기를 바꿨는지 컨트롤러가 알게 한다 (칸에 덮개를 띄우고, [세션 가져오기] 로만 되돌린다)
         this.controllers.get(e.session.id)?.noteSize(e.session.cols, e.session.rows);
         const n = e.type === "session_updated" ? noticeFor(prev, e.session) : null;
         if (n) this.notifySession(e.session.id, n);

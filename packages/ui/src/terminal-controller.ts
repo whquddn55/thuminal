@@ -158,7 +158,10 @@ export class TerminalController {
     this.resizeTimer = window.setTimeout(() => this.fit(), 50);
   }
 
-  /** 자리 크기에 맞춰 열과 줄 수를 정하고 엔진과 데몬 세션 크기를 바꾼다 */
+  /**
+   * 자리 크기에 맞춰 열과 줄 수를 정하고 엔진 크기를 바꾼다. 세션 크기가 이 칸 것이면 데몬 세션 크기도 같이 바꾼다.
+   * 다른 화면이 가져가 있으면 데몬은 그대로 둔다 (가져오기는 [세션 가져오기] 로만 한다)
+   */
   private fit(): void {
     if (!this.host || !this.engine || !this.renderer) return;
     const { width, height } = this.renderer.metrics;
@@ -166,34 +169,68 @@ export class TerminalController {
     const cols = Math.max(2, Math.floor(r.width / width));
     const rows = Math.max(2, Math.floor(r.height / height));
     if (cols === this.engine.cols && rows === this.engine.rows) return;
+    const owned = !this.sizeTaken;
     this.engine.resize(cols, rows);
     this.renderer.layout();
-    this.daemonSize = { cols, rows };
-    void this.s.host.resize(this.id, cols, rows);
+    if (owned) this.resizeDaemon(cols, rows);
+    this.emitSize();
   }
 
   private send(bytes: Uint8Array | null) {
     if (!bytes || !bytes.length) return;
-    // 입력하면 맨 아래(지금 화면)로 돌아간다
+    // 입력하면 맨 아래(지금 화면)로 돌아간다. 다른 화면이 크기를 가져가 있어도 가져오지 않는다
     this.engine?.scrollToBottom();
-    this.claimSize();
     void this.s.host.input(this.id, bytes);
   }
 
   /** 데몬 세션 크기. 다른 화면(폰·다른 창)이 바꾸면 화면 모델이 알려 준다 */
   private daemonSize: { cols: number; rows: number } | null = null;
+  /** 이 칸이 데몬에 보냈는데 아직 돌아오지 않은 크기 (`<열>x<줄>`, 보낸 때) */
+  private sentSizes: { key: string; at: number }[] = [];
+  private sizeListeners = new Set<() => void>();
 
-  noteSize(cols: number, rows: number) {
+  private resizeDaemon(cols: number, rows: number) {
     this.daemonSize = { cols, rows };
+    this.sentSizes.push({ key: `${cols}x${rows}`, at: Date.now() });
+    void this.s.host.resize(this.id, cols, rows);
   }
 
-  /** 세션 크기를 다른 화면이 바꿔 두었으면 이 칸 크기로 되돌린다. 마지막으로 입력한 화면 크기를 따른다 (tmux window-size latest) */
+  /**
+   * 데몬이 알린 세션 크기. 이 칸이 보낸 크기가 돌아오기 전에 오는 다른 크기는 그 전 상태라 넘긴다
+   * (데몬은 받은 차례대로 바꾸므로 마지막에 오는 것이 지금 크기다). 보낸 것이 3초 안에 안 돌아오면 잊는다
+   */
+  noteSize(cols: number, rows: number) {
+    const now = Date.now();
+    this.sentSizes = this.sentSizes.filter((x) => now - x.at < 3000);
+    const i = this.sentSizes.findIndex((x) => x.key === `${cols}x${rows}`);
+    if (i >= 0) {
+      const last = i === this.sentSizes.length - 1;
+      this.sentSizes.splice(0, i + 1);
+      if (!last) return;
+    } else if (this.sentSizes.length) return;
+    const d = this.daemonSize;
+    if (d && d.cols === cols && d.rows === rows) return;
+    this.daemonSize = { cols, rows };
+    this.emitSize();
+  }
+
+  /** 다른 화면이 가져간 세션 크기를 이 칸 크기로 되돌린다 ([세션 가져오기]). 크기는 가져온 화면 것을 따른다 */
   claimSize() {
     const e = this.engine;
     const d = this.daemonSize;
     if (!e || !d || !this.host || (d.cols === e.cols && d.rows === e.rows)) return;
-    this.daemonSize = { cols: e.cols, rows: e.rows };
-    void this.s.host.resize(this.id, e.cols, e.rows);
+    this.resizeDaemon(e.cols, e.rows);
+    this.emitSize();
+  }
+
+  /** 세션 크기를 가져간 화면이 바뀔 때마다 부른다 (덮개를 띄우고 걷는다) */
+  onSizeState(cb: () => void): () => void {
+    this.sizeListeners.add(cb);
+    return () => this.sizeListeners.delete(cb);
+  }
+
+  private emitSize() {
+    for (const l of this.sizeListeners) l();
   }
 
   /** 다른 화면이 세션 크기를 바꿔 이 칸과 다르게 그려지고 있는지 */
@@ -342,7 +379,6 @@ export class TerminalController {
       if (touchMoved) return;
       // 누른 것은 키보드를 띄우는 것으로 받는다 (뒤따르는 mousedown 은 고르기를 지운다)
       ev.preventDefault();
-      this.claimSize();
       this.onActivate?.();
       this.focus();
     });
@@ -376,7 +412,6 @@ export class TerminalController {
         this.dragged = false;
       }
       this.onActivate?.();
-      this.claimSize();
       setTimeout(() => this.focus());
     });
     on(window, "mousemove", (ev) => {

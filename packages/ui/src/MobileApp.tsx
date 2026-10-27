@@ -38,6 +38,7 @@ import { cn } from "./lib/utils";
 import type { Services } from "./services";
 import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
 import { AppModel, type AppState, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
+import { SizeTakenOverlay } from "./size-overlay";
 import { rendererOptions } from "./terminal-font";
 import "./styles.css";
 
@@ -544,8 +545,6 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
   const renderer = useRenderer(surfaceRef, fontSize);
   const [ctrl, setCtrl] = useState(false);
   const [line, setLine] = useState("");
-  // 다른 화면이 세션 크기를 가져갔는지 (세션 정보가 바뀔 때마다 다시 본다)
-  const [taken, setTaken] = useState(false);
   const c = model.controller(session);
 
   useLayoutEffect(() => {
@@ -554,11 +553,6 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
     return () => c.hide();
   }, [c, renderer, generation]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setTaken(c.sizeTaken), 200);
-    return () => window.clearTimeout(t);
-  }, [c, s?.cols, s?.rows, renderer]);
-
   const changeFont = (d: number) => {
     const next = Math.min(20, Math.max(8, fontSize + d));
     localStorage.setItem(FONT_KEY, String(next));
@@ -566,10 +560,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
   };
 
   const siblings = terminalsOf(layout);
-  const key = (k: string, mods?: { ctrl?: boolean }) => {
-    c.claimSize();
-    c.sendKey(k, mods);
-  };
+  const key = (k: string, mods?: { ctrl?: boolean }) => c.sendKey(k, mods);
   const sendLine = () => {
     c.sendText(line + "\r");
     setLine("");
@@ -629,13 +620,10 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
           </>
         }
       />
-      {taken && (
-        <button className="shrink-0 bg-accent px-3 py-1 text-left text-[12px] text-muted-foreground" onClick={() => (c.claimSize(), setTaken(false))}>
-          데스크톱 크기로 그려지고 있다. 누르면 폰 크기로 맞춘다
-        </button>
-      )}
       <div ref={surfaceRef} className="relative min-h-0 flex-1" style={{ touchAction: "none" }}>
         <div ref={hostRef} className="absolute inset-x-1 inset-y-0.5" />
+        {/* 데스크톱이나 다른 기기가 세션 크기를 가져갔으면 덮는다. [세션 가져오기] 를 눌러야 폰 크기로 돌아온다 */}
+        <SizeTakenOverlay c={c} cols={s?.cols} rows={s?.rows} />
       </div>
       <div className="shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)]">
         {ctrl && (
@@ -675,7 +663,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
           <Key onPress={() => void paste()} label="붙여넣기">
             <ClipboardTextIcon className="size-4" />
           </Key>
-          <Key onPress={() => (c.claimSize(), c.focus())} label="키보드">
+          <Key onPress={() => c.focus()} label="키보드">
             <KeyboardIcon className="size-4" />
           </Key>
         </KeyRow>
