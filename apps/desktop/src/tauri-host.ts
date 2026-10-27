@@ -10,9 +10,11 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentImage,
   AgentSettings,
+  AgentSettingsState,
   Attachment,
   BranchList,
   BrowserEvent,
@@ -158,6 +160,14 @@ export class TauriHostApi implements HostApi {
     search: (worktree, query, caseSensitive) =>
       this.req({ type: "search_text", worktree, query, case_sensitive: caseSensitive }, (r) => ({ hits: r.hits as SearchHit[], truncated: !!r.truncated })),
     all: (worktree) => this.req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
+    write: (worktree, file, text, expectModified) =>
+      this.req<FileContent>({ type: "write_file", worktree, file, text, expect_modified: expectModified ?? null }, (r) => r.file).catch((e) => {
+        // 데몬 오류는 `데몬이 오류로 답했다: Conflict …` 글로 온다 (src-tauri err)
+        throw /: Conflict /.test(String(e)) ? new FileConflictError(String(e).replace(/^.*?: Conflict /, "")) : e;
+      }),
+    // src-tauri media.rs 가 Range 를 받아 데몬에서 조각씩 읽는다
+    mediaUrl: (worktree, file) =>
+      `thuminal-file://localhost/?worktree=${encodeURIComponent(worktree)}&file=${encodeURIComponent(file)}${this.hostId ? `&host=${encodeURIComponent(this.hostId)}` : ""}`,
   };
 
   /**
@@ -331,12 +341,12 @@ export class TauriHostApi implements HostApi {
     return this.req({ type: "stop_claude_session", session_id: sessionId });
   }
 
-  getAgentSettings(): Promise<AgentSettings> {
-    return this.req<AgentSettings>({ type: "get_agent_settings" }, (r) => r.settings);
+  getAgentSettings(): Promise<AgentSettingsState> {
+    return this.req({ type: "get_agent_settings" }, agentSettingsState);
   }
 
-  setAgentSettings(settings: AgentSettings): Promise<AgentSettings> {
-    return this.req<AgentSettings>({ type: "set_agent_settings", settings }, (r) => r.settings);
+  setAgentSettings(settings: AgentSettings): Promise<AgentSettingsState> {
+    return this.req({ type: "set_agent_settings", settings }, agentSettingsState);
   }
 
   openPath(path: string): Promise<void> {
@@ -440,6 +450,8 @@ export class TauriHostApi implements HostApi {
     this.subscribed ??= (async () => {
       const channel = new Channel<DaemonEvent>();
       channel.onmessage = (e) => {
+        // 다시 붙은 데몬은 새 판일 수 있다 (데몬을 다시 띄웠다)
+        if (e.type === "daemon_reconnected") this.info = null;
         for (const l of this.listeners) l(e);
       };
       await this.call("subscribe_events", { channel });

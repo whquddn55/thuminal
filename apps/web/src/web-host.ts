@@ -5,9 +5,11 @@
 // - 1 출력 [세션 u64][바이트], 2 입력 [세션 u64][바이트], 3 저장본 [세션 u64][형식 u8][바이트]
 // 연결이 끊기면 다시 붙고 `daemon_reconnected` 이벤트를 흘린다 (화면이 다시 붙는다). 폰이 잠들었다 깨면 바로 다시 붙는다.
 
+import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentImage,
   AgentSettings,
+  AgentSettingsState,
   Attachment,
   BranchList,
   CreateSession,
@@ -36,7 +38,7 @@ import type {
 } from "@thuminal/term-core";
 
 const PROTOCOL_MAJOR = 1;
-const PROTOCOL_MINOR = 4;
+const PROTOCOL_MINOR = 5;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -95,7 +97,7 @@ export class WebHostApi implements HostApi {
         opened = true;
         try {
           const r = await this.send({ type: "hello", protocol_major: PROTOCOL_MAJOR, protocol_minor: PROTOCOL_MINOR, client: "web" });
-          this.info = { engine: String(r.engine), version: String(r.daemon_version) };
+          this.info = { engine: String(r.engine), version: String(r.daemon_version), protocol: [Number(r.protocol_major), Number(r.protocol_minor)] };
           this.retry = 0;
           this.setState("open");
           const again = this.everOpened;
@@ -153,7 +155,11 @@ export class WebHostApi implements HostApi {
         if (!w) return;
         this.waits.delete(m.id as number);
         if (m.ok) w.resolve(m.ok as Json);
-        else w.reject(new Error(String((m.err as Json | undefined)?.message ?? "데몬 오류")));
+        else {
+          const err = m.err as Json | undefined;
+          const message = String(err?.message ?? "데몬 오류");
+          w.reject(err?.code === "conflict" ? new FileConflictError(message) : new Error(message));
+        }
       } else if (m.kind === "event") {
         for (const l of this.listeners) l(m.event as DaemonEvent);
       }
@@ -202,6 +208,11 @@ export class WebHostApi implements HostApi {
     search: (worktree, query, caseSensitive) =>
       this.req({ type: "search_text", worktree, query, case_sensitive: caseSensitive }, (r) => ({ hits: r.hits as SearchHit[], truncated: !!r.truncated })),
     all: (worktree) => this.req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
+    write: (worktree, file, text, expectModified) =>
+      this.req<FileContent>({ type: "write_file", worktree, file, text, expect_modified: expectModified ?? null }, (r) => r.file),
+    // 데몬 웹 서버가 Range 로 낸다 (daemon remote.rs `/api/file`)
+    mediaUrl: (worktree, file) =>
+      `${this.base}/api/file?token=${encodeURIComponent(this.token)}&worktree=${encodeURIComponent(worktree)}&file=${encodeURIComponent(file)}`,
   };
 
   async daemon(): Promise<DaemonInfo> {
@@ -349,12 +360,12 @@ export class WebHostApi implements HostApi {
     return this.req({ type: "stop_claude_session", session_id: sessionId });
   }
 
-  getAgentSettings(): Promise<AgentSettings> {
-    return this.req({ type: "get_agent_settings" }, (r) => r.settings);
+  getAgentSettings(): Promise<AgentSettingsState> {
+    return this.req({ type: "get_agent_settings" }, agentSettingsState);
   }
 
-  setAgentSettings(settings: AgentSettings): Promise<AgentSettings> {
-    return this.req({ type: "set_agent_settings", settings }, (r) => r.settings);
+  setAgentSettings(settings: AgentSettings): Promise<AgentSettingsState> {
+    return this.req({ type: "set_agent_settings", settings }, agentSettingsState);
   }
 
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null> {

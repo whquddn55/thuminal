@@ -175,7 +175,12 @@ export interface FileContent {
   binary: boolean;
   truncated: boolean;
   size: number;
+  /** 마지막으로 바뀐 때 (유닉스 밀리초). 고쳐 쓸 때 그사이 바뀌었는지 본다. 옛 데몬은 보내지 않는다 */
+  modified?: number | null;
 }
+
+/** 데몬 프로토콜 부 판이 이 값 이상이어야 파일 쓰기(`write_file`) · 바이트 읽기(`read_file_bytes`)가 된다 */
+export const FILES_PROTOCOL_MINOR = 5;
 
 /** 세션 꼬리표 중 워크트리 경로를 담는 키 (데몬이 시작 폴더로 채운다) */
 export const WORKTREE_LABEL = "worktree";
@@ -336,7 +341,15 @@ export interface AgentSettings {
     skip_permissions: boolean;
     /** 에이전트 팀을 켜고 팀원을 리더 칸에 딸린 터미널로 연다 (기본 켬) */
     teams: boolean;
+    /** thuminal claude 플러그인에서 끈 스킬 이름들 (옛 데몬은 보내지 않는다) */
+    disabled_skills?: string[];
   };
+}
+
+/** thuminal claude 플러그인의 스킬 하나 (`skills/<name>/SKILL.md`) */
+export interface PluginSkill {
+  name: string;
+  description: string;
 }
 
 // ---- 터미널 색 (데몬 엔진의 기본색. 프로그램 질의에 이 색으로 답한다) ----

@@ -1,7 +1,7 @@
 {
   "name": "thuminal",
-  "version": "0.1.0",
-  "description": "thuminal 터미널 안에서 도는 claude 의 상태와 세션 id 를 thuminal 에 알린다. thuminal 이 claude --plugin-dir 로 그 실행에만 얹는다 (설치하지 않는다).",
+  "version": "0.2.0",
+  "description": "thuminal 터미널 안에서 도는 claude 의 상태와 세션 id 를 thuminal 에 알리고, thuminal 용 스킬(new-work, agenda-picker)을 준다. thuminal 이 claude --plugin-dir 로 그 실행에만 얹는다 (설치하지 않는다). 스킬은 설정 → 에이전트에서 켜고 끈다.",
   "author": {
     "name": "thuthi"
   }

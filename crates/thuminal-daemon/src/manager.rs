@@ -547,6 +547,10 @@ impl Manager {
         self.shell.set_settings(settings);
     }
 
+    pub fn plugin_skills(&self) -> Vec<thuminal_protocol::PluginSkill> {
+        self.shell.skills()
+    }
+
     pub fn kill_all(&self) {
         for h in self.sessions.lock().unwrap().values() {
             let _ = h.cmd.send(Cmd::Kill);

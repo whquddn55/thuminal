@@ -5,6 +5,7 @@
 import type {
   AgentImage,
   AgentSettings,
+  PluginSkill,
   BranchList,
   CreateSession,
   DaemonEvent,
@@ -90,6 +91,32 @@ export interface FilesApi {
   search(worktree: string, query: string, caseSensitive: boolean): Promise<{ hits: SearchHit[]; truncated: boolean }>;
   /** 워크트리 안 파일 경로 전부 (추적 + 무시하지 않는 새 파일) */
   all(worktree: string): Promise<{ files: string[]; truncated: boolean }>;
+  /**
+   * 글자 파일을 통째로 쓴다 (데몬 부 판 `FILES_PROTOCOL_MINOR` 부터). expectModified 를 주면 그사이 파일이 바뀌었을 때
+   * 쓰지 않고 `FileConflictError` 로 거절한다. 새 크기 · 바뀐 때를 돌려준다
+   */
+  write(worktree: string, file: string, text: string, expectModified?: number | null): Promise<FileContent>;
+  /** `<img>` · `<video>` 가 받을 파일 주소 (Range 를 받는다). 데몬 부 판 `FILES_PROTOCOL_MINOR` 부터 된다 */
+  mediaUrl(worktree: string, file: string): string;
+}
+
+/** 에이전트 설정과 thuminal claude 플러그인의 스킬 목록 (옛 데몬은 스킬을 보내지 않아 빈 목록) */
+export interface AgentSettingsState {
+  settings: AgentSettings;
+  skills: PluginSkill[];
+}
+
+/** `agent_settings` 응답에서 설정 · 스킬을 꺼낸다 (옛 데몬은 skills 가 없다) */
+export function agentSettingsState(r: Record<string, unknown>): AgentSettingsState {
+  return { settings: r.settings as AgentSettings, skills: (r.skills as PluginSkill[] | undefined) ?? [] };
+}
+
+/** 고쳐 쓰려는 파일이 그사이 다른 곳에서 바뀌었다 (데몬 `conflict`) */
+export class FileConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FileConflictError";
+  }
 }
 
 /** 원격 접속 설정. 데몬이 원격 연결에서는 받지 않으므로 데스크톱 껍데기만 둔다 */
@@ -156,6 +183,8 @@ export interface Attachment {
 export interface DaemonInfo {
   engine: string;
   version: string;
+  /** 프로토콜 [주 판, 부 판]. 새 요청을 보내도 되는지 본다 (옛 데몬은 모른다: 앱 껍데기가 hello 에서 채운다) */
+  protocol?: [number, number];
 }
 
 export interface HostApi {
@@ -237,8 +266,8 @@ export interface HostApi {
   /** 이 claude 세션으로 떠 있는 claude 를 끝낸다 (Orca 에서 옮겨 올 때) */
   stopClaudeSession(sessionId: string): Promise<void>;
   /** 에이전트를 띄울 때 붙일 옵션 (데몬이 들고 있다) */
-  getAgentSettings(): Promise<AgentSettings>;
-  setAgentSettings(settings: AgentSettings): Promise<AgentSettings>;
+  getAgentSettings(): Promise<AgentSettingsState>;
+  setAgentSettings(settings: AgentSettings): Promise<AgentSettingsState>;
   /** 사용자 로그인 셸 PATH 에 있는 명령만 돌려준다 (설치된 에이전트 찾기) */
   findCommands(names: string[]): Promise<string[]>;
   /**

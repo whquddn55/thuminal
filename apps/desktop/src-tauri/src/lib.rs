@@ -8,6 +8,7 @@
 
 mod browser;
 mod hosts;
+mod media;
 mod notify;
 
 use std::collections::HashMap;
@@ -194,13 +195,17 @@ fn forward_events(c: &Client, channel: Channel<serde_json::Value>) {
 struct DaemonInfo {
     engine: String,
     version: String,
+    /// 프로토콜 [주 판, 부 판]. 화면이 새 요청을 보내도 되는지 본다
+    protocol: [u32; 2],
 }
 
 #[tauri::command]
 async fn daemon_info(state: State<'_, AppState>, host: Option<String>) -> CmdResult<DaemonInfo> {
     let c = state.client(host.as_deref()).await?;
     match &c.daemon {
-        Response::Hello { engine, daemon_version, .. } => Ok(DaemonInfo { engine: engine.clone(), version: daemon_version.clone() }),
+        Response::Hello { engine, daemon_version, protocol_major, protocol_minor, .. } => {
+            Ok(DaemonInfo { engine: engine.clone(), version: daemon_version.clone(), protocol: [*protocol_major, *protocol_minor] })
+        }
         other => Err(format!("예상하지 못한 hello 응답: {other:?}")),
     }
 }
@@ -532,6 +537,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol(media::SCHEME, |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move { responder.respond(media::serve(app, req).await) });
+        })
         .setup(|app| {
             app.manage(AppState::default());
             app.set_menu(app_menu(app.handle())?)?;

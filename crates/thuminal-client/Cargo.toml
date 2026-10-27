@@ -23,4 +23,5 @@ thuminal-engine-ghostty.workspace = true
 thuminal-pty-portable.workspace = true
 thuminal-vcs-git.workspace = true
 tempfile.workspace = true
+base64 = "0.22"
 serde_json.workspace = true

@@ -12,7 +12,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Notify, mpsc};
 use tracing::{debug, info, warn};
 
-use thuminal_protocol::{Event, WORKTREE_LABEL};
+use thuminal_protocol::{Event, FileBytes, WORKTREE_LABEL};
 use thuminal_workspace::{Workspace, WorkspaceError};
 
 use crate::layout::Layouts;
@@ -309,10 +309,10 @@ impl Server {
                 Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
                 Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
             },
-            Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings() }),
+            Request::GetAgentSettings => Ok(Response::AgentSettings { settings: m.agent_settings(), skills: m.plugin_skills() }),
             Request::SetAgentSettings { settings } => {
                 m.set_agent_settings(settings.clone());
-                Ok(Response::AgentSettings { settings })
+                Ok(Response::AgentSettings { settings, skills: m.plugin_skills() })
             }
             Request::FindCommands { names } => tokio::task::spawn_blocking(move || crate::shell::find_commands(&names))
                 .await
@@ -385,6 +385,8 @@ impl Server {
             | Request::ListBranches { .. }
             | Request::ListDir { .. }
             | Request::ReadFile { .. }
+            | Request::ReadFileBytes { .. }
+            | Request::WriteFile { .. }
             | Request::SearchText { .. }
             | Request::ListFiles { .. }
             | Request::GitLineCounts { .. }) => self.workspace_request(req).await,
@@ -430,7 +432,8 @@ impl Server {
             | Request::GitUnstage { worktree, .. }
             | Request::GitDiscard { worktree, .. }
             | Request::GitCommit { worktree, .. }
-            | Request::GitPush { worktree } => Some(worktree.clone()),
+            | Request::GitPush { worktree }
+            | Request::WriteFile { worktree, .. } => Some(worktree.clone()),
             _ => None,
         };
         let result = tokio::task::spawn_blocking(move || -> Result<Response, WorkspaceError> {
@@ -460,6 +463,14 @@ impl Server {
                 Request::ListBranches { repo } => Response::Branches { branches: ws.branches(&repo)? },
                 Request::ListDir { worktree, dir } => Response::Dir { entries: ws.list_dir(&worktree, &dir)? },
                 Request::ReadFile { worktree, file } => Response::File { file: ws.read_file(&worktree, &file)? },
+                Request::ReadFileBytes { worktree, file, offset, len } => {
+                    use base64::Engine;
+                    let (data, size, modified) = ws.read_file_bytes(&worktree, &file, offset, len)?;
+                    Response::FileBytes { bytes: FileBytes { data: base64::engine::general_purpose::STANDARD.encode(data), offset, size, modified } }
+                }
+                Request::WriteFile { worktree, file, text, expect_modified } => {
+                    Response::File { file: ws.write_file(&worktree, &file, &text, expect_modified)? }
+                }
                 Request::SearchText { worktree, query, case_sensitive } => {
                     let (hits, truncated) = ws.search(&worktree, &query, case_sensitive)?;
                     Response::SearchHits { hits, truncated }
@@ -490,6 +501,7 @@ impl Server {
             code: match e {
                 WorkspaceError::UnknownRepo(_) => ErrorCode::NotFound,
                 WorkspaceError::Invalid(_) => ErrorCode::InvalidRequest,
+                WorkspaceError::Conflict(_) => ErrorCode::Conflict,
                 _ => ErrorCode::Vcs,
             },
             message: e.to_string(),
@@ -541,6 +553,8 @@ fn request_kind(r: &Request) -> &'static str {
         Request::RepoIcon { .. } => "repo_icon",
         Request::ListDir { .. } => "list_dir",
         Request::ReadFile { .. } => "read_file",
+        Request::ReadFileBytes { .. } => "read_file_bytes",
+        Request::WriteFile { .. } => "write_file",
         Request::SearchText { .. } => "search_text",
         Request::ListFiles { .. } => "list_files",
         Request::GitLineCounts { .. } => "git_line_counts",
@@ -580,6 +594,8 @@ fn is_slow(r: &Request) -> bool {
             | Request::ListBranches { .. }
             | Request::ListDir { .. }
             | Request::ReadFile { .. }
+            | Request::ReadFileBytes { .. }
+            | Request::WriteFile { .. }
             | Request::SearchText { .. }
             | Request::ListFiles { .. }
             | Request::GitLineCounts { .. }

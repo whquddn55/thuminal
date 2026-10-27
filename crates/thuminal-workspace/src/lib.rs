@@ -75,6 +75,8 @@ pub enum WorkspaceError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(String),
+    #[error("파일이 그사이 바뀌었다: {0}")]
+    Conflict(String),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -108,6 +110,15 @@ impl WorktreeMeta {
 /// 파일 보기로 읽는 최대 크기
 const MAX_READ: u64 = 2 * 1024 * 1024;
 
+/// 바이트 읽기(그림 · 영상) 한 번에 돌려주는 최대 크기
+pub const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
+
+/// 고쳐 쓸 수 있는 글자 파일의 최대 크기 (보기 한도와 같다. 잘린 파일을 쓰면 뒤가 사라진다)
+const MAX_WRITE: u64 = MAX_READ;
+
+/// 워크트리 확인을 다시 쓰는 시간. 영상은 조각마다 읽기 요청이 와서 그때마다 git 을 부르지 않게 한다
+const KNOWN_WORKTREE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SavedRepo {
     path: PathBuf,
@@ -120,6 +131,8 @@ pub struct Workspace {
     meta: Mutex<std::collections::BTreeMap<PathBuf, WorktreeMeta>>,
     /// 남긴 그대로의 워크스페이스. 읽을 때마다 [`normalize_groups`] 로 지금 저장소 목록에 맞춘다
     groups: Mutex<Vec<RepoGroup>>,
+    /// 마지막으로 확인한 워크트리 목록과 그때 (`known_worktree`)
+    known: Mutex<Option<(std::time::Instant, Vec<PathBuf>)>>,
 }
 
 /// 기본 워크스페이스 이름 (사용자가 바꿀 수 있다)
@@ -169,7 +182,14 @@ impl Workspace {
     pub fn open(vcs: Arc<dyn Vcs>, home: &Path) -> Self {
         let file = home.join("workspace.json");
         let saved: Saved = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { vcs, file, repos: Mutex::new(saved.repos), meta: Mutex::new(saved.worktrees), groups: Mutex::new(saved.groups) }
+        Self {
+            vcs,
+            file,
+            repos: Mutex::new(saved.repos),
+            meta: Mutex::new(saved.worktrees),
+            groups: Mutex::new(saved.groups),
+            known: Mutex::new(None),
+        }
     }
 
     fn save(&self, repos: &[SavedRepo]) -> Result<(), WorkspaceError> {
@@ -410,7 +430,17 @@ impl Workspace {
     /// 등록한 저장소의 워크트리인지 확인하고 경로를 돌려준다
     fn known_worktree(&self, path: &str) -> Result<PathBuf, WorkspaceError> {
         let p = std::fs::canonicalize(path).map_err(|_| WorkspaceError::Invalid(format!("없는 폴더: {path}")))?;
-        if self.worktrees(None)?.iter().any(|w| Path::new(&w.path) == p) {
+        // 방금 확인한 목록에 있으면 git 을 다시 부르지 않는다. 없으면 목록을 새로 받아 본다 (막 만든 워크트리)
+        if let Some((at, list)) = &*self.known.lock().unwrap()
+            && at.elapsed() < KNOWN_WORKTREE_TTL
+            && list.contains(&p)
+        {
+            return Ok(p);
+        }
+        let list: Vec<PathBuf> = self.worktrees(None)?.into_iter().map(|w| PathBuf::from(w.path)).collect();
+        let found = list.contains(&p);
+        *self.known.lock().unwrap() = Some((std::time::Instant::now(), list));
+        if found {
             Ok(p)
         } else {
             Err(WorkspaceError::Invalid(format!("등록한 저장소의 워크트리가 아니다: {path}")))
@@ -557,13 +587,62 @@ impl Workspace {
         std::fs::File::open(&p)?.take(MAX_READ).read_to_end(&mut buf)?;
         let binary = buf.iter().take(8000).any(|&b| b == 0);
         let text = (!binary).then(|| String::from_utf8_lossy(&buf).into_owned());
-        Ok(FileContent { text, binary, truncated: size > MAX_READ, size })
+        Ok(FileContent { text, binary, truncated: size > MAX_READ, size, modified: modified_ms(&p) })
+    }
+
+    /// 파일 바이트 `offset` 부터 `len` 만큼 (`MAX_READ_BYTES` 까지). (바이트, 전체 크기, 바뀐 때)
+    pub fn read_file_bytes(&self, worktree: &str, file: &str, offset: u64, len: u64) -> Result<(Vec<u8>, u64, Option<u64>), WorkspaceError> {
+        use std::io::{Read, Seek};
+        let w = self.known_worktree(worktree)?;
+        let p = inside(&w, file)?;
+        let mut f = std::fs::File::open(&p)?;
+        let size = f.metadata()?.len();
+        let mut buf = Vec::new();
+        if offset < size {
+            f.seek(std::io::SeekFrom::Start(offset))?;
+            f.take(len.min(MAX_READ_BYTES)).read_to_end(&mut buf)?;
+        }
+        Ok((buf, size, modified_ms(&p)))
+    }
+
+    /// 글자 파일을 통째로 쓴다. `expect_modified` 가 지금 파일의 바뀐 때와 다르면 쓰지 않는다.
+    /// 있는 파일만 고친다 (새 파일을 만들지 않는다). 쓴 뒤의 크기 · 바뀐 때를 돌려준다
+    pub fn write_file(&self, worktree: &str, file: &str, text: &str, expect_modified: Option<u64>) -> Result<FileContent, WorkspaceError> {
+        let w = self.known_worktree(worktree)?;
+        let p = inside(&w, file)?;
+        let meta = std::fs::metadata(&p).map_err(|_| WorkspaceError::Invalid(format!("없는 파일: {file}")))?;
+        if !meta.is_file() {
+            return Err(WorkspaceError::Invalid(format!("파일이 아니다: {file}")));
+        }
+        if text.len() as u64 > MAX_WRITE {
+            return Err(WorkspaceError::Invalid(format!("{}MB 넘는 파일은 고쳐 쓰지 않는다: {file}", MAX_WRITE / 1024 / 1024)));
+        }
+        if let Some(expect) = expect_modified
+            && modified_ms(&p) != Some(expect)
+        {
+            return Err(WorkspaceError::Conflict(file.to_string()));
+        }
+        // 같은 폴더의 임시 파일에 쓰고 바꿔 끼운다 (쓰다 실패해도 원래 파일이 남는다). 권한은 원래 것을 따른다
+        let tmp = p.with_file_name(format!(".{}.thuminal-tmp", p.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
+        let r = std::fs::write(&tmp, text).and_then(|_| std::fs::set_permissions(&tmp, meta.permissions())).and_then(|_| std::fs::rename(&tmp, &p));
+        if let Err(e) = r {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        info!(event = "file_written", worktree, file, bytes = text.len());
+        Ok(FileContent { text: None, binary: false, truncated: false, size: text.len() as u64, modified: modified_ms(&p) })
     }
 
     /// 경로가 든 워크트리 맨 위 폴더 (세션 꼬리표용). git 저장소가 아니면 None
     pub fn worktree_of(&self, path: &Path) -> Option<PathBuf> {
         self.vcs.worktree_root(path).ok()
     }
+}
+
+/// 파일이 마지막으로 바뀐 때 (유닉스 밀리초)
+fn modified_ms(p: &Path) -> Option<u64> {
+    let t = std::fs::metadata(p).ok()?.modified().ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
 /// `rel` 이 `root` 밖으로 나가지 않는지 확인하고 절대 경로를 돌려준다
@@ -650,8 +729,8 @@ mod tests {
         fn worktree_root(&self, path: &Path) -> Result<PathBuf, VcsError> {
             Ok(path.to_path_buf())
         }
-        fn list_worktrees(&self, _: &Path) -> Result<Vec<VcsWorktree>, VcsError> {
-            Ok(Vec::new())
+        fn list_worktrees(&self, path: &Path) -> Result<Vec<VcsWorktree>, VcsError> {
+            Ok(vec![VcsWorktree { path: path.to_path_buf(), branch: None, head: String::new() }])
         }
         fn create_worktree(&self, _: &Path, _: &Path, _: &str, _: Option<&str>) -> Result<(), VcsError> {
             unimplemented!()
@@ -780,5 +859,56 @@ mod tests {
         // 다시 등록하면 옛 워크스페이스가 아니라 기본에 든다
         ws.add_repo(Path::new("/w/b")).unwrap();
         assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["a", "b"]), row("x", "일", &[])]);
+    }
+
+    /// 시험용 저장소 폴더 하나를 등록하고 (워크스페이스, 워크트리 경로) 를 돌려준다
+    fn with_worktree() -> (tempfile::TempDir, Workspace, String) {
+        let d = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(d.path()).unwrap().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let ws = open(d.path());
+        ws.add_repo(&root).unwrap();
+        (d, ws, root.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn write_file_checks_modified_time() {
+        let (_d, ws, w) = with_worktree();
+        std::fs::write(Path::new(&w).join("a.md"), "옛 글\n").unwrap();
+        let read = ws.read_file(&w, "a.md").unwrap();
+        let at = read.modified.expect("바뀐 때를 준다");
+
+        let saved = ws.write_file(&w, "a.md", "새 글\n", Some(at)).unwrap();
+        assert_eq!(std::fs::read_to_string(Path::new(&w).join("a.md")).unwrap(), "새 글\n");
+        assert_eq!(saved.size, "새 글\n".len() as u64);
+        // 옛 바뀐 때로 다시 쓰면 그사이 바뀐 것이다
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(Path::new(&w).join("a.md"), "다른 곳에서 고침\n").unwrap();
+        assert!(matches!(ws.write_file(&w, "a.md", "덮어쓰기", saved.modified), Err(WorkspaceError::Conflict(_))));
+        assert_eq!(std::fs::read_to_string(Path::new(&w).join("a.md")).unwrap(), "다른 곳에서 고침\n");
+        // 바뀐 때를 주지 않으면 그냥 쓴다
+        ws.write_file(&w, "a.md", "덮어쓰기", None).unwrap();
+        assert_eq!(std::fs::read_to_string(Path::new(&w).join("a.md")).unwrap(), "덮어쓰기");
+
+        assert!(ws.write_file(&w, "none.md", "x", None).is_err(), "없는 파일은 만들지 않는다");
+        assert!(ws.write_file(&w, "../out.md", "x", None).is_err(), "워크트리 밖은 쓰지 않는다");
+        let leftovers = std::fs::read_dir(&w).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains("thuminal-tmp")).count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn reads_bytes_in_pieces() {
+        let (_d, ws, w) = with_worktree();
+        let data: Vec<u8> = (0..=255u8).cycle().take(10_000).collect();
+        std::fs::write(Path::new(&w).join("clip.mp4"), &data).unwrap();
+        let (a, size, _) = ws.read_file_bytes(&w, "clip.mp4", 0, 4096).unwrap();
+        assert_eq!((a.as_slice(), size), (&data[..4096], 10_000));
+        let (b, _, _) = ws.read_file_bytes(&w, "clip.mp4", 9_000, 4096).unwrap();
+        assert_eq!(b, &data[9_000..]);
+        let (c, _, _) = ws.read_file_bytes(&w, "clip.mp4", 20_000, 10).unwrap();
+        assert!(c.is_empty());
+        let (big, _, _) = ws.read_file_bytes(&w, "clip.mp4", 0, u64::MAX).unwrap();
+        assert_eq!(big.len(), 10_000, "한도보다 작은 파일은 다 준다");
+        assert!(ws.read_file_bytes(&w, "../x", 0, 1).is_err());
     }
 }

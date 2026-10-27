@@ -6,7 +6,8 @@ import { CheckIcon, CopyIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import { useEffect, useState } from "react";
 import { renderSVG } from "uqr";
 
-import type { AgentSettings, RemoteApi, RemoteHost, RemoteHostsApi, RemoteStatus } from "@thuminal/term-core";
+import { FILES_PROTOCOL_MINOR } from "@thuminal/term-core";
+import type { AgentSettings, AgentSettingsState, RemoteApi, RemoteHost, RemoteHostsApi, RemoteStatus } from "@thuminal/term-core";
 import { type TerminalTheme, themes } from "@thuminal/themes";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
@@ -205,15 +206,21 @@ function FontSection() {
 function AgentSection() {
   const model = useModel();
   const host = model.services.host;
-  const [settings, setSettings] = useState<AgentSettings | null>(null);
+  const [state, setState] = useState<AgentSettingsState | null>(null);
+  const [oldDaemon, setOldDaemon] = useState(false);
   useEffect(() => {
-    void host.getAgentSettings().then(setSettings, model.fail);
+    void host.getAgentSettings().then(setState, model.fail);
+    void host.daemon().then((d) => setOldDaemon((d.protocol?.[1] ?? 0) < FILES_PROTOCOL_MINOR), () => undefined);
   }, [host, model]);
-  if (!settings) return null;
+  if (!state) return null;
+  const { settings, skills } = state;
   const change = (next: AgentSettings) => {
-    setSettings(next);
-    void host.setAgentSettings(next).then(setSettings, model.fail);
+    setState({ settings: next, skills });
+    void host.setAgentSettings(next).then(setState, model.fail);
   };
+  const disabled = settings.claude.disabled_skills ?? [];
+  const setSkill = (name: string, on: boolean) =>
+    change({ ...settings, claude: { ...settings.claude, disabled_skills: on ? disabled.filter((n) => n !== name) : [...disabled, name] } });
   return (
     <div className="flex flex-col gap-3">
       <Toggle
@@ -227,6 +234,25 @@ function AgentSection() {
         claude에게 팀을 만들라고 시키면 팀원 claude를 띄운다 (<Code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS</Code>). 리더 칸의 [팀원 N] 단추를 누르면
         팀원 목록이 팝업으로 뜨고, 이름을 누르면 그 팀원 터미널을 본다. 시키지 않으면 아무 일도 하지 않는다.
       </Toggle>
+      <div className="flex flex-col gap-2">
+        <div className="font-medium">thuminal 스킬</div>
+        <p className="text-xs text-muted-foreground">
+          thuminal 안에서 띄우는 claude에만 얹는 스킬이다 (<Code>thuminal:이름</Code>). 끈 스킬은 claude에게 보이지 않는다.
+        </p>
+        {skills.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {oldDaemon ? "지금 데몬은 옛 판이라 스킬을 켜고 끌 수 없다. 데몬을 다시 띄우면 여기서 고른다 (그때까지는 모두 켜져 있다)." : "플러그인에 스킬이 없다."}
+          </p>
+        ) : (
+          skills.map((k) => (
+            <Toggle key={k.name} checked={!disabled.includes(k.name)} onChange={(v) => setSkill(k.name, v)} title={k.name}>
+              <span className="line-clamp-2" title={k.description}>
+                {k.description}
+              </span>
+            </Toggle>
+          ))
+        )}
+      </div>
       <p className="text-xs text-muted-foreground">
         바꾸면 다음에 띄우는 claude부터 적용된다 (이미 열린 셸에서 치는 <Code>claude</Code>도). 지금 돌고 있는 claude는 다시 띄워야 한다.
       </p>

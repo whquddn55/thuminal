@@ -1,0 +1,33 @@
+/* agenda-picker 그림 공통 스타일. 페이지가 <html> 에 data-theme="light|dark" 를 달아 준다 (prefers-color-scheme 은 쓰지 않는다). */
+:root {
+  --bg: #fafaf8; --panel: #fff; --line: #d9d9d4; --ink: #1d1d1b; --ink2: #55554f; --ink3: #8a8a84;
+  --accent: #F45084; --accent-soft: #fdebf1; --new: #2f6fd6; --new-soft: #eaf1fc; --warn: #c2410c; --warn-soft: #fdf0e7;
+  --font: "Pretendard", "Pretendard Variable", -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+:root[data-theme="dark"] {
+  --bg: #1b1b19; --panel: #242422; --line: #3d3d39; --ink: #ecece9; --ink2: #c3c3be; --ink3: #8f8f89;
+  --accent-soft: #3b1f2a; --new: #7aa7f0; --new-soft: #1d2a40; --warn: #f0a35c; --warn-soft: #3a2a1c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); }
+body { padding: 22px 26px 26px; font-size: 15px; line-height: 1.55; }   /* 너비는 정하지 않는다. 페이지가 칸 너비로 그린다 */
+h1 { margin: 0 0 18px; font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+.note { margin: 18px 0 0; font-size: 14px; color: var(--ink2); }
+.note b { color: var(--ink); }
+
+/* 그래프: 줄 (누가 · 어디서) 마다 상자 (단계) 를 화살표로 잇는다. 화살표는 상자에 붙어 줄이 꺾여도 같이 넘어간다.
+   상자 종류: 기본 · .new (새로 생기거나 바뀌는 것) · .warn (문제가 생기는 곳) · .muted (그대로 두는 것). */
+.lane { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px dashed var(--line); }
+.lane.solo { grid-template-columns: 1fr; }
+.lane:first-of-type, h1 + .lane { border-top: 0; }
+.who { font-size: 14px; font-weight: 700; color: var(--ink2); }
+.row { display: flex; align-items: center; gap: 12px 34px; flex-wrap: wrap; }
+.node { position: relative; min-width: 120px; padding: 10px 16px; border: 1.5px solid var(--line); border-radius: 10px;
+        background: var(--panel); text-align: center; font-weight: 600; }
+.node small { display: block; margin-top: 2px; font-size: 12.5px; font-weight: 400; color: var(--ink3); }
+.node.new { border-color: var(--new); background: var(--new-soft); }
+.node.warn { border-color: var(--warn); background: var(--warn-soft); }
+.node.muted { color: var(--ink3); border-style: dashed; }
+.node + .node::before { content: "→"; position: absolute; left: -27px; top: 50%; transform: translateY(-50%);
+                        color: var(--ink3); font-size: 20px; font-weight: 400; line-height: 1; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; padding: 1px 5px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); }

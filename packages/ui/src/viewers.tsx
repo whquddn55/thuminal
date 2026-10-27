@@ -1,13 +1,16 @@
-// 문서 칸: diff 보기, 파일 보기. Markdown 파일은 미리보기를 기본으로 보인다 (markdown.tsx 는 처음 필요할 때 불러온다).
+// 문서 칸: diff 보기, 파일 보기. Markdown 파일은 미리보기를 기본으로 보이고, 원문 보기에서 바로 고친다
+// (markdown.tsx · source-editor.tsx 는 처음 필요할 때 불러온다). 그림 · 영상 · 소리는 주소로 띄운다.
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
-import type { FileContent, HostApi } from "@thuminal/term-core";
+import { type FileContent, FileConflictError, type HostApi } from "@thuminal/term-core";
 
+import { type MediaKind, mediaKind, useFilesSupported } from "./file-features";
 import { cn } from "./lib/utils";
 import { isMarkdownFile } from "./markdown-links";
 
 const MarkdownPreview = lazy(() => import("./markdown"));
+const SourceEditor = lazy(() => import("./source-editor"));
 
 interface DiffLine {
   kind: "add" | "del" | "ctx" | "hunk" | "meta";
@@ -87,13 +90,105 @@ function Head({ children }: { children: React.ReactNode }) {
 }
 
 export function DocView({ host, worktree, doc, generation, actions }: { host: HostApi; worktree: string; doc: DocSpec; generation: number; actions?: DocActions }) {
+  return doc.kind === "diff" ? (
+    <DiffView host={host} worktree={worktree} doc={doc} generation={generation} />
+  ) : (
+    <FileView host={host} worktree={worktree} doc={doc} generation={generation} actions={actions} />
+  );
+}
+
+function frameOf(ref: React.RefObject<HTMLDivElement | null>) {
+  return (children: React.ReactNode) => (
+    <div ref={ref} className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">
+      {children}
+    </div>
+  );
+}
+
+function DiffView({ host, worktree, doc, generation }: { host: HostApi; worktree: string; doc: DocSpec; generation: number }) {
   const [diff, setDiff] = useState<string | null>(null);
-  const [file, setFile] = useState<FileContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const staged = doc.staged === "1";
+  const body = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    host.git
+      .diff(worktree, doc.file, staged)
+      .then((d) => alive && setDiff(d))
+      .catch((e) => alive && setError(String(e)));
+    return () => {
+      alive = false;
+    };
+    // generation: git 상태가 바뀔 때마다 다시 읽는다
+  }, [host, worktree, doc.file, staged, generation]);
+
+  const frame = frameOf(body);
+  if (error) return frame(<div className="p-4 text-destructive">{error}</div>);
+  if (diff === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
+  const lines = parseDiff(diff).filter((l) => l.kind !== "meta");
+  const adds = lines.filter((l) => l.kind === "add").length;
+  const dels = lines.filter((l) => l.kind === "del").length;
+  return frame(
+    <>
+      <Head>
+        <span className="flex-1 truncate font-mono">{doc.file}</span>
+        <span className="text-muted-foreground">{staged ? "스테이지됨" : "작업 폴더"}</span>
+        <span className="text-emerald-500">+{adds}</span>
+        <span className="text-red-500">−{dels}</span>
+      </Head>
+      {lines.length === 0 ? (
+        <div className="p-4 text-muted-foreground">바뀐 내용이 없다 (이미 스테이지했거나 되돌렸다)</div>
+      ) : (
+        <table className={cn("w-full border-collapse", ROW)}>
+          <tbody>
+            {lines.map((l, i) =>
+              l.kind === "hunk" ? (
+                <tr key={i}>
+                  <td colSpan={4} className="bg-sky-500/10 px-2 py-1 text-sky-500">
+                    {l.text}
+                  </td>
+                </tr>
+              ) : (
+                <tr key={i} className={cn(l.kind === "add" && "bg-emerald-500/12", l.kind === "del" && "bg-red-500/12")}>
+                  <td className={LN}>{l.old ?? ""}</td>
+                  <td className={LN}>{l.new ?? ""}</td>
+                  <td className={cn("w-px select-none px-1", l.kind === "add" ? "text-emerald-500" : "text-red-500")}>
+                    {l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}
+                  </td>
+                  <td className="whitespace-pre px-2">{l.text}</td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      )}
+    </>,
+  );
+}
+
+/**
+ * 저장하지 않은 고친 글. 칸이 탭을 옮기거나 닫혔다 다시 열려도 남게 칸 밖(호스트 · 워크트리 · 파일마다)에 둔다.
+ * 앱을 끄면 사라진다
+ */
+const drafts = new Map<string, string>();
+function draftKey(host: HostApi, worktree: string, file: string): string {
+  return `${host.hostId ?? ""}\n${worktree}\n${file}`;
+}
+
+type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "conflict"; message: string } | { kind: "error"; message: string };
+
+function FileView({ host, worktree, doc, generation, actions }: { host: HostApi; worktree: string; doc: DocSpec; generation: number; actions?: DocActions }) {
+  const [file, setFile] = useState<FileContent | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const line = Number(doc.line) || 0;
   const body = useRef<HTMLDivElement>(null);
-  const markdown = doc.kind === "file" && isMarkdownFile(doc.file);
+  const supported = useFilesSupported(host);
+  const media = mediaKind(doc.file);
+  // 새 데몬이면 그림 · 영상 · 소리는 주소로 보인다 (옛 데몬은 SVG 만 글자로 본다)
+  const asMedia = media !== null && supported === true;
+  const markdown = isMarkdownFile(doc.file);
   // 줄로 가라는 요청(line)이 있으면 원문으로 연다 (Orca 와 같다). 고른 보기는 doc.view 로 칸에 남는다
   const savedView: MdView = doc.view === "preview" || doc.view === "source" ? doc.view : line ? "source" : "preview";
   const [view, setView] = useState<MdView>(savedView);
@@ -107,114 +202,258 @@ export function DocView({ host, worktree, doc, generation, actions }: { host: Ho
   const showPreview = markdown && view === "preview";
   const scroller = useCallback(() => body.current, []);
 
+  // ---- 고친 글 · 저장 ----
+  const key = draftKey(host, worktree, doc.file);
+  const [draft, setDraftState] = useState<string | null>(() => drafts.get(key) ?? null);
+  useEffect(() => setDraftState(drafts.get(key) ?? null), [key]);
+  const setDraft = (t: string | null) => {
+    if (t === null) drafts.delete(key);
+    else drafts.set(key, t);
+    setDraftState(t);
+  };
+  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+  /** 고치는 동안 다른 곳에서 파일이 바뀌었다 (다시 읽은 바뀐 때가 다르다) */
+  const [outside, setOutside] = useState(false);
+  const dirty = draft !== null && file !== null && draft !== file.text;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
   useEffect(() => {
+    if (asMedia) return;
     let alive = true;
     setError(null);
-    const p =
-      doc.kind === "diff"
-        ? host.git.diff(worktree, doc.file, staged).then((d) => alive && setDiff(d))
-        : host.files.read(worktree, doc.file).then((f) => alive && setFile(f));
-    p.catch((e) => alive && setError(String(e)));
+    host.files
+      .read(worktree, doc.file)
+      .then((f) => {
+        if (!alive) return;
+        // 고치는 중이면 편집기 글은 그대로 두고, 파일이 바뀌었는지만 알린다 (저장할 때 바뀐 때로 다시 막는다)
+        setFile((old) => {
+          if (dirtyRef.current && old) {
+            if (f.modified != null && f.modified !== old.modified) setOutside(true);
+            return old;
+          }
+          return f;
+        });
+      })
+      .catch((e) => alive && setError(String(e)));
     return () => {
       alive = false;
     };
     // generation: git 상태가 바뀔 때마다 다시 읽는다
-  }, [host, worktree, doc.kind, doc.file, staged, generation]);
+  }, [host, worktree, doc.file, generation, asMedia]);
 
-  // 검색 결과에서 열었으면 그 줄을 가운데로
+  const editable = markdown && supported === true && file !== null && !file.binary && !file.truncated;
+  const doSave = (force = false) => {
+    if (!file || draft === null || !editable || save.kind === "saving") return;
+    const text = draft;
+    setSave({ kind: "saving" });
+    host.files.write(worktree, doc.file, text, force ? null : file.modified).then(
+      (saved) => {
+        setFile({ ...file, text, size: saved.size, modified: saved.modified ?? null });
+        if (drafts.get(key) === text) setDraft(null);
+        setSave({ kind: "idle" });
+        setOutside(false);
+      },
+      (e) => setSave(e instanceof FileConflictError ? { kind: "conflict", message: e.message } : { kind: "error", message: String(e) }),
+    );
+  };
+  /** 고친 것을 버리고 파일을 다시 읽는다 */
+  const reload = () => {
+    setDraft(null);
+    setSave({ kind: "idle" });
+    setOutside(false);
+    host.files.read(worktree, doc.file).then(setFile, (e) => setError(String(e)));
+  };
+
+  // 검색 결과에서 열었으면 그 줄을 가운데로 (편집기가 아닌 표 보기)
   useEffect(() => {
-    if (!line || !file || showPreview) return;
+    if (!line || !file || showPreview || markdown) return;
     body.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" });
-  }, [line, file, showPreview]);
+  }, [line, file, showPreview, markdown]);
 
-  const frame = (children: React.ReactNode) => (
-    <div ref={body} className="absolute inset-0 overflow-auto bg-background select-text thm-scroll">
-      {children}
-    </div>
-  );
+  const frame = frameOf(body);
+  if (asMedia) return <MediaView host={host} worktree={worktree} file={doc.file} kind={media} />;
   if (error) return frame(<div className="p-4 text-destructive">{error}</div>);
+  if (file === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
+  const text = draft ?? file.text ?? "";
 
-  if (doc.kind === "diff") {
-    if (diff === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
-    const lines = parseDiff(diff).filter((l) => l.kind !== "meta");
-    const adds = lines.filter((l) => l.kind === "add").length;
-    const dels = lines.filter((l) => l.kind === "del").length;
+  const head = (
+    <Head>
+      <span className="flex-1 truncate font-mono">{doc.file}</span>
+      {dirty && (
+        <span className="shrink-0 text-amber-500" title="저장하지 않은 고친 내용이 있다">
+          ● 저장 안 됨
+        </span>
+      )}
+      {!dirty && <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>}
+      {file.truncated && <span className="text-amber-500">앞 2MB만 보인다</span>}
+      {markdown && !file.binary && <Toggle value={view} onChange={changeView} />}
+      {dirty && editable && (
+        <button
+          className="shrink-0 rounded-md bg-primary px-2 py-0.5 text-2xs text-primary-foreground disabled:opacity-50"
+          disabled={save.kind === "saving"}
+          onClick={() => doSave()}
+          title="저장 (⌘S)"
+        >
+          {save.kind === "saving" ? "저장 중…" : "저장"}
+        </button>
+      )}
+    </Head>
+  );
+  const banner = (() => {
+    const bar = (tone: string, children: React.ReactNode) => <div className={cn("flex items-center gap-2 border-b px-3 py-1.5 text-xs", tone)}>{children}</div>;
+    const btn = (label: string, onClick: () => void) => (
+      <button className="rounded border bg-background px-2 py-0.5 hover:bg-accent" onClick={onClick}>
+        {label}
+      </button>
+    );
+    if (save.kind === "conflict" || (outside && dirty))
+      return bar(
+        "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        <>
+          <span className="flex-1">다른 곳에서 이 파일을 바꿨다. 저장하면 그 내용을 덮어쓴다.</span>
+          {btn("다시 읽기 (고친 것 버림)", reload)}
+          {btn("덮어쓰기", () => doSave(true))}
+        </>,
+      );
+    if (save.kind === "error")
+      return bar(
+        "bg-destructive/10 text-destructive",
+        <>
+          <span className="flex-1">저장하지 못했다: {save.message}</span>
+          {btn("닫기", () => setSave({ kind: "idle" }))}
+        </>,
+      );
+    return null;
+  })();
+
+  if (file.binary)
     return frame(
       <>
-        <Head>
-          <span className="flex-1 truncate font-mono">{doc.file}</span>
-          <span className="text-muted-foreground">{staged ? "스테이지됨" : "작업 폴더"}</span>
-          <span className="text-emerald-500">+{adds}</span>
-          <span className="text-red-500">−{dels}</span>
-        </Head>
-        {lines.length === 0 ? (
-          <div className="p-4 text-muted-foreground">바뀐 내용이 없다 (이미 스테이지했거나 되돌렸다)</div>
-        ) : (
-          <table className={cn("w-full border-collapse", ROW)}>
-            <tbody>
-              {lines.map((l, i) =>
-                l.kind === "hunk" ? (
-                  <tr key={i}>
-                    <td colSpan={4} className="bg-sky-500/10 px-2 py-1 text-sky-500">
-                      {l.text}
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={i} className={cn(l.kind === "add" && "bg-emerald-500/12", l.kind === "del" && "bg-red-500/12")}>
-                    <td className={LN}>{l.old ?? ""}</td>
-                    <td className={LN}>{l.new ?? ""}</td>
-                    <td className={cn("w-px select-none px-1", l.kind === "add" ? "text-emerald-500" : "text-red-500")}>
-                      {l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}
-                    </td>
-                    <td className="whitespace-pre px-2">{l.text}</td>
-                  </tr>
-                ),
-              )}
-            </tbody>
-          </table>
-        )}
+        {head}
+        <div className="p-4 text-muted-foreground">
+          {media && supported === false ? "데몬이 옛 판이라 그림 · 영상을 보일 수 없다. 데몬을 다시 띄우면 보인다." : "글자 파일이 아니다"}
+        </div>
       </>,
     );
-  }
-
-  if (file === null) return frame(<div className="p-4 text-muted-foreground">불러오는 중…</div>);
-  return frame(
-    <>
-      <Head>
-        <span className="flex-1 truncate font-mono">{doc.file}</span>
-        <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
-        {file.truncated && <span className="text-amber-500">앞 2MB만 보인다</span>}
-        {markdown && !file.binary && <Toggle value={view} onChange={changeView} />}
-      </Head>
-      {file.binary ? (
-        <div className="p-4 text-muted-foreground">글자 파일이 아니다</div>
-      ) : showPreview ? (
+  if (showPreview)
+    return frame(
+      <>
+        {head}
+        {banner}
         <Suspense fallback={<div className="p-4 text-muted-foreground">불러오는 중…</div>}>
           <MarkdownPreview
             host={host}
             worktree={worktree}
             file={doc.file}
-            text={file.text ?? ""}
+            text={text}
             scroller={scroller}
             openFile={actions?.openFile ?? noop}
             openUrl={actions?.openUrl ?? openUrlFallback(host)}
             notice={actions?.notice ?? noop}
           />
         </Suspense>
-      ) : (
-        <table className={cn("w-full border-collapse", ROW)}>
-          <tbody>
-            {(file.text ?? "").split("\n").map((t, i) => (
-              <tr key={i} data-line={i + 1} className={cn(i + 1 === line && "bg-amber-500/15")}>
-                <td className={LN}>{i + 1}</td>
-                <td className="whitespace-pre px-2">{t}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      </>,
+    );
+  // Markdown 원문은 편집기에서 바로 고친다 (Orca 와 같다). 옛 데몬이거나 잘린 파일은 읽기만 된다
+  if (markdown)
+    return (
+      <div className="absolute inset-0 flex flex-col bg-background">
+        {head}
+        {banner}
+        {supported === false && (
+          <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">데몬이 옛 판이라 읽기만 된다. 데몬을 다시 띄우면 여기서 고칠 수 있다.</div>
+        )}
+        <div className="min-h-0 flex-1">
+          <Suspense fallback={<div className="p-4 text-muted-foreground">불러오는 중…</div>}>
+            <SourceEditor value={text} readOnly={!editable} line={line} onChange={(t) => setDraft(t === file.text ? null : t)} onSave={() => doSave()} />
+          </Suspense>
+        </div>
+      </div>
+    );
+  return frame(
+    <>
+      {head}
+      <table className={cn("w-full border-collapse", ROW)}>
+        <tbody>
+          {text.split("\n").map((t, i) => (
+            <tr key={i} data-line={i + 1} className={cn(i + 1 === line && "bg-amber-500/15")}>
+              <td className={LN}>{i + 1}</td>
+              <td className="whitespace-pre px-2">{t}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>,
   );
+}
+
+/** 그림 · 영상 · 소리. 주소는 껍데기가 정한다 (데스크톱 `thuminal-file://`, 웹 `/api/file`). 영상은 Range 로 받으며 재생한다 */
+function MediaView({ host, worktree, file, kind }: { host: HostApi; worktree: string; file: string; kind: MediaKind }) {
+  const url = host.files.mediaUrl(worktree, file);
+  const [failed, setFailed] = useState(false);
+  /** 그림: 칸에 맞추기(기본) · 원래 크기 */
+  const [actual, setActual] = useState(false);
+  const [size, setSize] = useState<string | null>(null);
+  useEffect(() => {
+    setFailed(false);
+    setSize(null);
+  }, [url]);
+  return (
+    <div className="absolute inset-0 flex flex-col bg-background">
+      <Head>
+        <span className="flex-1 truncate font-mono">{file}</span>
+        {size && <span className="text-muted-foreground">{size}</span>}
+        {kind === "image" && !failed && (
+          <button className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-2xs hover:text-foreground" onClick={() => setActual((a) => !a)}>
+            {actual ? "칸에 맞추기" : "원래 크기"}
+          </button>
+        )}
+      </Head>
+      <div className={cn("min-h-0 flex-1 thm-scroll", actual ? "overflow-auto" : "flex items-center justify-center overflow-hidden p-3")}>
+        {failed ? (
+          <div className="p-4 text-muted-foreground">열지 못했다. 이 앱이 재생하지 못하는 형식이거나 파일을 읽지 못했다.</div>
+        ) : kind === "image" ? (
+          <img
+            src={url}
+            alt={file}
+            className={cn(actual ? "max-w-none" : "max-h-full max-w-full object-contain", "cursor-zoom-in [image-rendering:auto]")}
+            style={{ backgroundImage: "repeating-conic-gradient(var(--muted) 0% 25%, transparent 0% 50%)", backgroundSize: "16px 16px" }}
+            onClick={() => setActual((a) => !a)}
+            onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
+            onError={() => setFailed(true)}
+          />
+        ) : kind === "video" ? (
+          <video
+            src={url}
+            controls
+            preload="metadata"
+            className="max-h-full max-w-full"
+            onLoadedMetadata={(e) => setSize(`${e.currentTarget.videoWidth}×${e.currentTarget.videoHeight} · ${duration(e.currentTarget.duration)}`)}
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <audio
+            src={url}
+            controls
+            preload="metadata"
+            className="w-full max-w-xl"
+            onLoadedMetadata={(e) => setSize(duration(e.currentTarget.duration))}
+            onError={() => setFailed(true)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function duration(sec: number): string {
+  if (!Number.isFinite(sec)) return "";
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
 }
 
 const noop = () => undefined;

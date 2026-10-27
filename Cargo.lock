@@ -4295,6 +4295,7 @@ dependencies = [
 name = "thuminal-client"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "libc",
  "serde_json",
@@ -4341,6 +4342,7 @@ dependencies = [
 name = "thuminal-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "fontdb",
  "serde",
  "serde_json",

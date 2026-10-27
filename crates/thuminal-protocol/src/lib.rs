@@ -6,6 +6,7 @@
 
 pub mod frame;
 pub mod layout;
+pub mod media;
 pub mod message;
 pub mod paths;
 
@@ -16,4 +17,4 @@ pub use message::*;
 /// 주 버전이 다르면 서로 붙지 않는다. 소켓 이름에도 들어간다.
 pub const PROTOCOL_MAJOR: u32 = 1;
 /// 부 버전은 하위 호환으로 늘린다 (필드 추가 등).
-pub const PROTOCOL_MINOR: u32 = 4;
+pub const PROTOCOL_MINOR: u32 = 5;

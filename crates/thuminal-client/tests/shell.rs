@@ -75,7 +75,8 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
     .unwrap();
     tokio::spawn(d.run());
     let c = Client::connect(&Paths::new(&data), "test").await.unwrap();
-    let plugin_s = plugin.to_string_lossy();
+    // 실행기는 원본 대신 데몬이 짠 플러그인 폴더(켠 스킬만)를 얹는다
+    let plugin_s = data.join("shell/claude-plugin").to_string_lossy().into_owned();
 
     // zsh: 네 단계 설정을 다 읽고, ZDOTDIR 는 원래대로(없음), claude 에 별칭과 플러그인이 붙는다
     let screen = run_in_shell(

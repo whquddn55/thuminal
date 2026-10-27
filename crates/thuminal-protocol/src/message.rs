@@ -322,6 +322,21 @@ pub struct FileContent {
     pub binary: bool,
     pub truncated: bool,
     pub size: u64,
+    /// 마지막으로 바뀐 때 (유닉스 밀리초). 고쳐 쓸 때 그사이 바뀌었는지 보는 데 쓴다. 옛 데몬은 보내지 않는다
+    #[serde(default)]
+    pub modified: Option<u64>,
+}
+
+/// 파일 바이트 한 조각 (`ReadFileBytes`)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileBytes {
+    /// base64
+    pub data: String,
+    /// 이 조각이 시작하는 자리
+    pub offset: u64,
+    /// 파일 전체 크기
+    pub size: u64,
+    pub modified: Option<u64>,
 }
 
 /// 세션 꼬리표 중 워크트리 경로를 담는 키. 데몬이 세션을 만들 때 시작 폴더로 채운다
@@ -482,6 +497,17 @@ pub enum Request {
         dir: String,
     },
     ReadFile { worktree: String, file: String },
+    /// 파일 바이트를 `offset` 부터 `len` 만큼 (그림 · 영상). `len` 은 데몬이 `MAX_READ_BYTES` 로 줄인다 (minor 5)
+    ReadFileBytes { worktree: String, file: String, offset: u64, len: u64 },
+    /// 글자 파일을 통째로 쓴다. 답은 `File` (글은 빼고 새 크기 · 바뀐 때). `expect_modified` 를 주면
+    /// 파일이 그때 그대로일 때만 쓰고, 그사이 바뀌었으면 `Conflict` 로 거절한다 (minor 5)
+    WriteFile {
+        worktree: String,
+        file: String,
+        text: String,
+        #[serde(default)]
+        expect_modified: Option<u64>,
+    },
     /// 워크트리 안 파일 내용에서 글을 찾는다 (git grep, 무시하는 파일은 뺀다). 결과가 많으면 앞부분만
     SearchText {
         worktree: String,
@@ -594,6 +620,7 @@ pub enum Response {
     RepoIcon { icon: Option<RepoIcon> },
     Dir { entries: Vec<DirEntry> },
     File { file: FileContent },
+    FileBytes { bytes: FileBytes },
     SearchHits { hits: Vec<SearchHit>, truncated: bool },
     FileList { files: Vec<String>, truncated: bool },
     LineCounts { counts: Vec<LineCount> },
@@ -608,7 +635,12 @@ pub enum Response {
     /// 데몬이 쓴 파일
     Saved { path: String },
     RunningAgents { found: Vec<RunningAgent> },
-    AgentSettings { settings: AgentSettings },
+    AgentSettings {
+        settings: AgentSettings,
+        /// thuminal claude 플러그인에 든 스킬들 (설정에서 켜고 끈다). 옛 데몬은 보내지 않는다
+        #[serde(default)]
+        skills: Vec<PluginSkill>,
+    },
     Tmux { stdout: String, stderr: String, code: i32 },
     AgentImages { images: Vec<AgentImage> },
     /// 그림 내용 (`data` 는 base64)
@@ -655,6 +687,8 @@ pub enum ErrorCode {
     InvalidRequest,
     SpawnFailed,
     Vcs,
+    /// 고쳐 쓰려는 파일이 그사이 바뀌었다
+    Conflict,
     Internal,
 }
 
@@ -779,12 +813,23 @@ pub struct ClaudeSettings {
     pub skip_permissions: bool,
     /// 에이전트 팀을 켜고, 팀원을 리더 칸에 딸린 thuminal 터미널로 연다 (기본 켬)
     pub teams: bool,
+    /// thuminal claude 플러그인에서 끈 스킬 이름들. 없는 이름은 켜진 것이다 (새 스킬은 처음에 켜져 있다)
+    pub disabled_skills: Vec<String>,
 }
 
 impl Default for ClaudeSettings {
     fn default() -> Self {
-        Self { skip_permissions: true, teams: true }
+        Self { skip_permissions: true, teams: true, disabled_skills: Vec::new() }
     }
+}
+
+/// thuminal claude 플러그인의 스킬 하나 (`skills/<name>/SKILL.md`)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginSkill {
+    pub name: String,
+    /// SKILL.md 머리의 description
+    #[serde(default)]
+    pub description: String,
 }
 
 #[cfg(test)]

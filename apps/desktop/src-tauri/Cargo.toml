@@ -23,6 +23,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 fontdb = "0.24.0"
+base64 = "0.22"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 

@@ -5,6 +5,9 @@
 //! Claude Code 설정(~/.claude)에는 아무것도 설치하지 않는다.
 //! 실행기는 에이전트 설정(`agent-settings.json`)이 바뀔 때마다 다시 쓴다. 함수가 부를 때마다 실행기를 돌리므로
 //! 설정을 바꾸면 이미 뜬 셸에서 치는 `claude` 에도 바로 들어간다.
+//! - 스킬: 플러그인의 `skills/` 중 설정에서 끈 것을 뺀다. 실행기는 원본 플러그인 대신 `shell/claude-plugin` 을 얹는다.
+//!   그 폴더의 `skills` 는 켠 스킬만 링크한 `skills.<번호>` 를 가리키는 링크이고, 설정이 바뀌면 그 링크만 바꿔 끼운다
+//!   (떠 있는 claude 의 훅 경로 `${CLAUDE_PLUGIN_ROOT}/hooks/…` 가 끊기지 않게 한다).
 //! - 권한: `--dangerously-skip-permissions`
 //! - 에이전트 팀: 팀 환경 변수를 켜고, 가짜 `tmux`(`shell/teams-bin/tmux` → `thuminal tmux`)를 claude 에게만 보인다.
 //!   claude 가 tmux 안이라고 믿고 팀원 칸을 나누려 하면 데몬이 팀원 세션을 띄운다 (`teams.rs`).
@@ -19,7 +22,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use thuminal_protocol::AgentSettings;
+use thuminal_protocol::{AgentSettings, PluginSkill};
 use tracing::{info, warn};
 
 #[derive(Debug, Default)]
@@ -137,11 +140,85 @@ fi
                 bin = sh_quote(&self.teams_bin().to_string_lossy()),
             ));
         }
-        if let Some(p) = &self.claude_plugin {
+        if let Some(p) = self.plugin_dir() {
             out.push_str(&format!("[ -d {p} ] && set -- --plugin-dir {p} \"$@\"\n", p = sh_quote(&p.to_string_lossy())));
         }
         out.push_str("exec claude \"$@\"\n");
         out
+    }
+
+    /// 플러그인에 든 스킬들 (`skills/<이름>/SKILL.md`, 이름 순)
+    pub fn skills(&self) -> Vec<PluginSkill> {
+        let Some(src) = &self.claude_plugin else { return Vec::new() };
+        let mut out: Vec<PluginSkill> = std::fs::read_dir(src.join("skills"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_str()?.to_string();
+                let md = std::fs::read_to_string(e.path().join("SKILL.md")).ok()?;
+                Some(PluginSkill { description: frontmatter(&md, "description").unwrap_or_default(), name })
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
+    /// 실행기가 얹는 플러그인 폴더. 짜 둔 `shell/claude-plugin` 이 있으면 그것, 아니면 원본
+    fn plugin_dir(&self) -> Option<PathBuf> {
+        self.claude_plugin.as_ref()?;
+        let built = self.dir.join("claude-plugin");
+        Some(if built.join("skills").exists() { built } else { self.claude_plugin.clone()? })
+    }
+
+    /// `shell/claude-plugin` 을 원본에 맞춰 다시 짠다. 스킬 말고는 원본으로 가는 링크다
+    fn build_plugin(&self) -> std::io::Result<()> {
+        use std::os::unix::fs::symlink;
+        let Some(src) = &self.claude_plugin else { return Ok(()) };
+        let root = self.dir.join("claude-plugin");
+        std::fs::create_dir_all(&root)?;
+        let disabled = self.settings.lock().unwrap().claude.disabled_skills.clone();
+        // 원본 맨 위 항목마다 링크 (스킬 폴더는 따로). 원본에서 사라진 것은 지운다
+        let mut keep = vec![std::ffi::OsString::from("skills")];
+        for e in std::fs::read_dir(src)?.flatten() {
+            let name = e.file_name();
+            if name == "skills" {
+                continue;
+            }
+            let link = root.join(&name);
+            if std::fs::read_link(&link).ok().as_deref() != Some(e.path().as_path()) {
+                let _ = std::fs::remove_file(&link);
+                symlink(e.path(), &link)?;
+            }
+            keep.push(name);
+        }
+        for e in std::fs::read_dir(&root)?.flatten() {
+            let name = e.file_name();
+            if !keep.contains(&name) && !name.to_string_lossy().starts_with("skills.") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        // 켠 스킬만 든 새 skills.<번호> 를 만들고 skills 링크를 바꿔 끼운다
+        let fresh = format!("skills.{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        let dir = root.join(&fresh);
+        std::fs::create_dir_all(&dir)?;
+        for skill in self.skills() {
+            if !disabled.contains(&skill.name) {
+                symlink(src.join("skills").join(&skill.name), dir.join(&skill.name))?;
+            }
+        }
+        let tmp = root.join("skills.link-tmp");
+        let _ = std::fs::remove_file(&tmp);
+        symlink(&fresh, &tmp)?;
+        std::fs::rename(&tmp, root.join("skills"))?;
+        // 옛 skills.<번호> 는 지운다 (안에는 링크뿐이다)
+        for e in std::fs::read_dir(&root)?.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("skills.") && name != fresh && name != "skills.link-tmp" {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+        Ok(())
     }
 
     fn launcher_file(&self) -> PathBuf {
@@ -153,6 +230,9 @@ fi
     }
 
     fn write_launcher(&self) {
+        if let Err(e) = self.build_plugin() {
+            warn!(event = "claude_plugin_build_failed", error = %e);
+        }
         let p = self.launcher_file();
         let tmp = p.with_extension("tmp");
         let r = std::fs::write(&tmp, self.launcher()).and_then(|_| set_exec(&tmp)).and_then(|_| std::fs::rename(&tmp, &p));
@@ -208,6 +288,20 @@ fi
             _ => {}
         }
     }
+}
+
+/// SKILL.md 머리(`---` 사이)에서 `key: 값` 을 읽는다. 따옴표는 벗기고, 여러 줄 값(`>-`, `|` 처럼 다음 줄들을
+/// 들여 쓴 것)은 한 줄로 잇는다
+fn frontmatter(md: &str, key: &str) -> Option<String> {
+    let body = md.strip_prefix("---")?;
+    let head = &body[..body.find("\n---")?];
+    let mut lines = head.lines().skip_while(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix(':')).is_none());
+    let v = lines.next()?[key.len() + 1..].trim();
+    if matches!(v, ">" | ">-" | ">+" | "|" | "|-" | "|+") {
+        let parts: Vec<&str> = lines.take_while(|l| l.is_empty() || l.starts_with(' ') || l.starts_with('\t')).map(str::trim).filter(|l| !l.is_empty()).collect();
+        return Some(parts.join(" "));
+    }
+    Some(v.trim_matches(|c| c == '"' || c == '\'').to_string())
 }
 
 /// 사용자 로그인 셸의 PATH 에서 찾을 수 있는 명령만 돌려준다.
@@ -287,7 +381,8 @@ mod launcher_tests {
         std::fs::create_dir_all(&plugin).unwrap();
         let shell = ShellIntegration::new(home.path(), Some(plugin.clone()));
         shell.install();
-        let p = plugin.to_string_lossy().into_owned();
+        // 원본 대신 데몬이 짠 플러그인 폴더를 얹는다
+        let p = home.path().join("shell/claude-plugin").to_string_lossy().into_owned();
         let in_session = [("THUMINAL_SESSION_ID", "7"), ("THUMINAL_CLI", "/x/thuminal")];
 
         // 기본: 권한 확인 없이 + 팀 (세션 안에서만 tmux 흉내)
@@ -304,5 +399,43 @@ mod launcher_tests {
         assert_eq!(run(&shell, home.path(), &in_session), format!("--plugin-dir {p} --resume x | TMUX_PANE= TEAMS="));
         // 데몬이 다시 떠도 남는다
         assert_eq!(ShellIntegration::new(home.path(), None).settings(), off);
+    }
+
+    #[test]
+    fn plugin_drops_disabled_skills() {
+        let home = tempfile::tempdir().unwrap();
+        let plugin = home.path().join("plugin");
+        for (name, desc) in [("new-work", ">-\n  새 브랜치를 따고\n  claude 를 띄운다\nargument-hint: x"), ("agenda-picker", "\"안건 고르기\"")] {
+            std::fs::create_dir_all(plugin.join("skills").join(name)).unwrap();
+            std::fs::write(plugin.join("skills").join(name).join("SKILL.md"), format!("---\nname: {name}\ndescription: {desc}\n---\n\n본문\n")).unwrap();
+        }
+        std::fs::create_dir_all(plugin.join("hooks")).unwrap();
+        std::fs::write(plugin.join("hooks/report.sh"), "#!/bin/sh\n").unwrap();
+        let shell = ShellIntegration::new(home.path(), Some(plugin.clone()));
+        shell.install();
+
+        let names = |s: &ShellIntegration| s.skills().into_iter().map(|k| (k.name, k.description)).collect::<Vec<_>>();
+        assert_eq!(names(&shell), [("agenda-picker".to_string(), "안건 고르기".to_string()), ("new-work".into(), "새 브랜치를 따고 claude 를 띄운다".into())]);
+        let built = home.path().join("shell/claude-plugin");
+        let listed = || {
+            let mut v: Vec<String> = std::fs::read_dir(built.join("skills")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(listed(), ["agenda-picker", "new-work"]);
+        assert!(built.join("hooks/report.sh").exists(), "스킬 말고는 원본으로 가는 링크다");
+        assert!(built.join("skills/new-work/SKILL.md").exists());
+
+        let mut s = AgentSettings::default();
+        s.claude.disabled_skills = vec!["agenda-picker".into()];
+        shell.set_settings(s.clone());
+        assert_eq!(listed(), ["new-work"]);
+        // 옛 skills.<번호> 는 남지 않는다
+        let gens = std::fs::read_dir(&built).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("skills.")).count();
+        assert_eq!(gens, 1);
+
+        s.claude.disabled_skills.clear();
+        shell.set_settings(s);
+        assert_eq!(listed(), ["agenda-picker", "new-work"]);
     }
 }

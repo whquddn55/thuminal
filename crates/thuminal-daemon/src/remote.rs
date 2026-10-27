@@ -381,6 +381,7 @@ fn router(server: Arc<Server>) -> Router {
         .route("/api/check", get(check))
         .route("/api/fonts", get(fonts))
         .route("/api/font/{id}", get(font))
+        .route("/api/file", get(worktree_file))
         .fallback(get(static_file))
         .with_state(server)
 }
@@ -488,6 +489,67 @@ async fn font(State(server): State<Arc<Server>>, UrlPath(id): UrlPath<usize>, Qu
     match tokio::task::spawn_blocking(move || remote.font_data(id)).await {
         Ok(Some(bytes)) => ([(header::CONTENT_TYPE, "font/ttf"), (header::CACHE_CONTROL, "max-age=86400")], bytes).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct FileQuery {
+    #[serde(default)]
+    token: String,
+    worktree: String,
+    file: String,
+}
+
+/// Range 없이 받을 때 한 번에 내는 최대 크기 (그림). 영상 플레이어는 늘 Range 로 받는다
+const WHOLE_FILE_MAX: u64 = 64 * 1024 * 1024;
+
+/// 워크트리 안 파일 내용 (웹 화면의 그림 · 영상 · 소리). `Range` 를 받으면 그 구간만 206 으로 낸다.
+/// 경로 검사는 데몬 요청 `read_file_bytes` 와 같다 (워크트리 밖은 거절)
+async fn worktree_file(State(server): State<Arc<Server>>, Query(q): Query<FileQuery>, headers: axum::http::HeaderMap) -> Response {
+    if server.remote.device_for(&q.token).is_none() {
+        return unauthorized();
+    }
+    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let ws = server.workspace.clone();
+    let res = tokio::task::spawn_blocking(move || -> Result<Response, String> {
+        let kind = thuminal_protocol::media::content_type(&q.file);
+        let (_, size, _) = ws.read_file_bytes(&q.worktree, &q.file, 0, 0).map_err(|e| e.to_string())?;
+        let (start, end, partial) = match range {
+            Some(r) => match thuminal_protocol::media::parse_range(&r, size) {
+                Some((a, b)) => (a, b.min(a + thuminal_workspace::MAX_READ_BYTES - 1), true),
+                None => {
+                    return Ok((StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{size}"))]).into_response());
+                }
+            },
+            None if size > WHOLE_FILE_MAX => return Ok((StatusCode::PAYLOAD_TOO_LARGE, "Range 로 나눠 받는다").into_response()),
+            None => (0, size.saturating_sub(1), false),
+        };
+        let mut body = Vec::with_capacity((end + 1 - start) as usize);
+        while size > 0 && (body.len() as u64) < end + 1 - start {
+            let at = start + body.len() as u64;
+            let (chunk, _, _) = ws.read_file_bytes(&q.worktree, &q.file, at, end + 1 - at).map_err(|e| e.to_string())?;
+            if chunk.is_empty() {
+                break;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        // 파일이 그사이 줄었으면 받은 만큼만 낸다
+        let last = start + (body.len() as u64).max(1) - 1;
+        let mut res = if partial { (StatusCode::PARTIAL_CONTENT, body).into_response() } else { body.into_response() };
+        let h = res.headers_mut();
+        h.insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
+        h.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        if partial && let Ok(v) = HeaderValue::from_str(&format!("bytes {start}-{last}/{size}")) {
+            h.insert(header::CONTENT_RANGE, v);
+        }
+        Ok(res)
+    })
+    .await;
+    match res {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => (StatusCode::NOT_FOUND, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 

@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="base.css">
+<style>
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tab { border: 1.5px solid var(--line); border-radius: 12px; background: var(--panel); padding: 16px 18px; }
+  .tab h2 { margin: 0 0 8px; font-size: 14px; color: var(--ink3); font-weight: 600; }
+  .head { display: inline-block; padding: 4px 12px; border-radius: 8px; background: var(--new-soft); color: var(--new); font-weight: 700; }
+</style>
+<h1>B: 탭마다 다른 이름</h1>
+<div class="tabs">
+  <div class="tab"><h2>토큰 탭</h2><span class="head">선언된 곳</span></div>
+  <div class="tab"><h2>컴포넌트 탭</h2><span class="head">정의된 곳</span></div>
+</div>
+<p class="note"><b>뜻이 정확하다</b> 대신 탭을 오가면 제목이 바뀐다.</p>

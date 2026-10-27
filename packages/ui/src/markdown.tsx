@@ -21,6 +21,7 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
+import { useFilesSupported } from "./file-features";
 import { anchorCandidates, resolveImage, resolveLink } from "./markdown-links";
 
 /** GitHub 거르기 규칙에 몇 가지를 더 허용한다 */
@@ -153,14 +154,20 @@ function useDarkScheme(): boolean {
 
 // ---- 이미지 ----
 
-/** 원격 이미지는 그대로. 워크트리 안 이미지는 파일 읽기가 글자만 주므로 SVG 만 그리고, 나머지는 대체 글로 보인다 */
+/**
+ * 원격 이미지는 그대로. 워크트리 안 이미지는 새 데몬이면 파일 주소(`files.mediaUrl`)로 그린다.
+ * 옛 데몬은 파일 읽기가 글자만 주므로 SVG 만 그리고, 나머지는 대체 글로 보인다
+ */
 function MdImage({ host, worktree, docFile, src, alt, title }: { host: HostApi; worktree: string; docFile: string; src?: string; alt?: string; title?: string }) {
   const r = resolveImage(src, docFile);
   const local = r.type === "file" ? r.file : null;
+  const supported = useFilesSupported(host);
   const [svg, setSvg] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [local]);
   useEffect(() => {
     setSvg(null);
-    if (!local || !/\.svg$/i.test(local)) return;
+    if (!local || !/\.svg$/i.test(local) || supported !== false) return;
     let alive = true;
     host.files
       .read(worktree, local)
@@ -169,9 +176,10 @@ function MdImage({ host, worktree, docFile, src, alt, title }: { host: HostApi; 
     return () => {
       alive = false;
     };
-  }, [host, worktree, local]);
+  }, [host, worktree, local, supported]);
 
   if (r.type === "remote") return <img src={r.src} alt={alt} title={title} loading="lazy" />;
+  if (local && supported && !failed) return <img src={host.files.mediaUrl(worktree, local)} alt={alt} title={title} loading="lazy" onError={() => setFailed(true)} />;
   if (svg) return <img src={svg} alt={alt} title={title} />;
   return (
     <span className="md-img-alt" title={local ?? src}>
