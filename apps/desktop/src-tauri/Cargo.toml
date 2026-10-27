@@ -27,5 +27,12 @@ base64 = "0.22"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS 알림 (notify.rs). mac-notification-sys 는 번들 id 를 바꿔치기해서 쓰지 않는다
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSError"] }
+objc2-user-notifications = "0.3"
+block2 = "0.6"
+
 [dev-dependencies]
 tempfile.workspace = true

@@ -571,6 +571,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::default());
             app.set_menu(app_menu(app.handle())?)?;
+            notify::init(app.handle());
             // 등록한 원격 호스트마다 연결을 띄운다 (끊겨 있으면 스스로 다시 붙는다)
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

@@ -1,0 +1,7 @@
+# `pnpm dev`(tauri dev → cargo run)이 개발 앱을 `.app` 번들 안에서 실행하게 한다 (scripts/dev-app-runner.sh).
+# 경로는 이 .cargo 폴더가 든 src-tauri 기준이다. macOS 알림 API(UNUserNotificationCenter)는 번들 안에서 도는 프로세스만 쓸 수 있다
+[target.aarch64-apple-darwin]
+runner = "../../../scripts/dev-app-runner.sh"
+
+[target.x86_64-apple-darwin]
+runner = "../../../scripts/dev-app-runner.sh"
