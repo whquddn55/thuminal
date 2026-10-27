@@ -97,6 +97,9 @@ export class TerminalController {
     }
     this.attachment = a;
     this.session = a.session;
+    // 다른 화면이 이미 붙어 있으면 그 화면이 세션 크기를 쓰는 중이다. 처음 칸에 맞출 때 가져오지 않는다
+    this.daemonSize = { cols: a.session.cols, rows: a.session.rows };
+    this.othersAtAttach = a.session.attached > 1;
     if (this.colors) e.setColors(this.colors);
     for (const chunk of this.pending) e.feed(chunk);
     this.pending = [];
@@ -168,8 +171,10 @@ export class TerminalController {
     const r = this.host.getBoundingClientRect();
     const cols = Math.max(2, Math.floor(r.width / width));
     const rows = Math.max(2, Math.floor(r.height / height));
+    const fresh = this.othersAtAttach;
+    this.othersAtAttach = false;
     if (cols === this.engine.cols && rows === this.engine.rows) return;
-    const owned = !this.sizeTaken;
+    const owned = !this.sizeTaken && !fresh;
     this.engine.resize(cols, rows);
     this.renderer.layout();
     if (owned) this.resizeDaemon(cols, rows);
@@ -178,13 +183,17 @@ export class TerminalController {
 
   private send(bytes: Uint8Array | null) {
     if (!bytes || !bytes.length) return;
-    // 입력하면 맨 아래(지금 화면)로 돌아간다. 다른 화면이 크기를 가져가 있어도 가져오지 않는다
+    // 다른 화면이 크기를 가져가 덮여 있는 동안은 입력도 막는다 ([세션 가져오기] 를 눌러야 다시 친다)
+    if (this.sizeTaken) return;
+    // 입력하면 맨 아래(지금 화면)로 돌아간다
     this.engine?.scrollToBottom();
     void this.s.host.input(this.id, bytes);
   }
 
   /** 데몬 세션 크기. 다른 화면(폰·다른 창)이 바꾸면 화면 모델이 알려 준다 */
   private daemonSize: { cols: number; rows: number } | null = null;
+  /** 붙을 때 다른 화면도 붙어 있었다. 다음 한 번 칸에 맞출 때 세션 크기를 가져오지 않는다 */
+  private othersAtAttach = false;
   /** 이 칸이 데몬에 보냈는데 아직 돌아오지 않은 크기 (`<열>x<줄>`, 보낸 때) */
   private sentSizes: { key: string; at: number }[] = [];
   private sizeListeners = new Set<() => void>();

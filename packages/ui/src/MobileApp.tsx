@@ -38,7 +38,7 @@ import { cn } from "./lib/utils";
 import type { Services } from "./services";
 import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
 import { AppModel, type AppState, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
-import { SizeTakenOverlay } from "./size-overlay";
+import { SizeTakenOverlay, useSizeTaken } from "./size-overlay";
 import { rendererOptions } from "./terminal-font";
 import "./styles.css";
 
@@ -546,6 +546,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
   const [ctrl, setCtrl] = useState(false);
   const [line, setLine] = useState("");
   const c = model.controller(session);
+  const taken = useSizeTaken(c);
 
   useLayoutEffect(() => {
     if (!renderer || !hostRef.current) return;
@@ -625,7 +626,8 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
         {/* 데스크톱이나 다른 기기가 세션 크기를 가져갔으면 덮는다. [세션 가져오기] 를 눌러야 폰 크기로 돌아온다 */}
         <SizeTakenOverlay c={c} cols={s?.cols} rows={s?.rows} />
       </div>
-      <div className="shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)]">
+      {/* 덮여 있는 동안은 키 줄 · 입력 줄도 막는다 (터미널은 입력을 받지 않는다) */}
+      <div className={cn("shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)]", taken && "pointer-events-none opacity-40")} aria-disabled={taken}>
         {ctrl && (
           <KeyRow>
             {"CDZLRAEUWK".split("").map((ch) => (
