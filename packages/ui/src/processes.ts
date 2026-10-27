@@ -138,11 +138,11 @@ const WILDCARD = new Set(["*", "0.0.0.0", "::", "[::]"]);
 const LOOPBACK = new Set(["127.0.0.1", "[::1]", "::1", "localhost"]);
 
 /**
- * 포트를 열 주소. `0.0.0.0` · `::` 는 localhost 로, 443 · 8443 은 https.
+ * 포트를 열 주소. `0.0.0.0` · `::` 와 `127.0.0.1` · `[::1]` 은 localhost 로, 443 · 8443 은 https.
  * `remoteHost` 를 주면(원격 컴퓨터의 포트) 모든 주소 · 이 컴퓨터 주소를 그 컴퓨터 이름으로 바꾼다
  */
 export function portUrl(p: Pick<ListenPort, "address" | "port">, remoteHost?: string | null): string {
-  let host = WILDCARD.has(p.address) ? "localhost" : p.address.includes(":") && !p.address.startsWith("[") ? `[${p.address}]` : p.address;
+  let host = WILDCARD.has(p.address) || LOOPBACK.has(p.address) ? "localhost" : p.address.includes(":") && !p.address.startsWith("[") ? `[${p.address}]` : p.address;
   if (remoteHost && (WILDCARD.has(p.address) || LOOPBACK.has(p.address))) host = remoteHost.includes(":") && !remoteHost.startsWith("[") ? `[${remoteHost}]` : remoteHost;
   const scheme = p.port === 443 || p.port === 8443 ? "https" : "http";
   return `${scheme}://${host}:${p.port}`;

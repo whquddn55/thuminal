@@ -19,12 +19,12 @@ const port = (p: Partial<ListenPort>): ListenPort => ({
 });
 
 describe("portUrl", () => {
-  it("모든 주소는 localhost, 443 · 8443 은 https", () => {
+  it("모든 주소 · 이 컴퓨터 주소는 localhost, 443 · 8443 은 https", () => {
     expect(portUrl(port({ address: "*" }))).toBe("http://localhost:3000");
     expect(portUrl(port({ address: "0.0.0.0", port: 8443 }))).toBe("https://localhost:8443");
     expect(portUrl(port({ address: "[::]", port: 443 }))).toBe("https://localhost:443");
-    expect(portUrl(port({ address: "127.0.0.1" }))).toBe("http://127.0.0.1:3000");
-    expect(portUrl(port({ address: "[::1]" }))).toBe("http://[::1]:3000");
+    expect(portUrl(port({ address: "127.0.0.1" }))).toBe("http://localhost:3000");
+    expect(portUrl(port({ address: "[::1]" }))).toBe("http://localhost:3000");
   });
 
   it("원격 컴퓨터 포트는 그 컴퓨터 이름으로", () => {

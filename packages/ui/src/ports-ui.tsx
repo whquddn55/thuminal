@@ -28,17 +28,26 @@ export function portAddress(model: AppModel, p: ListenPort): string {
   return portUrl(p, remoteHostname(model));
 }
 
-/** 브라우저로 연다. system 이면(⇧⌘클릭) 시스템 브라우저, 아니면 앱 안 브라우저 칸 (그 포트의 워크트리 · 세션 워크스페이스에) */
+/**
+ * 브라우저로 연다. 아니면 앱 안 브라우저 칸 (그 포트의 워크트리 · 세션 워크스페이스에), system 이면(⇧⌘클릭) 시스템 브라우저.
+ * 브라우저 칸에는 데몬 컴퓨터 기준 주소(`localhost`)를 남긴다. 원격 컴퓨터 · 웹 · 폰은 칸이 데몬 대리 주소로 바꿔 연다
+ * (daemon `browser_proxy.rs`). 시스템 브라우저도 대리 주소로 열고, 대리를 못 하면 그 컴퓨터 이름으로 바꾼 주소로 연다
+ */
 export function openPort(model: AppModel, p: ListenPort, system = false) {
-  const url = portAddress(model, p);
+  const local = portUrl(p);
   const host = model.services.host;
-  if (!system && host.browser) {
+  if (!system) {
     const s = model.get();
     const ws = (p.session !== null ? model.workspaceOf(p.session) : null) ?? (p.worktree && s.worktrees.some((w) => w.path === p.worktree) ? p.worktree : null);
     if (ws && ws !== FLOATING_WORKSPACE && (s.active !== ws || s.activeHost !== model.hostKey)) model.select(ws);
-    void model.newBrowserTab(ws ?? undefined, url).catch(model.fail);
-  } else if (host.openUrl) void host.openUrl(url).catch(model.fail);
-  else window.open(url, "_blank", "noopener");
+    void model.newBrowserTab(ws ?? undefined, local).catch(model.fail);
+    return;
+  }
+  void (async () => {
+    const view = (host.isRemote ? await host.browserProxyUrl?.(local).catch(() => null) : null) ?? portAddress(model, p);
+    if (host.openUrl) await host.openUrl(view);
+    else window.open(view, "_blank", "noopener");
+  })().catch(model.fail);
 }
 
 export function copyPort(model: AppModel, p: ListenPort) {
