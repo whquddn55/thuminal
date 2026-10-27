@@ -35,6 +35,7 @@ import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { GalleryButton } from "./ImagePanel";
 import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { SizeTakenOverlay } from "./size-overlay";
+import { TabPorts } from "./ports-ui";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
 
 type Surface = "main" | "floating";
@@ -176,6 +177,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
                 ) : (
                   <span className="min-w-0 truncate">{title}</span>
                 )}
+                <TabPorts sessions={panes.flatMap((p) => (p.type === "terminal" ? [p.session] : []))} />
                 {panes.length > 1 && <span className="rounded bg-foreground/10 px-1 text-[10px] tabular-nums">{panes.length}</span>}
                 <button
                   className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-foreground/10"
