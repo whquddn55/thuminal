@@ -3,19 +3,24 @@
 //! Orca 의 `repo-icon-file-detection.ts` 를 따른다: 흔한 자리의 png·webp 파일을 정한 차례로 보고,
 //! 없으면 `index.html`·루트 라우트 파일이 `<link rel="icon" href=…>` 로 가리키는 파일을 본다.
 //! 파일 종류는 확장자가 아니라 머리 바이트로 가르고, 256KB 를 넘는 파일은 건너뛴다.
-//! Orca 에는 없는 것 하나: 맨 위에서 못 찾으면 모노레포 하위 프로젝트(`apps/*`, `packages/*`)에서 같은 차례로 찾는다.
+//! Orca 에는 없는 것:
+//! - 그래도 없으면 같은 자리의 svg, 그다음 ico 를 본다 (Vite 기본 `favicon.svg`, Next.js `app/favicon.ico`)
+//! - 맨 위에서 못 찾으면 하위 프로젝트에서 같은 차례로 찾는다: 모노레포(`apps/*`, `packages/*`),
+//!   그다음 맨 위 폴더 중 프로젝트처럼 보이는 것(`web/`, `fe/` 처럼 `package.json` · `index.html` · `src-tauri` 가 있는 폴더)
+//!
 //! Orca 가 그다음에 쓰는 네트워크 아이콘(package.json homepage favicon, GitHub 주인 아바타)은 쓰지 않는다
 //! (데몬이 밖에 묻지 않고, 앱 CSP 가 https 그림을 막는다).
 
 use std::path::Path;
 
-/// 차례대로 볼 파일 자리 (확장자 뺀 것). Orca `REPO_ICON_FILE_STEMS` 와 같다
+/// 차례대로 볼 파일 자리 (확장자 뺀 것). Orca `REPO_ICON_FILE_STEMS` 에 `src/app/favicon`(Next.js) · `icons/icon` 을 더했다
 const STEMS: &[&str] = &[
     "favicon",
     "public/favicon",
     "app/favicon",
     "app/icon",
     "src/favicon",
+    "src/app/favicon",
     "src/app/icon",
     "assets/favicon",
     "assets/icon",
@@ -26,9 +31,11 @@ const STEMS: &[&str] = &[
     "src-tauri/icons/icon",
     "app-icon",
     "icon",
+    "icons/icon",
 ];
 
-const EXTENSIONS: &[&str] = &["png", "webp"];
+/// 볼 확장자 묶음. 앞 묶음을 모든 자리 · 소스 파일에서 다 본 뒤 다음 묶음으로 간다 (그림 파일을 벡터 · ico 보다 앞에)
+const EXTENSION_PASSES: &[&[&str]] = &[&["png", "webp"], &["svg"], &["ico"]];
 
 /// 아이콘 href 를 찾아볼 소스 파일. Orca `REPO_ICON_SOURCE_FILE_CANDIDATES` 와 같다
 const SOURCES: &[&str] = &["index.html", "public/index.html", "app/routes/__root.tsx", "src/routes/__root.tsx", "app/root.tsx", "src/root.tsx", "src/index.html"];
@@ -37,6 +44,10 @@ const SOURCES: &[&str] = &["index.html", "public/index.html", "app/routes/__root
 const SUBPROJECT_DIRS: &[&str] = &["apps", "packages"];
 /// 하위 프로젝트 폴더마다 볼 수 (너무 많이 뒤지지 않게)
 const MAX_SUBPROJECTS: usize = 16;
+/// 맨 위 폴더가 이 중 하나를 가지면 하위 프로젝트로 본다
+const PROJECT_MARKERS: &[&str] = &["package.json", "index.html", "src-tauri"];
+/// 맨 위 폴더 중 하위 프로젝트로 보지 않는 것 (빌드 결과 · 의존성)
+const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "out", "vendor", "coverage", "apps", "packages"];
 
 const MAX_ICON_BYTES: u64 = 256 * 1024;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024;
@@ -55,32 +66,59 @@ pub fn find(root: &Path) -> Option<FoundIcon> {
         return Some(icon);
     }
     for dir in SUBPROJECT_DIRS {
-        let Ok(entries) = std::fs::read_dir(root.join(dir)) else { continue };
-        let mut names: Vec<String> = entries
-            .flatten()
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| !n.starts_with('.') && n != "node_modules")
-            .collect();
-        names.sort();
-        for name in names.into_iter().take(MAX_SUBPROJECTS) {
+        for name in subdirs(&root.join(dir)) {
             if let Some(icon) = find_in(root, &format!("{dir}/{name}/")) {
                 return Some(icon);
             }
         }
     }
+    for name in subdirs(root) {
+        if SKIP_DIRS.contains(&name.as_str()) || !PROJECT_MARKERS.iter().any(|m| root.join(&name).join(m).exists()) {
+            continue;
+        }
+        if let Some(icon) = find_in(root, &format!("{name}/")) {
+            return Some(icon);
+        }
+    }
     None
+}
+
+/// 폴더 바로 아래 폴더 이름들 (숨김 · node_modules 빼고, 이름 차례로 `MAX_SUBPROJECTS` 개까지)
+fn subdirs(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with('.') && n != "node_modules")
+        .collect();
+    names.sort();
+    names.truncate(MAX_SUBPROJECTS);
+    names
 }
 
 /// `prefix`(빈 글 또는 `apps/desktop/` 처럼 `/` 로 끝나는 상대 경로) 아래에서 찾는다
 fn find_in(root: &Path, prefix: &str) -> Option<FoundIcon> {
-    for stem in STEMS {
-        for ext in EXTENSIONS {
-            if let Some(icon) = read_icon(root, &format!("{prefix}{stem}.{ext}")) {
-                return Some(icon);
+    for (pass, exts) in EXTENSION_PASSES.iter().enumerate() {
+        for stem in STEMS {
+            for ext in exts.iter() {
+                if let Some(icon) = read_icon(root, &format!("{prefix}{stem}.{ext}")) {
+                    return Some(icon);
+                }
             }
         }
+        // 소스 파일이 가리키는 아이콘은 종류를 가리지 않으므로 그림 파일 묶음을 본 바로 뒤에 한 번만 본다
+        if pass == 0
+            && let Some(icon) = from_sources(root, prefix)
+        {
+            return Some(icon);
+        }
     }
+    None
+}
+
+/// `index.html` · 루트 라우트 파일이 `<link rel="icon">` 으로 가리키는 파일
+fn from_sources(root: &Path, prefix: &str) -> Option<FoundIcon> {
     for source in SOURCES {
         let path = root.join(prefix).join(source);
         let Ok(meta) = std::fs::metadata(&path) else { continue };
@@ -109,15 +147,26 @@ fn read_icon(root: &Path, rel: &str) -> Option<FoundIcon> {
     Some(FoundIcon { mime, bytes, file: rel.to_string() })
 }
 
-/// 화면이 그리는 png·webp 만 받는다
+/// 화면이 `<img>` 로 그리는 png · webp · svg · ico 만 받는다 (svg 는 그림으로 그리므로 안 스크립트가 돌지 않는다)
 fn sniff(b: &[u8]) -> Option<&'static str> {
     if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
         Some("image/png")
     } else if b.len() >= 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
         Some("image/webp")
+    } else if b.len() >= 6 && b[..4] == [0, 0, 1, 0] && u16::from_le_bytes([b[4], b[5]]) > 0 {
+        Some("image/x-icon")
+    } else if is_svg(b) {
+        Some("image/svg+xml")
     } else {
         None
     }
+}
+
+/// 앞부분(BOM · 공백 · `<?xml …?>` · 주석 · doctype 뒤)에 `<svg` 가 있는 글자 파일
+fn is_svg(b: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&b[..b.len().min(2048)]).to_ascii_lowercase();
+    let head = head.trim_start_matches('\u{feff}').trim_start();
+    head.starts_with('<') && head.contains("<svg")
 }
 
 /// `<link rel="icon" href="…">` 또는 (TanStack 같은 루트 라우트의) `{ rel: 'icon', href: '…' }` 의 href.
@@ -263,6 +312,45 @@ mod tests {
         // 머리 바이트로 가른다 (확장자가 png 여도 webp 면 webp)
         put(root, "favicon.png", WEBP);
         assert_eq!(find(root).map(|i| (i.file, i.mime)), Some(("favicon.png".into(), "image/webp")));
+    }
+
+    #[test]
+    fn svg_ico_와_맨_위_하위_프로젝트도_본다() {
+        const SVG: &[u8] = b"\xef\xbb\xbf<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+        const ICO: &[u8] = &[0, 0, 1, 0, 1, 0, 16, 16];
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // 맨 위 폴더라도 프로젝트 표시가 없거나 빌드 결과 폴더면 보지 않는다
+        put(root, "docs/favicon.svg", SVG);
+        put(root, "dist/package.json", b"{}");
+        put(root, "dist/favicon.png", PNG);
+        assert_eq!(found(root), None);
+
+        // Vite 처럼 web/ 아래 프로젝트의 favicon.svg
+        put(root, "web/package.json", b"{}");
+        put(root, "web/public/favicon.svg", SVG);
+        assert_eq!(find(root).map(|i| (i.file, i.mime)), Some(("web/public/favicon.svg".into(), "image/svg+xml")));
+        // 같은 하위 프로젝트 안에서는 그림 파일이 svg 보다 앞 (자리 차례가 뒤여도)
+        put(root, "web/icons/icon.png", PNG);
+        assert_eq!(found(root).as_deref(), Some("web/icons/icon.png"));
+        // apps/* 가 맨 위 폴더보다 앞
+        put(root, "apps/site/src/app/favicon.ico", ICO);
+        assert_eq!(find(root).map(|i| (i.file, i.mime)), Some(("apps/site/src/app/favicon.ico".into(), "image/x-icon")));
+        // 맨 위 자리는 하위 프로젝트보다 앞이고, svg 가 ico 보다 앞
+        put(root, "src/app/favicon.ico", ICO);
+        assert_eq!(found(root).as_deref(), Some("src/app/favicon.ico"));
+        put(root, "public/favicon.svg", SVG);
+        assert_eq!(found(root).as_deref(), Some("public/favicon.svg"));
+        // index.html 이 가리키는 svg 는 svg 자리보다 앞 (그림 파일 묶음 바로 뒤에 본다)
+        put(root, "index.html", br#"<link rel="icon" type="image/svg+xml" href="/brand.svg" />"#);
+        put(root, "public/brand.svg", SVG);
+        assert_eq!(found(root).as_deref(), Some("public/brand.svg"));
+
+        // svg 가 아닌 글자 파일은 받지 않는다
+        put(root, "x/favicon.svg", b"hello");
+        assert_eq!(sniff(b"hello"), None);
+        assert_eq!(sniff(b"<html><body></body></html>"), None);
     }
 
     #[test]

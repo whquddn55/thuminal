@@ -7,40 +7,61 @@ import type { HostApi } from "@thuminal/term-core";
 import { cn } from "./lib/utils";
 import { useModel } from "./store";
 
-/** 저장소 id → 그림 data URL (없으면 null). 저장소마다 한 번만 묻는다. 묻기가 실패하면 지워서 다음에 다시 묻는다 */
+/**
+ * `<호스트>|<저장소 id>` → 그림 data URL (없으면 null). 저장소마다 한 번만 묻는다. 묻기가 실패하면 지워서 다음에 다시 묻는다.
+ * 데몬이 다시 뜨면(찾는 규칙이 바뀌었을 수 있다) 그 호스트 것을 비워 다시 묻는다
+ */
 const icons = new Map<string, Promise<string | null>>();
 const resolved = new Map<string, string | null>();
+const watched = new WeakSet<HostApi>();
+/** 다시 묻기를 기다리는 그림들 (데몬이 다시 뜨면 부른다) */
+const reloaders = new Set<() => void>();
+
+const keyOf = (host: HostApi, repo: string) => `${host.hostId ?? ""}|${repo}`;
 
 function iconOf(host: HostApi, repo: string): Promise<string | null> {
-  let p = icons.get(repo);
+  if (!watched.has(host)) {
+    watched.add(host);
+    host.onEvent((e) => {
+      if (e.type !== "daemon_reconnected") return;
+      const prefix = `${host.hostId ?? ""}|`;
+      for (const k of [...icons.keys()]) if (k.startsWith(prefix)) icons.delete(k);
+      for (const r of reloaders) r();
+    });
+  }
+  const key = keyOf(host, repo);
+  let p = icons.get(key);
   if (!p) {
     p = host.repoIcon(repo).then(
       (icon) => {
         const url = icon ? `data:${icon.mime};base64,${icon.data}` : null;
-        resolved.set(repo, url);
+        resolved.set(key, url);
         return url;
       },
       () => {
-        icons.delete(repo);
+        icons.delete(key);
         return null;
       },
     );
-    icons.set(repo, p);
+    icons.set(key, p);
   }
   return p;
 }
 
 export function RepoMark({ repo, name, className }: { repo: string; name: string; className?: string }) {
   const host = useModel().services.host;
-  const [url, setUrl] = useState(() => resolved.get(repo) ?? null);
+  const [url, setUrl] = useState(() => resolved.get(keyOf(host, repo)) ?? null);
   const [broken, setBroken] = useState(false);
   useEffect(() => {
     let live = true;
-    setUrl(resolved.get(repo) ?? null);
+    setUrl(resolved.get(keyOf(host, repo)) ?? null);
     setBroken(false);
-    void iconOf(host, repo).then((u) => live && setUrl(u));
+    const load = () => void iconOf(host, repo).then((u) => live && (setUrl(u), setBroken(false)));
+    load();
+    reloaders.add(load);
     return () => {
       live = false;
+      reloaders.delete(load);
     };
   }, [host, repo]);
 
