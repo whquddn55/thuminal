@@ -40,17 +40,19 @@ enum BrowserEvent {
 }
 
 /// 페이지마다 넣는 스크립트: 앱 단축키를 메인 웹뷰로 넘기고, 키보드를 받기 시작하면 알린다.
-/// 편집 키(⌘C ⌘V ⌘X ⌘A ⌘Z ⌘F)와 시스템 키(⌘Q ⌘H ⌘M)는 페이지가 그대로 쓴다
+/// 편집 키(⌘C ⌘V ⌘X ⌘A ⌘Z ⌘F)와 시스템 키(⌘Q ⌘H ⌘M)는 페이지가 그대로 쓴다. Windows · Linux 는 Ctrl 이 같은 자리다
 const BRIDGE: &str = r#"
 (() => {
   if (window.top !== window || window.__thuminalBridge) return;
   window.__thuminalBridge = true;
   const send = (path, q) => { try { location.href = 'thuminal-key://' + path + '?' + new URLSearchParams(q); } catch (_) {} };
-  const pageKeys = new Set(['c', 'v', 'x', 'a', 'z', 'f', 'q', 'h', 'm', 'g']);
+  // 앱 단축키 수정키는 macOS 는 ⌘, Windows · Linux 는 Ctrl 이다
+  const mac = /Mac/.test(navigator.platform);
+  const pageKeys = new Set(mac ? ['c', 'v', 'x', 'a', 'z', 'f', 'q', 'h', 'm', 'g'] : ['c', 'v', 'x', 'a', 'z', 'y', 'f']);
   addEventListener('keydown', (e) => {
-    if (!e.metaKey || e.isComposing) return;
+    if (!(mac ? e.metaKey : e.ctrlKey) || e.isComposing) return;
     const k = (e.key || '').toLowerCase();
-    if (!e.altKey && !e.ctrlKey && pageKeys.has(k)) return;
+    if (!e.altKey && !(mac && e.ctrlKey) && !(!mac && e.shiftKey) && pageKeys.has(k)) return;
     if (k === 'meta' || k === 'shift' || k === 'alt' || k === 'control') return;
     e.preventDefault();
     e.stopPropagation();

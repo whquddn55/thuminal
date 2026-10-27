@@ -23,6 +23,7 @@ import remarkMath from "remark-math";
 
 import { useFilesSupported } from "./file-features";
 import { anchorCandidates, resolveImage, resolveLink } from "./markdown-links";
+import { primaryMod } from "./platform";
 
 /** GitHub 거르기 규칙에 몇 가지를 더 허용한다 */
 const schema = {
@@ -123,7 +124,7 @@ function onLink(h: LinkHandlers, href: string | undefined, e: React.MouseEvent) 
       h.goAnchor(t.id);
       return;
     case "url":
-      h.openUrl(t.url, e.metaKey && e.shiftKey && /^https?:/i.test(t.url));
+      h.openUrl(t.url, primaryMod(e) && e.shiftKey && /^https?:/i.test(t.url));
       return;
     case "file":
       h.openFile(t.file, t.line);

@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "./components/ui/label";
 import { Switch } from "./components/ui/switch";
 import { cn } from "./lib/utils";
+import { IS_MAC, keyLabel } from "./platform";
 import { type SettingsSection, useApp, useModel } from "./store";
 import { DEFAULT_TERMINAL_FONT, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack } from "./terminal-font";
 import { currentTheme } from "./theme";
@@ -189,11 +190,11 @@ function FontSection() {
       </div>
       <div className="flex flex-col gap-1 text-muted-foreground">
         <p>
-          SF Mono는 macOS에 들어 있는 고정폭 글꼴이에요. 다른 글꼴은 이 컴퓨터에 설치된 이름을 그대로 적어 주세요. 프롬프트 아이콘처럼 그 글꼴에 없는 글자는{" "}
+          {IS_MAC ? "SF Mono는 macOS에 들어 있는 고정폭 글꼴이에요." : "SF Mono는 macOS 글꼴이라 이 컴퓨터에서는 기본 고정폭 글꼴(Windows는 Cascadia Mono · Consolas, Linux는 DejaVu Sans Mono)로 보여요."} 다른 글꼴은 이 컴퓨터에 설치된 이름을 그대로 적어 주세요. 프롬프트 아이콘처럼 그 글꼴에 없는 글자는{" "}
           <Code>MesloLGLDZ Nerd Font Mono</Code>로 채워요.
         </p>
         <p>
-          터미널에서 <Code>⌘+</Code> <Code>⌘-</Code>로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄여요. <Code>⌘0</Code>을 누르면 원래대로 돌아와요.
+          터미널에서 <Code>{keyLabel("⌘+")}</Code> <Code>{keyLabel("⌘-")}</Code>로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄여요. <Code>{keyLabel("⌘0")}</Code>을 누르면 원래대로 돌아와요.
           {zoom.terminal !== 0 && ` 지금 터미널: ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
           {zoom.ui !== 1 && ` 지금 화면 배율: ${Math.round(zoom.ui * 100)}%.`}
         </p>

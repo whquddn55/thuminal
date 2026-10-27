@@ -7,6 +7,7 @@ import { type FileContent, FileConflictError, type HostApi } from "@thuminal/ter
 
 import { type MediaKind, mediaKind, useFilesSupported } from "./file-features";
 import { cn } from "./lib/utils";
+import { keyLabel } from "./platform";
 import { isMarkdownFile } from "./markdown-links";
 
 const MarkdownPreview = lazy(() => import("./markdown"));
@@ -293,7 +294,7 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
           className="shrink-0 rounded-md bg-primary px-2 py-0.5 text-2xs text-primary-foreground disabled:opacity-50"
           disabled={save.kind === "saving"}
           onClick={() => doSave()}
-          title="저장 (⌘S)"
+          title={`저장 (${keyLabel("⌘S")})`}
         >
           {save.kind === "saving" ? "저장 중…" : "저장"}
         </button>

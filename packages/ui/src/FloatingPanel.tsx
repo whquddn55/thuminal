@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { cn } from "./lib/utils";
+import { keyLabel } from "./platform";
 import { FLOATING_WORKSPACE, type FloatingRect, useApp, useModel } from "./store";
 import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 
@@ -128,7 +129,7 @@ export function FloatingPanel() {
           <Button variant="ghost" size="icon-xs" className="text-muted-foreground" title={maximized ? "원래 크기" : "최대화"} onClick={() => model.setFloatingRect(saved, !maximized)}>
             {maximized ? <ArrowsInIcon /> : <ArrowsOutIcon />}
           </Button>
-          <Button variant="ghost" size="icon-xs" className="text-muted-foreground" title="닫기 (⌘⌥A)" onClick={() => void model.toggleFloating()}>
+          <Button variant="ghost" size="icon-xs" className="text-muted-foreground" title={`닫기 (${keyLabel("⌘⌥A")})`} onClick={() => void model.toggleFloating()}>
             <XIcon />
           </Button>
         </TabBar>
@@ -261,7 +262,7 @@ export function FloatingTrigger() {
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={6}>
-        플로팅 워크스페이스 {open ? "접기" : "열기"} (⌘⌥A)
+        플로팅 워크스페이스 {open ? "접기" : "열기"} ({keyLabel("⌘⌥A")})
       </TooltipContent>
     </Tooltip>
   );

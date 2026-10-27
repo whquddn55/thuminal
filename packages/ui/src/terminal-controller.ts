@@ -8,6 +8,7 @@
 import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
 
 import { HangulComposer, isJamo } from "./hangul";
+import { IS_MAC, PRIMARY_KEY, primaryMod } from "./platform";
 import type { Services } from "./services";
 import { type LinkHandler, LinkHover } from "./terminal-link-hover";
 
@@ -355,11 +356,11 @@ export class TerminalController {
     const hover = (meta: boolean) => links.update(mouse && inside(mouse) ? this.cellAt(mouse) : null, meta);
     on(window, "mousemove", (ev) => {
       mouse = ev;
-      hover(ev.metaKey);
+      hover(primaryMod(ev));
     });
     on(host, "mouseleave", () => links.clear());
-    on(window, "keydown", (ev) => ev.key === "Meta" && hover(true));
-    on(window, "keyup", (ev) => ev.key === "Meta" && hover(false));
+    on(window, "keydown", (ev) => ev.key === PRIMARY_KEY && hover(true));
+    on(window, "keyup", (ev) => ev.key === PRIMARY_KEY && hover(false));
     on(window, "blur", () => links.clear());
     // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
     let touchY: number | null = null;
@@ -507,6 +508,17 @@ export class TerminalController {
       if (!MODIFIER_KEYS.has(ev.key)) this.flushHangul();
       // 조합 중(한글 등)인 키는 IME 에 맡긴다
       if (ev.isComposing || ev.keyCode === 229) return;
+      // Windows · Linux 복사 · 붙여넣기: Ctrl+C 는 고른 글자가 있을 때만 복사(없으면 터미널 중단), Ctrl+Shift+C 는 늘 복사.
+      // Ctrl+V · Ctrl+Shift+V 는 막지 않아 웹뷰의 paste 이벤트로 붙여 넣는다
+      if (!IS_MAC && ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        const k = ev.key.toLowerCase();
+        if (k === "c" && (ev.shiftKey || this.hasSelection())) {
+          ev.preventDefault();
+          this.copySelection();
+          return;
+        }
+        if (k === "v") return;
+      }
       if (this.macEditKey(ev)) {
         ev.preventDefault();
         return;
@@ -629,6 +641,10 @@ export class TerminalController {
       [only("alt"), "ArrowRight", "\x1bf"],
       [only("alt"), "Backspace", "\x1b\x7f"],
       [only("ctrl"), "Backspace", "\x17"],
+      // Windows · Linux 는 Ctrl+← → 가 단어 이동, Ctrl+Delete 가 뒤 단어 지우기다
+      [!IS_MAC && only("ctrl"), "ArrowLeft", "\x1bb"],
+      [!IS_MAC && only("ctrl"), "ArrowRight", "\x1bf"],
+      [!IS_MAC && only("ctrl"), "Delete", "\x1bd"],
     ];
     const hit = map.find(([mods, key]) => mods && ev.key === key);
     if (!hit) return false;

@@ -6,6 +6,7 @@
 import type { CellPoint, CellRange, LineText, TerminalEngine } from "@thuminal/term-core";
 
 import { type FoundLink, type LinkTarget, linkCandidatesAt, parseHyperlink } from "./links";
+import { primaryMod } from "./platform";
 
 /** 열 수 있게 푼 링크 (파일은 절대 경로) */
 export type ResolvedLink = { kind: "url"; url: string } | { kind: "path"; path: string; isDir: boolean; line?: number; col?: number };
@@ -57,7 +58,7 @@ export class LinkHover {
 
   /** ⌘+클릭이면 링크를 연다. 연 링크가 있으면 true (마우스 보고 · 고르기를 하지 않는다) */
   click(at: CellPoint | null, ev: MouseEvent): boolean {
-    if (!ev.metaKey || !at || ev.button !== 0) return false;
+    if (!primaryMod(ev) || !at || ev.button !== 0) return false;
     const handler = this.handler();
     if (!handler) return false;
     this.update(at, true);

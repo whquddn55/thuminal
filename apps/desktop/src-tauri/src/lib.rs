@@ -547,8 +547,11 @@ async fn font_face_data(id: usize) -> CmdResult<tauri::ipc::Response> {
     .map_err(|e| e.to_string())?
 }
 
-/// 앱 메뉴. Tauri 기본 메뉴에는 "윈도우 닫기 ⌘W" 가 있어 웹뷰보다 먼저 ⌘W 를 받아 앱 창을 닫아 버린다.
-/// ⌘W 는 칸 닫기(화면 단축키)이므로 그 항목만 빼고 기본 메뉴와 같게 만든다
+/// 앱 메뉴 (macOS). Tauri 기본 메뉴에는 "윈도우 닫기 ⌘W" 가 있어 웹뷰보다 먼저 ⌘W 를 받아 앱 창을 닫아 버린다.
+/// ⌘W 는 칸 닫기(화면 단축키)이므로 그 항목만 빼고 기본 메뉴와 같게 만든다.
+/// Windows · Linux 는 메뉴를 달지 않는다. 창 안 메뉴 막대가 생기고, Edit 항목의 Ctrl+C · Ctrl+V · Ctrl+A · Ctrl+Z 가
+/// 터미널보다 먼저 키를 가져가기 때문이다
+#[cfg(target_os = "macos")]
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
     let name = app.package_info().name.clone();
@@ -570,6 +573,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppState::default());
+            #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;
             notify::init(app.handle());
             // 등록한 원격 호스트마다 연결을 띄운다 (끊겨 있으면 스스로 다시 붙는다)

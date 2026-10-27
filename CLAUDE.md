@@ -63,7 +63,7 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - **프로토콜 타입은 두 벌이다.** 원본은 `crates/thuminal-protocol/src/{message,layout}.rs`, TS 쪽은 `packages/term-core/src/protocol.ts`. 와이어 모양을 바꾸면 둘을 같이 바꾼다. enum 은 serde `tag = "type"`(op 는 `tag = "op"`), snake_case 다. 새 필드는 `#[serde(default)]` 로 옛 데몬·앱과 맞춘다.
 - 앱의 데몬 요청은 대부분 generic `daemon_request` Tauri 명령으로 그대로 넘어간다 (`tauri-host.ts` 의 `req()`). 새 요청에 Tauri 명령을 늘릴 필요는 보통 없다.
 - 데몬은 바깥 환경의 `THUMINAL_*`, `ORCA_*`, `CLAUDE_CODE_*` 를 세션에 물려주지 않는다 (`SCRUBBED_ENV_PREFIXES`). 세션 안 CLI 가 써야 하는 값은 데몬이 다시 넣는다.
-- 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다. ⌘+ ⌘- ⌘0 은 터미널에 포커스가 있으면 모든 터미널 글자 크기, 아니면 앱 화면 배율(Tauri 웹뷰 확대)이다 (`ui/src/App.tsx` `useShortcuts`).
+- 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다. ⌘+ ⌘- ⌘0 은 터미널에 포커스가 있으면 모든 터미널 글자 크기, 아니면 앱 화면 배율(Tauri 웹뷰 확대)이다 (`ui/src/App.tsx` `useShortcuts`). Windows · Linux 는 누른 키를 macOS 자리로 바꿔 읽는다 (`ui/src/platform.ts` `appMods`): ⌘ 는 Ctrl(터미널과 겹치는 Ctrl+D · W · L 등도 앱이 가져간다), ⌃1~9 탭은 Alt+1~9, ⌃⌘방향키는 Ctrl+Alt+방향키, ⌘⌥←→ 는 Alt+←→, 터미널 단어 이동은 Ctrl+←→. 화면에 쓰는 단축키 글자는 `keyLabel("⌘D")` 로 바꿔 보인다.
 - 주석·문서·CLI 도움말·출력은 한국어 `-다` 평서형이다. 주변 코드의 주석 밀도와 말투를 따른다.
 - 화면 글(앱·웹·폰, 화면에 뜨는 데몬·클라이언트 오류, 알림)은 해요체다 ("열린 터미널이 없어요", "이 기기를 지울까요?"). 단추·메뉴·상태·칸 머리 같은 짧은 이름은 명사로 쓴다 ("저장", "작업 중", "응답 대기"). 낱말은 개발자가 흔히 쓰는 말로: 버전(판 아님), 연결(붙다 아님), 실행·시작(띄우다 아님). 칸·탭·워크트리는 화면 이름이라 그대로 쓴다. 문장 안에 em dash 를 쓰지 않는다.
 - CLI 는 orca CLI 와 호환하지 않는다. 명령 하나 = 연결 하나 + 바꾸는 요청 하나가 원칙이고, 대상(`p7`, `t3`, `s12`, `.`)은 데몬이 푼다.

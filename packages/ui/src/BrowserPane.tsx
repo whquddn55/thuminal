@@ -14,6 +14,7 @@ import { pageKey, pageStore, setPage } from "./browser-state";
 import { useDrag } from "./dnd";
 import { useDaemonSupports } from "./file-features";
 import { cn } from "./lib/utils";
+import { keyLabel } from "./platform";
 import { useApp, useModel } from "./store";
 
 /** 주소 칸에 친 글을 주소로 바꾼다. 주소처럼 보이지 않으면 검색한다 */
@@ -133,13 +134,13 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
   return (
     <div className="absolute inset-0 flex flex-col bg-background" onPointerDown={() => !focused && model.focusPane(paneId)}>
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b bg-card px-1.5">
-        <button className={btn} title="뒤로 (⌘[)" onClick={() => void browser.go(paneId, -1)}>
+        <button className={btn} title={`뒤로 (${keyLabel("⌘[")})`} onClick={() => void browser.go(paneId, -1)}>
           <ArrowLeftIcon />
         </button>
-        <button className={btn} title="앞으로 (⌘])" onClick={() => void browser.go(paneId, 1)}>
+        <button className={btn} title={`앞으로 (${keyLabel("⌘]")})`} onClick={() => void browser.go(paneId, 1)}>
           <ArrowRightIcon />
         </button>
-        <button className={btn} title="새로 고침 (⌘R)" onClick={() => void browser.reload(paneId)}>
+        <button className={btn} title={`새로 고침 (${keyLabel("⌘R")})`} onClick={() => void browser.reload(paneId)}>
           {page?.loading ? <XIcon /> : <ArrowClockwiseIcon />}
         </button>
         <div className="mx-1 flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md border bg-background px-2">

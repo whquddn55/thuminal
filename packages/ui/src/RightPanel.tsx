@@ -25,6 +25,7 @@ import { Button } from "./components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "./components/ui/context-menu";
 import { baseName as base, dirName as dirOf, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
+import { keyLabel, primaryMod } from "./platform";
 import { type Panel, useApp, useModel } from "./store";
 
 const LETTER: Record<ChangeKind, string> = {
@@ -53,9 +54,9 @@ const TONE: Record<ChangeKind, string> = {
 const HEAD = "flex items-center justify-between px-3 pt-2.5 pb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground";
 
 const TABS: { id: NonNullable<Panel>; label: string; key: string; icon: React.ReactNode }[] = [
-  { id: "files", label: "파일", key: "⌘⇧E", icon: <FilesIcon /> },
-  { id: "changes", label: "변경", key: "⌘⇧G", icon: <GitDiffIcon /> },
-  { id: "search", label: "검색", key: "⌘⇧F", icon: <MagnifyingGlassIcon /> },
+  { id: "files", label: "파일", key: keyLabel("⌘⇧E"), icon: <FilesIcon /> },
+  { id: "changes", label: "변경", key: keyLabel("⌘⇧G"), icon: <GitDiffIcon /> },
+  { id: "search", label: "검색", key: keyLabel("⌘⇧F"), icon: <MagnifyingGlassIcon /> },
 ];
 
 export function RightPanel() {
@@ -86,7 +87,7 @@ export function RightPanel() {
         ))}
         <button
           className="ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          title="오른쪽 사이드바 닫기 (⌘L)"
+          title={`오른쪽 사이드바 닫기 (${keyLabel("⌘L")})`}
           onClick={() => model.toggleRight()}
         >
           <XIcon className="size-3.5" />
@@ -291,11 +292,11 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
       </div>
       <textarea
         className="mx-3 min-h-16 resize-y rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        placeholder="커밋 메시지 (⌘Enter로 커밋)"
+        placeholder={`커밋 메시지 (${keyLabel("⌘Enter")}로 커밋)`}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && e.metaKey) commit();
+          if (e.key === "Enter" && primaryMod(e)) commit();
         }}
       />
       <div className="flex gap-1.5 px-3 py-2">

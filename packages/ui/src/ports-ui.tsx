@@ -9,6 +9,7 @@ import type { ListenPort, SessionId } from "@thuminal/term-core";
 
 import { Popover, PopoverAnchor, PopoverContent } from "./components/ui/popover";
 import { cn } from "./lib/utils";
+import { keyLabel, primaryMod } from "./platform";
 import { BACKGROUND_POLL_MS, portsOfSessions, portUrl, processesOf, programName, strayPortsOfWorktree, useProcesses } from "./processes";
 import { type AppModel, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel } from "./store";
 
@@ -100,7 +101,7 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="px-1.5 pt-1 pb-0.5 text-2xs text-muted-foreground">열린 포트 · ⇧⌘클릭은 시스템 브라우저</div>
+        <div className="px-1.5 pt-1 pb-0.5 text-2xs text-muted-foreground">열린 포트 · {keyLabel("⇧⌘")}클릭은 시스템 브라우저</div>
         {ports.map((p) => (
           <PortRow key={`${p.pid}:${p.port}`} p={p} />
         ))}
@@ -143,7 +144,7 @@ export function PortRow({ p }: { p: ListenPort }) {
         {p.process}
         <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{p.pid}</span>
       </span>
-      <PortButton title="브라우저로 열기 (⇧⌘클릭은 시스템 브라우저)" onClick={(e) => openPort(model, p, e.metaKey && e.shiftKey)}>
+      <PortButton title={`브라우저로 열기 (${keyLabel("⇧⌘")}클릭은 시스템 브라우저)`} onClick={(e) => openPort(model, p, primaryMod(e) && e.shiftKey)}>
         <GlobeIcon className="size-3.5" />
       </PortButton>
       <PortButton title="주소 복사" onClick={() => copyPort(model, p)}>

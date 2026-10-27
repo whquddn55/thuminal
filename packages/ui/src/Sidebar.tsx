@@ -68,7 +68,7 @@ import { groupKey, NEW_GROUP_NAME, normalizeGroups } from "./groups";
 import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
-import { IS_MAC } from "./platform";
+import { IS_MAC, keyLabel, primaryMod } from "./platform";
 import { RepoMark } from "./repo-icon";
 import { SessionPorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
@@ -207,7 +207,7 @@ export function Sidebar() {
               <MagnifyingGlassIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>워크트리로 가기 (⌘J)</TooltipContent>
+          <TooltipContent>워크트리로 가기 ({keyLabel("⌘J")})</TooltipContent>
         </Tooltip>
       </div>
       <div className="flex h-7 shrink-0 items-center gap-1 pr-2 pl-3">
@@ -316,7 +316,7 @@ export function Sidebar() {
               <GearSixIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>설정 (⌘,)</TooltipContent>
+          <TooltipContent>설정 ({keyLabel("⌘,")})</TooltipContent>
         </Tooltip>
         <ResourceButton />
       </div>
@@ -572,7 +572,7 @@ function Group({
             </DropdownMenu>
           )}
           {onNew && (
-            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" title="새 워크트리 (⌘⇧N)" onClick={onNew}>
+            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" title={`새 워크트리 (${keyLabel("⌘⇧N")})`} onClick={onNew}>
               <PlusIcon className="size-3.5" />
             </Button>
           )}
@@ -684,7 +684,7 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
             renamePlaceholder={w.branch ?? ""}
             renameValue={w.name ?? ""}
             onKeyDown={(e) => {
-              if (e.metaKey && e.shiftKey && e.key === "Backspace" && !w.is_main) model.setDialog({ kind: "delete-worktree", worktree: w });
+              if (primaryMod(e) && e.shiftKey && e.key === "Backspace" && !w.is_main) model.setDialog({ kind: "delete-worktree", worktree: w });
             }}
           />
         </div>
@@ -734,7 +734,7 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" disabled={w.is_main} onSelect={() => model.setDialog({ kind: "delete-worktree", worktree: w })}>
           워크트리 지우기…
-          <ContextMenuShortcut>⌘⇧⌫</ContextMenuShortcut>
+          <ContextMenuShortcut>{keyLabel("⌘⇧⌫")}</ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

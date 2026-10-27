@@ -16,6 +16,7 @@ import { looksLikeUrl, toUrl } from "./BrowserPane";
 import { baseName, dirName, matchFiles } from "./file-match";
 import { panesOf } from "./layout";
 import { cn } from "./lib/utils";
+import { keyLabel } from "./platform";
 import { type Dialog, useApp, useModel } from "./store";
 
 interface Option {
@@ -183,20 +184,20 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
             <DropdownMenuItem className={ITEM} onSelect={newTerminal}>
               <TerminalWindowIcon className={ICON} />
               새 터미널
-              <DropdownMenuShortcut>⌘T</DropdownMenuShortcut>
+              <DropdownMenuShortcut>{keyLabel("⌘T")}</DropdownMenuShortcut>
             </DropdownMenuItem>
             {browserOk && (
               <DropdownMenuItem className={ITEM} onSelect={() => newBrowser()}>
                 <GlobeIcon className={ICON} />
                 새 브라우저 탭
-                <DropdownMenuShortcut>⌘⇧B</DropdownMenuShortcut>
+                <DropdownMenuShortcut>{keyLabel("⌘⇧B")}</DropdownMenuShortcut>
               </DropdownMenuItem>
             )}
             {inWorktree && (
               <DropdownMenuItem className={ITEM} onSelect={openMarkdown}>
                 <FileTextIcon className={ICON} />
                 Markdown 열기…
-                <DropdownMenuShortcut>⌘⇧O</DropdownMenuShortcut>
+                <DropdownMenuShortcut>{keyLabel("⌘⇧O")}</DropdownMenuShortcut>
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
@@ -204,7 +205,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
               <DropdownMenuItem key={a.cmd} className={ITEM} onSelect={() => launch(a.cmd)}>
                 <AgentIcon kind={a.cmd} className="size-3.5" />
                 {a.name}
-                {a.cmd === defaultAgent && <DropdownMenuShortcut>⌥⌘T</DropdownMenuShortcut>}
+                {a.cmd === defaultAgent && <DropdownMenuShortcut>{keyLabel("⌥⌘T")}</DropdownMenuShortcut>}
               </DropdownMenuItem>
             ))}
             {installed.length === 0 && <div className="px-2 py-1.5 text-[12px] leading-5 text-muted-foreground">에이전트를 찾지 못했어요</div>}
