@@ -66,12 +66,12 @@ export function RepoMark({ repo, name, className }: { repo: string; name: string
   }, [host, repo]);
 
   if (url && !broken) {
-    return <img src={url} alt="" draggable={false} className={cn("size-4 shrink-0 rounded-[4px] object-contain", className)} onError={() => setBroken(true)} />;
+    return <img src={url} alt="" draggable={false} className={cn("size-5 shrink-0 rounded-[5px] object-contain", className)} onError={() => setBroken(true)} />;
   }
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return (
-    <span className={cn("flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[9px] leading-none font-bold text-white uppercase", className)} style={{ background: `hsl(${h} 45% 45%)` }}>
+    <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-[5px] text-[11px] leading-none font-bold text-white uppercase", className)} style={{ background: `hsl(${h} 45% 45%)` }}>
       {[...name][0] ?? "?"}
     </span>
   );
