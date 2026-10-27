@@ -185,6 +185,67 @@ export const FILES_PROTOCOL_MINOR = 5;
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 원격 기기용 브라우저 칸 대리(`browser_proxy`)가 된다 */
 export const BROWSER_PROXY_PROTOCOL_MINOR = 6;
 
+/** 데몬 프로토콜 부 판이 이 값 이상이어야 프로세스 · 포트 읽기(`list_processes`) · 멈추기(`stop_process`)가 된다 */
+export const PROCESSES_PROTOCOL_MINOR = 6;
+
+// ---- 리소스 관리자 (세션 프로세스와 LISTEN 포트, `list_processes`) ----
+
+/** 프로세스 하나. cpu 는 ps 의 %CPU (코어 하나가 100), rss 는 바이트 */
+export interface ProcessInfo {
+  pid: number;
+  ppid: number;
+  /** 세션 셸에서 몇 단계 아래인지 (셸이 0) */
+  depth: number;
+  cpu: number;
+  rss: number;
+  /** 명령줄 (길면 자른다) */
+  command: string;
+  /** 이 프로세스가 LISTEN 중인 포트 */
+  ports: number[];
+}
+
+export interface SessionProcesses {
+  session: SessionId;
+  /** 셸 pid */
+  pid: number;
+  /** 셸과 그 자손 합계 */
+  cpu: number;
+  rss: number;
+  /** 셸부터 자손을 트리 차례로 */
+  processes: ProcessInfo[];
+  truncated: boolean;
+}
+
+/** 포트를 붙인 근거: 세션 셸 자손, 작업 폴더가 워크트리 안, 명령줄에 워크트리 경로, 어디에도 없음 */
+export type PortVia = "tree" | "cwd" | "command" | "external";
+
+export interface ListenPort {
+  port: number;
+  /** 받는 주소 (`*`, `127.0.0.1`, `[::1]` …) */
+  address: string;
+  pid: number;
+  /** 프로세스 이름 */
+  process: string;
+  command: string;
+  cwd: string | null;
+  /** 세션 셸 밑이면 그 세션 */
+  session: SessionId | null;
+  /** 붙인 워크트리 */
+  worktree: string | null;
+  via: PortVia;
+}
+
+export interface ProcessReport {
+  /** 데몬 자신 (thuminald) */
+  daemon: ProcessInfo;
+  sessions: SessionProcesses[];
+  /** 세션 · 워크트리 것 먼저, 그다음 밖. 그 안에서는 포트 번호 차례 */
+  ports: ListenPort[];
+  ports_truncated: boolean;
+  /** 포트를 읽지 못한 까닭 */
+  ports_error: string | null;
+}
+
 /** 세션 꼬리표 중 워크트리 경로를 담는 키 (데몬이 시작 폴더로 채운다) */
 export const WORKTREE_LABEL = "worktree";
 

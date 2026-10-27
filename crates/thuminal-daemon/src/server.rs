@@ -335,6 +335,27 @@ impl Server {
                     Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
                 }
             }
+            Request::ListProcesses => {
+                let (roots, ws) = (self.process_roots(), self.workspace.clone());
+                tokio::task::spawn_blocking(move || {
+                    let worktrees = all_worktrees(&ws, &roots);
+                    crate::procs::report(&crate::procs::snapshot(false), &roots, &worktrees, std::process::id())
+                })
+                .await
+                .map(|report| Response::Processes { report: Box::new(report) })
+                .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+            }
+            Request::StopProcess { pid, port } => {
+                let (roots, ws) = (self.process_roots(), self.workspace.clone());
+                match tokio::task::spawn_blocking(move || crate::procs::stop_port_process(pid, port, &roots, &all_worktrees(&ws, &roots))).await {
+                    Ok(Ok(())) => {
+                        info!(event = "process_stopped", pid, port);
+                        Ok(Response::Ok)
+                    }
+                    Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
+                    Err(e) => Err(ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
+                }
+            }
             Request::AgentImages { session } => {
                 let m = m.clone();
                 tokio::task::spawn_blocking(move || m.agent_images(session))
@@ -410,6 +431,16 @@ impl Server {
 }
 
 impl Server {
+    /// 리소스를 셀 세션들: 셸 pid 가 있고 돌고 있는 세션
+    fn process_roots(&self) -> Vec<crate::procs::SessionRoot> {
+        self.manager
+            .list()
+            .into_iter()
+            .filter(|s| matches!(s.state, thuminal_protocol::SessionState::Running))
+            .filter_map(|s| Some(crate::procs::SessionRoot { session: s.id, pid: s.pid?, worktree: s.labels.get(WORKTREE_LABEL).cloned() }))
+            .collect()
+    }
+
     /// 저장소와 워크트리 요청. git 명령이 막을 수 있어 블로킹 스레드에서 돌린다
     async fn workspace_request(&self, req: Request) -> Result<Response, ErrorBody> {
         let ws = self.workspace.clone();
@@ -572,6 +603,8 @@ fn request_kind(r: &Request) -> &'static str {
         Request::ResolvePath { .. } => "resolve_path",
         Request::SavePasteImage { .. } => "save_paste_image",
         Request::RunningAgents { .. } => "running_agents",
+        Request::ListProcesses => "list_processes",
+        Request::StopProcess { .. } => "stop_process",
         Request::Tmux { .. } => "tmux",
         Request::AgentImages { .. } => "agent_images",
         Request::AgentImage { .. } => "agent_image",
@@ -587,7 +620,7 @@ fn request_kind(r: &Request) -> &'static str {
     }
 }
 
-/// 오래 걸릴 수 있고 다른 요청과 순서가 상관없는 요청 (git, 파일, 셸에 묻기, Orca 읽기, 대화 기록 그림)
+/// 오래 걸릴 수 있고 다른 요청과 순서가 상관없는 요청 (git, 파일, 셸에 묻기, Orca 읽기, 대화 기록 그림, 프로세스 · 포트 읽기)
 fn is_slow(r: &Request) -> bool {
     matches!(
         r,
@@ -608,10 +641,21 @@ fn is_slow(r: &Request) -> bool {
             | Request::ResolvePath { .. }
             | Request::SavePasteImage { .. }
             | Request::RunningAgents { .. }
+            | Request::ListProcesses
+            | Request::StopProcess { .. }
             | Request::ScanOrca
             | Request::AgentImages { .. }
             | Request::AgentImage { .. }
     )
+}
+
+/// 포트를 붙일 워크트리 경로: 등록한 저장소의 워크트리 전부와 세션 꼬리표의 워크트리 (git 을 부르므로 블로킹 스레드에서)
+fn all_worktrees(ws: &Workspace, roots: &[crate::procs::SessionRoot]) -> Vec<String> {
+    let mut out: Vec<String> = ws.repos().iter().flat_map(|r| ws.worktrees(Some(&r.id)).unwrap_or_default()).map(|w| w.path).collect();
+    out.extend(roots.iter().filter_map(|r| r.worktree.clone()));
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// 붙여넣은 그림을 쓸 폴더. 하루 지난 것은 지운다 (claude 는 보낼 때 읽으므로 오래 둘 필요가 없다)

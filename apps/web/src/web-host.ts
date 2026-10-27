@@ -25,6 +25,7 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  ProcessReport,
   RepoGroup,
   RepoIcon,
   RepoInfo,
@@ -400,6 +401,14 @@ export class WebHostApi implements HostApi {
 
   runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]> {
     return this.req({ type: "running_agents", sessions, names }, (r) => r.found);
+  }
+
+  listProcesses(): Promise<ProcessReport> {
+    return this.req({ type: "list_processes" }, (r) => r.report);
+  }
+
+  async stopProcess(pid: number, port: number): Promise<void> {
+    await this.req({ type: "stop_process", pid, port });
   }
 
   findCommands(names: string[]): Promise<string[]> {

@@ -590,6 +590,11 @@ pub enum Request {
         thumb: bool,
     },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
+    /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
+    ListProcesses,
+    /// 포트를 연 프로세스 하나를 멈춘다 (SIGTERM). 데몬이 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고
+    /// 세션 · 워크트리 소유일 때만 보낸다. 밖(external) 프로세스와 데몬 자신은 거절한다 (minor 6)
+    StopProcess { pid: u32, port: u16 },
     Tmux {
         /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
         session: SessionId,
@@ -646,6 +651,7 @@ pub enum Response {
         skills: Vec<PluginSkill>,
     },
     Tmux { stdout: String, stderr: String, code: i32 },
+    Processes { report: Box<ProcessReport> },
     AgentImages { images: Vec<AgentImage> },
     /// 그림 내용 (`data` 는 base64)
     AgentImageData { media_type: String, data: String },
@@ -801,6 +807,95 @@ pub struct RemoteDevice {
     /// 지금 붙어 있는 연결 수
     #[serde(default)]
     pub connected: u32,
+}
+
+/// 세션 프로세스와 포트 (`ListProcesses`). CPU 는 `ps` 의 %CPU (코어 하나가 100), 메모리는 RSS 바이트
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProcessReport {
+    /// 데몬 자신 (thuminald)
+    pub daemon: ProcessInfo,
+    /// 셸 pid 가 있는 세션마다 하나 (팀원 세션도 든다)
+    pub sessions: Vec<SessionProcesses>,
+    /// LISTEN 중인 TCP 포트. 세션 · 워크트리 것 먼저, 그다음 밖. 그 안에서는 포트 번호 차례
+    pub ports: Vec<ListenPort>,
+    /// 포트가 [`MAX_PORTS`] 개를 넘어 뒤를 잘랐다
+    #[serde(default)]
+    pub ports_truncated: bool,
+    /// 포트를 읽지 못한 까닭 (lsof 가 없다, 시간 초과). 그때 `ports` 는 비어 있다
+    #[serde(default)]
+    pub ports_error: Option<String>,
+}
+
+/// 포트 목록 최대 개수
+pub const MAX_PORTS: usize = 200;
+/// 세션 하나에 보이는 프로세스 최대 개수 (합계는 모두 센다)
+pub const MAX_SESSION_PROCESSES: usize = 200;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionProcesses {
+    pub session: SessionId,
+    /// 셸 pid
+    pub pid: u32,
+    /// 셸과 그 자손 합계
+    pub cpu: f32,
+    pub rss: u64,
+    /// 셸부터 자손을 트리 차례(깊이 우선)로. 다른 세션 셸 밑의 것은 그 세션에 든다
+    pub processes: Vec<ProcessInfo>,
+    /// 프로세스가 [`MAX_SESSION_PROCESSES`] 개를 넘어 뒤를 잘랐다
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub ppid: u32,
+    /// 세션 셸에서 몇 단계 아래인지 (셸이 0)
+    #[serde(default)]
+    pub depth: u32,
+    pub cpu: f32,
+    pub rss: u64,
+    /// 명령줄 (길면 자른다)
+    pub command: String,
+    /// 이 프로세스가 LISTEN 중인 포트
+    #[serde(default)]
+    pub ports: Vec<u16>,
+}
+
+/// 포트를 무엇에 붙였는지
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortVia {
+    /// 연 프로세스가 세션 셸의 자손이다
+    Tree,
+    /// 연 프로세스의 작업 폴더가 워크트리 안이다
+    Cwd,
+    /// 연 프로세스의 명령줄에 워크트리 경로가 들어 있다
+    Command,
+    /// 어디에도 붙지 않았다 (이 컴퓨터의 다른 프로그램)
+    External,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListenPort {
+    pub port: u16,
+    /// 받는 주소 (`*`, `127.0.0.1`, `[::1]` …)
+    pub address: String,
+    pub pid: u32,
+    /// 프로세스 이름 (lsof 의 command)
+    pub process: String,
+    /// 명령줄 (길면 자른다)
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// 세션 셸 밑이면 그 세션
+    #[serde(default)]
+    pub session: Option<SessionId>,
+    /// 붙인 워크트리 (세션이면 그 세션의 `worktree` 꼬리표)
+    #[serde(default)]
+    pub worktree: Option<String>,
+    pub via: PortVia,
 }
 
 /// 데몬이 에이전트를 띄울 때 쓰는 설정 (`agent-settings.json`)

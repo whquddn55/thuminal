@@ -48,6 +48,14 @@ enum Command {
     /// 원격 접속 (폰·다른 컴퓨터 브라우저가 Tailscale 로 붙는다)
     #[command(subcommand)]
     Remote(RemoteCmd),
+    /// 세션마다 셸 pid · CPU · 메모리와 연 포트, 그리고 LISTEN 중인 포트를 붙인 곳 (세션 · 워크트리 · 밖)
+    Ps {
+        /// 세션 밑 프로세스도 찍는다
+        #[arg(short, long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// 에이전트 훅이 부르는 명령
     #[command(subcommand)]
     Agent(AgentCmd),
@@ -327,6 +335,63 @@ async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// 바이트를 사람이 읽는 크기로 (1024 단위)
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 4] = ["K", "M", "G", "T"];
+    let mut v = n as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    if v >= 100.0 { format!("{v:.0}{}", UNITS[unit]) } else { format!("{v:.1}{}", UNITS[unit]) }
+}
+
+async fn ps(c: &Client, all: bool, json: bool) -> Res<()> {
+    use thuminal_protocol::{PortVia, Request, Response};
+    let Response::Processes { report } = c.request(Request::ListProcesses).await? else { return Err("뜻밖의 응답".into()) };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    let sessions = c.list().await?;
+    let info = |id: SessionId| sessions.iter().find(|s| s.id == id);
+    println!("{:<7}  {:>7}  {:>6}  {:>7}  {:<16}  TITLE", "SESSION", "PID", "CPU", "MEM", "PORTS");
+    for s in &report.sessions {
+        let ports: Vec<String> = s.processes.iter().flat_map(|p| p.ports.iter().map(|n| format!(":{n}"))).collect();
+        let title = info(s.session).map(|i| i.title.as_str()).unwrap_or("");
+        println!("{:<7}  {:>7}  {:>5.1}%  {:>7}  {:<16}  {title}", format!("s{}", s.session), s.pid, s.cpu, human_bytes(s.rss), ports.join(" "));
+        if all {
+            for p in &s.processes {
+                let ports: Vec<String> = p.ports.iter().map(|n| format!(":{n}")).collect();
+                let indent = "  ".repeat(p.depth as usize);
+                println!("{:<7}  {:>7}  {:>5.1}%  {:>7}  {:<16}  {indent}{}", "", p.pid, p.cpu, human_bytes(p.rss), ports.join(" "), p.command);
+            }
+        }
+    }
+    let d = &report.daemon;
+    println!("{:<7}  {:>7}  {:>5.1}%  {:>7}  {:<16}  thuminald", "-", d.pid, d.cpu, human_bytes(d.rss), "");
+    if let Some(e) = &report.ports_error {
+        println!("\n포트: {e}");
+        return Ok(());
+    }
+    println!("\n{:<7}  {:>7}  {:<16}  {:<7}  {:<6}  WORKTREE", "PORT", "PID", "PROCESS", "SESSION", "VIA");
+    for p in &report.ports {
+        let via = match p.via {
+            PortVia::Tree => "트리",
+            PortVia::Cwd => "폴더",
+            PortVia::Command => "명령줄",
+            PortVia::External => "밖",
+        };
+        let session = p.session.map(|s| format!("s{s}")).unwrap_or_else(|| "-".into());
+        println!("{:<7}  {:>7}  {:<16}  {:<7}  {:<6}  {}", format!(":{}", p.port), p.pid, p.process, session, via, p.worktree.as_deref().unwrap_or("-"));
+    }
+    if report.ports_truncated {
+        println!("(포트가 많아 {} 개까지만 찍었다)", thuminal_protocol::MAX_PORTS);
+    }
+    Ok(())
+}
+
 /// 가짜 tmux: 명령 하나를 데몬에 넘기고 tmux 처럼 출력·종료 코드를 낸다
 async fn tmux(argv: Vec<String>) -> ExitCode {
     let Some(session) = std::env::var("THUMINAL_SESSION_ID").ok().and_then(|s| s.parse::<u64>().ok()) else {
@@ -390,6 +455,7 @@ async fn run(cli: Cli) -> Res<ExitCode> {
             Err(_) => println!("데몬이 떠 있지 않다"),
         },
         Command::Remote(cmd) => remote(&connect().await?, cmd).await?,
+        Command::Ps { all, json } => ps(&connect().await?, all, json).await?,
         Command::Term(cmd) => return term(cmd).await,
         Command::Repo(cmd) => workspace::repo(&connect().await?, cmd).await?,
         Command::Wt(cmd) => workspace::wt(&connect().await?, cmd).await?,

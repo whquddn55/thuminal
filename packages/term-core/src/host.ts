@@ -16,6 +16,7 @@ import type {
   LayoutResult,
   LineCount,
   OrcaScan,
+  ProcessReport,
   RemoteDevice,
   RemoteStatus,
   RepoGroup,
@@ -241,6 +242,13 @@ export interface HostApi {
   savePasteImage(data: string, ext: string): Promise<string>;
   /** 세션 셸 밑에서 이름이 names 에 든 프로세스(에이전트)가 도는 세션들 */
   runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]>;
+  /** 세션마다 셸 밑 프로세스 · CPU · 메모리와 LISTEN 포트 (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터) */
+  listProcesses(): Promise<ProcessReport>;
+  /**
+   * 포트를 연 프로세스 하나에 SIGTERM 을 보낸다. 데몬이 다시 읽어 아직 그 포트에서 LISTEN 이고 세션 · 워크트리 것일 때만 보낸다
+   * (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터)
+   */
+  stopProcess(pid: number, port: number): Promise<void>;
   /** 브라우저 칸을 지원하는 껍데기만 둔다 */
   readonly browser?: BrowserHost;
   /**
