@@ -1,6 +1,6 @@
 // 인스턴스 하나 = 칸 하나. uvec4:
 //   x: 열 | 줄 << 16
-//   y: 글자 자리(24비트) | 넓은 글자 << 24 | 밑줄 << 25 | 취소선 << 26
+//   y: 글자 자리(24비트) | 넓은 글자 << 24 | 밑줄 << 25 | 취소선 << 26 | 컬러 글자 << 27
 //   z: 글자색 0xRRGGBB
 //   w: 배경색 0xRRGGBB
 
@@ -39,6 +39,7 @@ out vec2 vUv;
 out vec2 vCell;
 flat out uint vDeco;
 flat out float vHasGlyph;
+flat out float vColorGlyph;
 void main() {
   uint slot = inst.y & 0xffffffu;
   uint deco = (inst.y >> 25) & 3u;
@@ -52,6 +53,7 @@ void main() {
   vCell = c;
   vDeco = deco;
   vHasGlyph = slot == 0u ? 0.0 : 1.0;
+  vColorGlyph = float((inst.y >> 27) & 1u);
   vColor = rgb(inst.z);
 }`;
 
@@ -64,13 +66,17 @@ in vec2 vUv;
 in vec2 vCell;
 flat in uint vDeco;
 flat in float vHasGlyph;
+flat in float vColorGlyph;
 out vec4 o;
 void main() {
-  float a = vHasGlyph * texture(atlas, vUv).a;
+  vec4 t = texture(atlas, vUv);
+  float a = vHasGlyph * t.a;
+  // 컬러 글자(이모지)는 그림 색 그대로, 나머지는 글자색으로 칠한다
+  vec3 c = vColorGlyph > 0.5 ? t.rgb : vColor.rgb;
   // 선 굵기는 기기 픽셀 1칸, 밑줄은 칸 아래쪽, 취소선은 가운데
   float px = 1.0 / cell.y;
-  if ((vDeco & 1u) != 0u && vCell.y > 1.0 - 2.5 * px && vCell.y < 1.0 - 1.0 * px) a = 1.0;
-  if ((vDeco & 2u) != 0u && abs(vCell.y - 0.55) < 0.75 * px) a = 1.0;
+  bool line = ((vDeco & 1u) != 0u && vCell.y > 1.0 - 2.5 * px && vCell.y < 1.0 - 1.0 * px) || ((vDeco & 2u) != 0u && abs(vCell.y - 0.55) < 0.75 * px);
+  if (line) { a = 1.0; c = vColor.rgb; }
   if (a <= 0.0) discard;
-  o = vec4(vColor.rgb, a);
+  o = vec4(c, a);
 }`;

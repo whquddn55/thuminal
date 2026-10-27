@@ -20,6 +20,22 @@ const ATLAS = 2048;
 const WIDE_BIT = 1 << 24;
 const UNDERLINE_BIT = 1 << 25;
 const STRIKE_BIT = 1 << 26;
+/** 컬러 글자(이모지): 글자색 대신 글자 그림의 색을 쓴다 */
+const COLOR_BIT = 1 << 27;
+
+/**
+ * 방금 흰색으로 그린 글자가 컬러 글자인지. 흑백 글자는 흰색 획뿐이고, 컬러 이모지(✅ 🚀)는 fillStyle 과 상관없이
+ * 제 색으로 그려진다. 투명도만 쓰면 ✅ 는 네모 한 덩어리가 되어 안의 체크가 사라진다
+ */
+function isColorGlyph(g: CanvasRenderingContext2D, w: number, h: number): boolean {
+  const d = g.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 64) continue;
+    const r = d[i], gr = d[i + 1], b = d[i + 2];
+    if (Math.abs(r - gr) > 16 || Math.abs(gr - b) > 16 || Math.max(r, gr, b) < 200) return true;
+  }
+  return false;
+}
 
 function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
   const p = gl.createProgram()!;
@@ -113,11 +129,13 @@ class Atlas {
     // 두 칸 글자(한글 등)는 대체 글꼴 폭이 두 칸보다 좁다. 두 칸 가운데에 놓는다
     const x = wide ? Math.max(0, Math.round((this.slotW - g.measureText(ch).width) / 2)) : 0;
     g.fillText(ch, x, this.baseline);
+    // 컬러 글자는 기호 · 이모지 영역(U+2000 위)에만 있다. 글자마다 픽셀을 읽지 않게 그 밖은 보지 않는다
+    const v = cp >= 0x2000 && isColorGlyph(g, this.slotW, this.slotH) ? s | COLOR_BIT : s;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, (s % this.cols) * this.slotW, Math.floor(s / this.cols) * this.slotH, gl.RGBA, gl.UNSIGNED_BYTE, this.canvas);
-    this.glyphs.set(key, s);
-    return s;
+    this.glyphs.set(key, v);
+    return v;
   }
 }
 
