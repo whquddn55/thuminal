@@ -548,7 +548,7 @@ function Group({
         onPointerDown={drag ? (e) => beginDrag(e, model, { kind: "project", repo: drag.repo, title: label }, onToggle) : undefined}
       >
         <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
-        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold leading-4">{label}</span>
         {count !== undefined && (
           <span className={cn("pr-1.5 text-[11px] tabular-nums text-muted-foreground/70 group-hover:hidden", menuOpen && "hidden")}>{count}</span>
         )}
