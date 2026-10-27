@@ -72,9 +72,9 @@ async fn pipe_conpty_and_powershell_integration() {
     // 기본 셸은 PowerShell 이고, thuminal 의 claude 함수가 들어 있으며, 실행기가 플러그인 폴더를 붙인다
     let s = c.create(CreateSession { cols: 200, rows: 20, ..Default::default() }).await.unwrap();
     wait_screen(&c, s.id, "PS ").await;
-    c.send_text(s.id, "(Get-Command claude).CommandType\r".into()).await.unwrap();
+    c.send_text(s.id, "(Get-Command claude).CommandType\r").await.unwrap();
     wait_screen(&c, s.id, "Function").await;
-    c.send_text(s.id, "claude hello\r".into()).await.unwrap();
+    c.send_text(s.id, "claude hello\r").await.unwrap();
     let screen = wait_screen(&c, s.id, "FAKE-CLAUDE").await;
     assert!(screen.contains("--plugin-dir"), "실행기가 플러그인 폴더를 붙여야 한다:\n{screen}");
     assert!(screen.contains("hello"), "{screen}");

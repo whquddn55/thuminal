@@ -96,6 +96,7 @@ exec "${THUMINAL_CLI:-thuminal}" tmux "$@"
 "#;
 
 /// sh 작은따옴표로 감싼다
+#[cfg_attr(windows, allow(dead_code))]
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
