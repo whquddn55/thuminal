@@ -55,7 +55,7 @@ impl PtySystem for PortablePty {
         let cwd = spec
             .cwd
             .clone()
-            .or_else(|| std::env::var_os("HOME").map(Into::into))
+            .or_else(|| std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(Into::into))
             .unwrap_or_else(|| "/".into());
         cmd.cwd(cwd);
         for k in &spec.env_remove {

@@ -62,7 +62,9 @@ const BRIDGE: &str = r#"
 "#;
 
 /// Safari 와 같은 User-Agent. WKWebView 기본값에는 `Version/… Safari/…` 가 빠져 있어
-/// Google 로그인처럼 "앱에 박힌 웹뷰"를 막는 사이트에 걸린다. Safari 판 번호는 설치된 Safari 에서 읽는다
+/// Google 로그인처럼 "앱에 박힌 웹뷰"를 막는 사이트에 걸린다. Safari 버전은 설치된 Safari 에서 읽는다.
+/// Windows(WebView2)와 Linux(WebKitGTK)는 기본값이 이미 보통 브라우저 모양이라 그대로 둔다
+#[cfg(target_os = "macos")]
 fn user_agent() -> &'static str {
     static UA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     UA.get_or_init(|| {
@@ -117,8 +119,10 @@ pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, 
     let (a1, a2, a3, a4) = (app.clone(), app.clone(), app.clone(), app.clone());
     let ev = event_name(tag);
     let (e1, e2, e3, e4) = (ev.clone(), ev.clone(), ev.clone(), ev);
-    let builder = WebviewBuilder::new(label(tag, id), WebviewUrl::External(parsed))
-        .user_agent(user_agent())
+    let builder = WebviewBuilder::new(label(tag, id), WebviewUrl::External(parsed));
+    #[cfg(target_os = "macos")]
+    let builder = builder.user_agent(user_agent());
+    let builder = builder
         .initialization_script(BRIDGE)
         .on_navigation(move |u| {
             if u.scheme() != "thuminal-key" {

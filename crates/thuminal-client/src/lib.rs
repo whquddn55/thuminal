@@ -25,7 +25,6 @@ use thuminal_protocol::{
     WorkspaceLayout, WorktreeInfo,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::UnixStream;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 #[derive(Debug, thiserror::Error)]
@@ -91,8 +90,7 @@ impl Client {
     /// 이미 떠 있는 데몬에 붙는다.
     pub async fn connect(paths: &Paths, client_name: &str) -> Result<Client> {
         let path = paths.socket();
-        let stream = UnixStream::connect(&path).await.map_err(|source| ClientError::Connect { path, source })?;
-        let (rd, wr) = stream.into_split();
+        let (rd, wr) = thuminal_ipc::connect(&path).await.map_err(|source| ClientError::Connect { path, source })?;
         Client::from_stream(rd, wr, client_name).await
     }
 
@@ -420,9 +418,9 @@ async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<Opti
     Frame::decode(&body).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-/// 데몬을 새 세션(`setsid`)으로 떼어 띄운다. 띄운 쪽(CLI, 앱)이 끝나도 데몬은 산다.
+/// 데몬을 떼어 띄운다. 띄운 쪽(CLI, 앱)이 끝나도 데몬은 산다.
+/// 유닉스는 새 세션(`setsid`)으로, Windows 는 콘솔 없이 새 프로세스 그룹으로 띄운다
 pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
-    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     std::fs::create_dir_all(paths.logs()).map_err(|e| ClientError::Spawn(e.to_string()))?;
     let stderr = std::fs::OpenOptions::new()
@@ -432,26 +430,37 @@ pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
         .map_err(|e| ClientError::Spawn(e.to_string()))?;
     let mut cmd = Command::new(daemon_bin);
     cmd.arg("--home").arg(&paths.home).stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
-    // SAFETY: fork 뒤 exec 전에 setsid 만 부른다 (async-signal-safe)
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: fork 뒤 exec 전에 setsid 만 부른다 (async-signal-safe)
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
     cmd.spawn().map_err(|e| ClientError::Spawn(format!("{}: {e}", daemon_bin.display())))?;
     Ok(())
 }
 
-/// 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald`.
+/// 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald` (Windows 는 `thuminald.exe`).
 pub fn default_daemon_bin() -> PathBuf {
     if let Some(p) = std::env::var_os("THUMINAL_DAEMON_BIN") {
         return PathBuf::from(p);
     }
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("thuminald")))
+        .and_then(|p| p.parent().map(|d| d.join(format!("thuminald{}", std::env::consts::EXE_SUFFIX))))
         .unwrap_or_else(|| PathBuf::from("thuminald"))
 }

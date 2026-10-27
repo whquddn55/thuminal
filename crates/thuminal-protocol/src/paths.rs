@@ -4,12 +4,25 @@ use std::path::{Path, PathBuf};
 
 use crate::PROTOCOL_MAJOR;
 
+/// 사용자 홈 폴더. 유닉스는 `HOME`, Windows 는 `HOME` 이 보통 없어 `USERPROFILE` 을 본다
+pub fn user_home() -> Option<PathBuf> {
+    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    var("HOME").or_else(|| if cfg!(windows) { var("USERPROFILE") } else { None })
+}
+
 /// 데이터 폴더. `THUMINAL_HOME` 이 있으면 그것을 쓴다 (시험, 여러 벌 띄우기).
+/// 없으면 macOS 는 `~/Library/Application Support/thuminal`, Windows 는 `%LOCALAPPDATA%\thuminal`,
+/// 그 밖은 `$XDG_DATA_HOME/thuminal`(없으면 `~/.local/share/thuminal`)
 pub fn home() -> PathBuf {
     if let Some(p) = std::env::var_os("THUMINAL_HOME") {
         return PathBuf::from(p);
     }
-    let base = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
+    if cfg!(windows)
+        && let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())
+    {
+        return PathBuf::from(local).join("thuminal");
+    }
+    let base = user_home().unwrap_or_else(std::env::temp_dir);
     if cfg!(target_os = "macos") {
         base.join("Library/Application Support/thuminal")
     } else {

@@ -246,7 +246,7 @@ impl Manager {
             env.insert("THUMINAL_HOME".into(), home.to_string_lossy().into_owned());
         }
         // 에이전트 훅이 부를 CLI (데몬 실행 파일 옆에 있다)
-        if let Some(cli) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("thuminal"))).filter(|p| p.exists()) {
+        if let Some(cli) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(format!("thuminal{}", std::env::consts::EXE_SUFFIX)))).filter(|p| p.exists()) {
             env.insert("THUMINAL_CLI".into(), cli.to_string_lossy().into_owned());
         }
         let mut command = req.command.clone();
@@ -267,7 +267,7 @@ impl Manager {
         let cwd = spec
             .cwd
             .clone()
-            .or_else(|| std::env::var_os("HOME").map(Into::into))
+            .or_else(thuminal_protocol::paths::user_home)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
         let title = req.command.first().map(|c| c.rsplit('/').next().unwrap_or(c).to_string()).unwrap_or_else(|| {

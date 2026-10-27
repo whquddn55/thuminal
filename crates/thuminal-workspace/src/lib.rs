@@ -226,9 +226,9 @@ impl Workspace {
     pub fn add_repo(&self, path: &Path) -> Result<RepoInfo, WorkspaceError> {
         // 화면에서 `~/…` 로 적어도 받는다
         let expanded;
-        let path = match (path.strip_prefix("~"), std::env::var_os("HOME")) {
+        let path = match (path.strip_prefix("~"), thuminal_protocol::paths::user_home()) {
             (Ok(rest), Some(home)) => {
-                expanded = PathBuf::from(home).join(rest);
+                expanded = home.join(rest);
                 expanded.as_path()
             }
             _ => path,

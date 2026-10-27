@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 thuminal-protocol.workspace = true
+thuminal-ipc.workspace = true
 thuminal-engine.workspace = true
 thuminal-layout.workspace = true
 thuminal-pty.workspace = true
@@ -26,8 +27,15 @@ base64 = "0.22"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 memchr = "2"
+# 이 컴퓨터의 네트워크 주소 (원격 접속이 Tailscale 주소를 찾는다)
+if-addrs = "0.15"
 # 붙인 그림 썸네일 (claude 기록의 png · jpeg)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
+# macOS 는 ps · lsof 로 읽는다 (procs.rs). 그 밖에서는 프로세스 표와 LISTEN 포트를 이것으로 읽는다
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+listeners = "0.6"
 
 [dev-dependencies]
 thuminal-engine-ghostty.workspace = true

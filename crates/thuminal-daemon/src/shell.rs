@@ -16,6 +16,10 @@
 //!   원래대로 되돌리고 사용자의 `.zshenv` 를 읽는다. 그 뒤 `.zprofile`, `.zshrc`, `.zlogin` 은 zsh 가
 //!   사용자 폴더에서 그대로 읽는다. 함수는 첫 프롬프트 직전에 정의해 사용자 설정보다 나중에 들어간다.
 //! - bash: `--rcfile` 로 우리 파일을 읽게 하고, 거기서 로그인 셸이 읽는 파일과 `.bashrc` 를 차례로 읽은 뒤 함수를 정의한다.
+//! - Windows: PowerShell(`pwsh.exe`, 없으면 `powershell.exe`)을 띄운다. 사용자 `$PROFILE` 은 PowerShell 이 그대로 읽고,
+//!   그 뒤 `-Command` 로 우리 `pwsh/profile.ps1` 을 읽어 함수를 정의한다. Windows 기본 실행 정책(Restricted)은 스크립트를
+//!   막으므로 thuminal 이 띄우는 PowerShell 에만 `-ExecutionPolicy Bypass` 를 준다. 실행기는 `claude-launch.ps1` 이다.
+//!   에이전트 팀(가짜 tmux)은 Windows 에서 아직 켜지 않는다.
 //! - 그 밖의 셸: 아무것도 더하지 않는다.
 
 use std::collections::BTreeMap;
@@ -79,6 +83,13 @@ if [ -n "${THUMINAL_CLAUDE_LAUNCH-}" ] && [ -x "$THUMINAL_CLAUDE_LAUNCH" ]; then
 fi
 "#;
 
+const PWSH_PROFILE: &str = r#"# thuminal 셸 통합 (데몬이 만든 파일이다. 고치지 않는다)
+# 사용자 $PROFILE 을 읽은 뒤 thuminal 이 이 파일을 읽어 기능을 더한다.
+if ($env:THUMINAL_CLAUDE_LAUNCH -and (Test-Path -LiteralPath $env:THUMINAL_CLAUDE_LAUNCH)) {
+  function global:claude { & $env:THUMINAL_CLAUDE_LAUNCH @args }
+}
+"#;
+
 const TMUX_SHIM: &str = r#"#!/bin/sh
 # thuminal 에이전트 팀: claude 가 부르는 tmux 명령을 thuminal 데몬으로 넘긴다 (데몬이 만든 파일이다. 고치지 않는다)
 exec "${THUMINAL_CLI:-thuminal}" tmux "$@"
@@ -89,9 +100,30 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// PowerShell 작은따옴표로 감싼다
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// 명령 첫 낱말이 claude 인지 (`/…/claude`, `C:\…\claude.exe`, `claude.cmd` 도)
+fn is_claude(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".cmd")).unwrap_or(base);
+    base == "claude"
+}
+
+/// Windows 에서 띄울 PowerShell. `pwsh.exe`(PowerShell 7)가 PATH 에 있으면 그것, 없으면 Windows 에 들어 있는 `powershell.exe`
+#[cfg(windows)]
+fn powershell() -> String {
+    std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|d| d.join("pwsh.exe")).find(|p| p.is_file()))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "powershell.exe".into())
+}
+
 fn set_exec(p: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755))
+    crate::sys::set_mode(p, 0o755)
 }
 
 impl ShellIntegration {
@@ -118,6 +150,7 @@ impl ShellIntegration {
     }
 
     /// claude 실행기. 설정을 바꾸면 다시 쓴다
+    #[cfg(unix)]
     fn launcher(&self) -> String {
         let s = self.settings.lock().unwrap();
         let mut out = String::from(
@@ -147,6 +180,24 @@ fi
         out
     }
 
+    /// claude 실행기 (PowerShell). 에이전트 팀은 Windows 에서 아직 켜지 않는다
+    #[cfg(windows)]
+    fn launcher(&self) -> String {
+        let s = self.settings.lock().unwrap();
+        let mut out = String::from("# thuminal 이 에이전트 설정(agent-settings.json)으로 만든 claude 실행기 (데몬이 만든 파일이다. 고치지 않는다)\n$a = @($args)\n");
+        if s.claude.skip_permissions {
+            out.push_str("$a = @('--dangerously-skip-permissions') + $a\n");
+        }
+        if let Some(p) = self.plugin_dir() {
+            out.push_str(&format!("if (Test-Path -LiteralPath {p}) {{ $a = @('--plugin-dir', {p}) + $a }}\n", p = ps_quote(&p.to_string_lossy())));
+        }
+        // 셸의 claude 함수(이 실행기를 부른다)를 다시 부르지 않게 실행 파일만 찾는다
+        out.push_str("$claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1\n");
+        out.push_str("if (-not $claude) { Write-Error 'claude 를 찾지 못했다'; exit 127 }\n");
+        out.push_str("& $claude.Source @a\nexit $LASTEXITCODE\n");
+        out
+    }
+
     /// 플러그인에 든 스킬들 (`skills/<이름>/SKILL.md`, 이름 순)
     pub fn skills(&self) -> Vec<PluginSkill> {
         let Some(src) = &self.claude_plugin else { return Vec::new() };
@@ -172,6 +223,7 @@ fi
     }
 
     /// `shell/claude-plugin` 을 원본에 맞춰 다시 짠다. 스킬 말고는 원본으로 가는 링크다
+    #[cfg(unix)]
     fn build_plugin(&self) -> std::io::Result<()> {
         use std::os::unix::fs::symlink;
         let Some(src) = &self.claude_plugin else { return Ok(()) };
@@ -221,8 +273,38 @@ fi
         Ok(())
     }
 
+    /// Windows 는 심볼릭 링크에 관리자 권한(또는 개발자 모드)이 들어 원본을 통째로 복사해 짠다 (켠 스킬만)
+    #[cfg(windows)]
+    fn build_plugin(&self) -> std::io::Result<()> {
+        fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+            std::fs::create_dir_all(to)?;
+            for e in std::fs::read_dir(from)?.flatten() {
+                let dest = to.join(e.file_name());
+                if e.file_type()?.is_dir() { copy_dir(&e.path(), &dest)? } else { std::fs::copy(e.path(), dest).map(|_| ())? }
+            }
+            Ok(())
+        }
+        let Some(src) = &self.claude_plugin else { return Ok(()) };
+        let root = self.dir.join("claude-plugin");
+        let disabled = self.settings.lock().unwrap().claude.disabled_skills.clone();
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("skills"))?;
+        for e in std::fs::read_dir(src)?.flatten() {
+            if e.file_name() != "skills" {
+                let dest = root.join(e.file_name());
+                if e.file_type()?.is_dir() { copy_dir(&e.path(), &dest)? } else { std::fs::copy(e.path(), dest).map(|_| ())? }
+            }
+        }
+        for skill in self.skills() {
+            if !disabled.contains(&skill.name) {
+                copy_dir(&src.join("skills").join(&skill.name), &root.join("skills").join(&skill.name))?;
+            }
+        }
+        Ok(())
+    }
+
     fn launcher_file(&self) -> PathBuf {
-        self.dir.join("claude-launch")
+        self.dir.join(if cfg!(windows) { "claude-launch.ps1" } else { "claude-launch" })
     }
 
     fn teams_bin(&self) -> PathBuf {
@@ -254,6 +336,7 @@ fi
         };
         write("zsh/.zshenv", ZSHENV);
         write("bash/rc", BASHRC);
+        write("pwsh/profile.ps1", PWSH_PROFILE);
         write("teams-bin/tmux", TMUX_SHIM);
         let _ = set_exec(&self.teams_bin().join("tmux"));
         self.write_launcher();
@@ -268,11 +351,36 @@ fi
         }
         env.insert("THUMINAL_CLAUDE_LAUNCH".into(), self.launcher_file().to_string_lossy().into_owned());
         // `term new -- claude …` 처럼 claude 를 바로 띄우면 실행기로 띄운다
-        if command.first().is_some_and(|c| c.rsplit('/').next() == Some("claude")) {
-            command[0] = self.launcher_file().to_string_lossy().into_owned();
+        if command.first().is_some_and(|c| is_claude(c)) {
+            let launcher = self.launcher_file().to_string_lossy().into_owned();
+            #[cfg(windows)]
+            {
+                let rest = command.split_off(1);
+                *command = [powershell(), "-NoLogo".into(), "-NoProfile".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-File".into(), launcher]
+                    .into_iter()
+                    .chain(rest)
+                    .collect();
+            }
+            #[cfg(not(windows))]
+            {
+                command[0] = launcher;
+            }
         }
         if !command.is_empty() {
             return;
+        }
+        #[cfg(windows)]
+        {
+            let profile = self.dir.join("pwsh/profile.ps1").to_string_lossy().into_owned();
+            *command = vec![
+                powershell(),
+                "-NoLogo".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-NoExit".into(),
+                "-Command".into(),
+                format!(". {}", ps_quote(&profile)),
+            ];
         }
         let shell = std::env::var("SHELL").unwrap_or_default();
         match shell.rsplit('/').next() {
@@ -311,6 +419,19 @@ pub fn find_commands(names: &[String]) -> Vec<String> {
     if names.is_empty() {
         return Vec::new();
     }
+    find_in_shell(&names)
+}
+
+/// Windows 는 로그인 셸이 PATH 를 바꾸는 일이 드물어 데몬의 PATH 에서 PATHEXT 확장자를 붙여 찾는다
+#[cfg(windows)]
+fn find_in_shell(names: &[&String]) -> Vec<String> {
+    let dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let exts: Vec<String> = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into()).split(';').map(str::to_lowercase).collect();
+    names.iter().filter(|n| dirs.iter().any(|d| exts.iter().any(|e| d.join(format!("{n}{e}")).is_file()))).map(|n| n.to_string()).collect()
+}
+
+#[cfg(not(windows))]
+fn find_in_shell(names: &[&String]) -> Vec<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let script = r#"for c in "$@"; do command -v -- "$c" >/dev/null 2>&1 && printf 'thuminal-found:%s\n' "$c"; done"#;
     let child = std::process::Command::new(&shell)

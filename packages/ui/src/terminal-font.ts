@@ -54,7 +54,9 @@ const isSystemMono = (family: string) => /^(sf mono|ui-monospace)$/i.test(family
 export function fontStack(family: string): string {
   const f = family.trim().replace(/['"]/g, "");
   const first = !f || isSystemMono(f) ? "ui-monospace, 'SF Mono'" : `'${f}'`;
-  return `${first}, '${NERD_FONT}', Menlo, 'Apple SD Gothic Neo', 'Noto Sans Mono CJK KR', monospace`;
+  // macOS 밖에는 SF Mono · Menlo 가 없어 그 OS 기본 고정폭(Windows Cascadia Mono · Consolas, Linux DejaVu Sans Mono)으로 넘어간다.
+  // 한글은 고정폭 글꼴에 없으면 각 OS 한글 글꼴로 채운다
+  return `${first}, '${NERD_FONT}', Menlo, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans Mono CJK KR', monospace`;
 }
 
 export const clampFontSize = (n: number) => Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(n)));

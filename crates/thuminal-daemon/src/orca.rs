@@ -2,7 +2,7 @@
 //!
 //! Orca 는 프로필마다 `~/Library/Application Support/orca/profiles/<프로필>/profile-state.db`(sqlite)에
 //! 문서(`domain` → JSON `payload`)를 둔다. 옛 판은 같은 폴더의 `orca-data.json` 한 파일이다.
-//! sqlite 는 macOS 에 들어 있는 `sqlite3` 를 읽기 전용으로 부른다 (Orca 가 떠 있어도 건드리지 않는다).
+//! sqlite 는 `sqlite3` 명령(macOS 에는 들어 있다)을 읽기 전용으로 부른다 (Orca 가 떠 있어도 건드리지 않는다).
 //! 읽기만 하고 바꾸지 않는다. 고른 것을 등록하고 탭을 여는 일은 앱이 한다.
 
 use std::collections::BTreeMap;
@@ -15,8 +15,18 @@ use tracing::info;
 /// Orca 떠 있는 터미널 워크트리 id
 const FLOATING: &str = "global-floating-terminal";
 
+/// Orca(Electron) 의 앱 데이터 폴더. macOS 는 `~/Library/Application Support/orca`, Linux 는 `$XDG_CONFIG_HOME/orca`
+/// (없으면 `~/.config/orca`), Windows 는 `%APPDATA%\\orca`
 fn orca_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/orca"))
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let home = thuminal_protocol::paths::user_home;
+    if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library/Application Support/orca"))
+    } else if cfg!(windows) {
+        env("APPDATA").map(|a| a.join("orca"))
+    } else {
+        env("XDG_CONFIG_HOME").or_else(|| home().map(|h| h.join(".config"))).map(|c| c.join("orca"))
+    }
 }
 
 /// 지금 고른 프로필 폴더
@@ -70,7 +80,7 @@ fn clean_title(t: &str) -> String {
 /// claude 세션 기록 파일과 그 세션을 띄운 폴더, 마지막으로 쓴 때(ms)
 fn transcript(session: &str, hint: Option<&str>) -> Option<(String, u64)> {
     let path = hint.map(PathBuf::from).filter(|p| p.is_file()).or_else(|| {
-        let projects = PathBuf::from(std::env::var_os("HOME")?).join(".claude/projects");
+        let projects = thuminal_protocol::paths::user_home()?.join(".claude/projects");
         std::fs::read_dir(projects).ok()?.flatten().map(|d| d.path().join(format!("{session}.jsonl"))).find(|p| p.is_file())
     })?;
     let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
@@ -81,12 +91,12 @@ fn transcript(session: &str, hint: Option<&str>) -> Option<(String, u64)> {
 }
 
 fn alive(pid: i32) -> bool {
-    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+    u32::try_from(pid).is_ok_and(crate::sys::alive)
 }
 
 /// 지금 떠 있는 claude: 세션 id → pid. claude 는 `~/.claude/sessions/<pid>.json` 에 pid 와 세션 id 를 적는다
 fn running_sessions() -> BTreeMap<String, i32> {
-    let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude/sessions")) else { return Default::default() };
+    let Some(dir) = thuminal_protocol::paths::user_home().map(|h| h.join(".claude/sessions")) else { return Default::default() };
     std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -105,13 +115,12 @@ fn running_sessions() -> BTreeMap<String, i32> {
 pub fn stop_session(session_id: &str) -> Result<(), String> {
     let Some(&pid) = running_sessions().get(session_id) else { return Ok(()) };
     // 다른 프로세스를 잘못 끄지 않게 이름을 확인한다 (pid 는 다시 쓰일 수 있다)
-    let comm = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().map_err(|e| e.to_string())?;
-    let comm = String::from_utf8_lossy(&comm.stdout);
+    let comm = crate::sys::process_name(pid as u32).unwrap_or_default();
     if !comm.contains("claude") && !comm.trim().rsplit('/').next().is_some_and(|n| n.starts_with("2.")) {
         return Err(format!("claude 프로세스가 아니에요: pid {pid} ({})", comm.trim()));
     }
     info!(event = "claude_stop", session = session_id, pid);
-    unsafe { libc::kill(pid, libc::SIGTERM) };
+    let _ = crate::sys::terminate(pid as u32);
     for _ in 0..50 {
         if !alive(pid) {
             return Ok(());
@@ -127,7 +136,10 @@ fn worktree_path(id: &str) -> Option<String> {
 }
 
 pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
-    let home = orca_home().filter(|h| h.is_dir()).ok_or("Orca 데이터 폴더가 없어요 (~/Library/Application Support/orca)")?;
+    let home = orca_home().filter(|h| h.is_dir()).ok_or_else(|| match orca_home() {
+        Some(h) => format!("Orca 데이터 폴더가 없어요 ({})", h.display()),
+        None => "Orca 데이터 폴더를 찾지 못했어요".to_string(),
+    })?;
     let profile = profile_dir(&home);
     let docs = documents(&profile, &["repos", "worktreeMeta", "workspaceSession", "worktreeLineageById"])?;
 

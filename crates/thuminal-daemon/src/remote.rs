@@ -9,7 +9,7 @@
 //! - Tailscale 이 나중에 켜지거나 주소가 바뀌어도 15초마다 다시 보고 받는 주소를 맞춘다.
 
 use std::collections::{BTreeSet, HashMap};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -114,8 +114,7 @@ impl Remote {
         let Ok(bytes) = serde_json::to_vec_pretty(st) else { return };
         let tmp = self.file.with_extension("json.tmp");
         if std::fs::write(&tmp, bytes).is_ok() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            let _ = crate::sys::set_mode(&tmp, 0o600);
             let _ = std::fs::rename(&tmp, &self.file);
         }
     }
@@ -641,33 +640,7 @@ fn is_tailnet(ip: &IpAddr) -> bool {
 
 /// 이 컴퓨터의 네트워크 주소들 (루프백·링크 로컬 빼고)
 fn interface_addrs() -> Vec<IpAddr> {
-    let mut out = Vec::new();
-    // SAFETY: getifaddrs 가 돌려준 목록을 다 읽은 뒤 freeifaddrs 로 푼다
-    unsafe {
-        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
-        if libc::getifaddrs(&mut ifap) != 0 {
-            return out;
-        }
-        let mut p = ifap;
-        while !p.is_null() {
-            let ifa = &*p;
-            if !ifa.ifa_addr.is_null() {
-                match (*ifa.ifa_addr).sa_family as i32 {
-                    libc::AF_INET => {
-                        let sin = &*(ifa.ifa_addr as *const libc::sockaddr_in);
-                        out.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
-                    }
-                    libc::AF_INET6 => {
-                        let sin6 = &*(ifa.ifa_addr as *const libc::sockaddr_in6);
-                        out.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
-                    }
-                    _ => {}
-                }
-            }
-            p = ifa.ifa_next;
-        }
-        libc::freeifaddrs(ifap);
-    }
+    let mut out: Vec<IpAddr> = if_addrs::get_if_addrs().unwrap_or_default().into_iter().map(|i| i.ip()).collect();
     out.retain(|ip| !ip.is_loopback() && !matches!(ip, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80));
     out.sort();
     out.dedup();

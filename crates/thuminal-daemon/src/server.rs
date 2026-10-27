@@ -8,7 +8,6 @@ use thuminal_protocol::{
     ServerMessage,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Notify, mpsc};
 use tracing::{debug, info, warn};
 
@@ -46,13 +45,13 @@ impl Server {
         Arc::new(Self { manager, workspace, layouts, teams, remote, stop_mode: std::sync::Mutex::new(StopMode::Keep), shutdown: Arc::new(Notify::new()), started_at: now_ms(), next_conn: AtomicU64::new(1) })
     }
 
-    pub async fn serve(self: Arc<Self>, listener: UnixListener) {
+    pub async fn serve(self: Arc<Self>, mut listener: thuminal_ipc::Listener) {
         loop {
             tokio::select! {
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, _)) => {
+                    Ok((rd, wr)) => {
                         let me = self.clone();
-                        tokio::spawn(async move { me.connection(stream).await });
+                        tokio::spawn(async move { me.serve_stream(rd, wr, None).await });
                     }
                     Err(e) => warn!(event = "accept_failed", error = %e),
                 },
@@ -61,12 +60,7 @@ impl Server {
         }
     }
 
-    async fn connection(self: Arc<Self>, stream: UnixStream) {
-        let (rd, wr) = stream.into_split();
-        self.serve_stream(rd, wr, None).await
-    }
-
-    /// 프레임 스트림 하나를 연결로 받는다. 유닉스 소켓 말고도 원격 접속(웹소켓을 이은 파이프)이 쓴다.
+    /// 프레임 스트림 하나를 연결로 받는다. 로컬 연결(유닉스 소켓 · named pipe) 말고도 원격 접속(웹소켓을 이은 파이프)이 쓴다.
     /// `remote` 는 원격 연결의 기기 id 다. 원격 연결은 원격 접속 설정을 바꾸지 못한다
     pub async fn serve_stream<R, W>(self: Arc<Self>, mut rd: R, mut wr: W, remote: Option<String>)
     where
@@ -692,7 +686,7 @@ fn resolve_path(path: &str, bases: &[String]) -> Option<(std::path::PathBuf, boo
     if path.is_empty() || path.len() > 4096 {
         return None;
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = thuminal_protocol::paths::user_home();
     let expanded = match (path.strip_prefix('~'), &home) {
         (Some(""), Some(h)) => h.clone(),
         (Some(rest), Some(h)) if rest.starts_with('/') => h.join(rest.trim_start_matches('/')),

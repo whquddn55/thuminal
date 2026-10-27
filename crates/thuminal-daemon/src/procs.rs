@@ -3,7 +3,8 @@
 //! - 탭을 닫기 전에 claude 같은 에이전트가 떠 있는지 본다 (에이전트 훅이 알려 오지 않은 경우: 플러그인 없이 띄운 claude,
 //!   훅이 아직 오지 않은 claude).
 //! - 리소스 관리자: 세션마다 셸과 자손의 CPU · 메모리, 이 컴퓨터에서 LISTEN 중인 TCP 포트와 그 포트를 붙인 곳.
-//!   Orca 처럼 `ps` 한 번으로 부모 표를 만들고, 포트는 `lsof` 로 읽는다. 포트는 연 프로세스가 세션 셸의 자손이면
+//!   macOS 는 Orca 처럼 `ps` 한 번으로 부모 표를 만들고, 포트는 `lsof` 로 읽는다. 그 밖(Linux · Windows)에서는
+//!   `sysinfo` 로 프로세스 표를, `listeners` 로 포트를 읽는다 (Linux 에는 `lsof` 가 없는 일이 많고 Windows 에는 둘 다 없다). 포트는 연 프로세스가 세션 셸의 자손이면
 //!   그 세션에, 아니면 작업 폴더 · 명령줄에 워크트리 경로가 든 워크트리(가장 긴 경로)에, 둘 다 아니면 밖(external)에 붙인다.
 
 use std::collections::{HashMap, HashSet};
@@ -18,11 +19,11 @@ use thuminal_protocol::{
 
 /// `roots`(세션, 셸 pid) 의 자손 프로세스 중 이름이 `names` 에 든 것. 세션마다 처음 찾은 하나만 낸다
 pub fn running_agents(roots: &[(SessionId, u32)], names: &[String]) -> Vec<RunningAgent> {
-    let Some(text) = run(&mut ps_command(), CMD_TIMEOUT) else { return Vec::new() };
-    find(&parse_ps(&text), roots, names)
+    find(&read_procs(), roots, names)
 }
 
 /// 바깥 명령 하나의 시간 제한 (Orca 와 같다)
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const CMD_TIMEOUT: Duration = Duration::from_secs(4);
 /// 포트 읽기가 시간을 넘기면 이만큼 쉬었다가 다시 읽는다
 const PORTS_BACKOFF: Duration = Duration::from_secs(15);
@@ -31,6 +32,17 @@ const SNAPSHOT_REUSE: Duration = Duration::from_millis(900);
 /// 명령줄을 이 글자 수까지 남긴다
 const COMMAND_MAX: usize = 400;
 
+#[cfg(target_os = "macos")]
+fn read_procs() -> Vec<Proc> {
+    run(&mut ps_command(), CMD_TIMEOUT).map(|t| parse_ps(&t)).unwrap_or_default()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_procs() -> Vec<Proc> {
+    native::procs()
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn ps_command() -> Command {
     let mut c = Command::new("ps");
     // LC_ALL=C: %CPU 를 소수점(.)으로 찍게 한다
@@ -39,6 +51,7 @@ fn ps_command() -> Command {
 }
 
 /// 명령을 돌려 표준 출력을 받는다. 시간을 넘기면 죽이고 None
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn run(cmd: &mut Command, timeout: Duration) -> Option<String> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let mut out = child.stdout.take()?;
@@ -72,6 +85,7 @@ struct Proc {
 }
 
 /// `ps -o pid=,ppid=,pcpu=,rss=,args=` 출력
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_ps(text: &str) -> Vec<Proc> {
     text.lines()
         .filter_map(|l| {
@@ -93,7 +107,8 @@ fn parse_ps(text: &str) -> Vec<Proc> {
 /// 실행 파일 이름. node · bun · deno 로 도는 스크립트면 스크립트 이름도 본다 (예전 npm 판 claude 는 `node …/bin/claude`)
 fn program_names(args: &str) -> Vec<String> {
     let base = |t: &str| {
-        let b = t.rsplit('/').next().unwrap_or(t);
+        let b = t.rsplit(['/', '\\']).next().unwrap_or(t);
+        let b = b.strip_suffix(".exe").unwrap_or(b);
         b.trim_end_matches(".js").trim_end_matches(".mjs").trim_end_matches(".cjs").trim_start_matches('-').to_string()
     };
     let mut tokens = args.split_whitespace();
@@ -148,6 +163,7 @@ struct RawPort {
 
 /// `lsof -nP -iTCP -sTCP:LISTEN -F pcn` 출력. `p` 로 프로세스가 바뀌고 `n` 마다 소켓 하나다.
 /// 같은 프로세스가 같은 포트를 IPv4 · IPv6 로 두 번 열면 하나로 친다
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_lsof_listen(text: &str) -> Vec<RawPort> {
     let mut out: Vec<RawPort> = Vec::new();
     let mut seen = HashSet::new();
@@ -179,6 +195,7 @@ fn parse_lsof_listen(text: &str) -> Vec<RawPort> {
 }
 
 /// `lsof -a -p … -d cwd -Fn` 출력 → pid 마다 작업 폴더
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_lsof_cwd(text: &str) -> HashMap<u32, String> {
     let mut out = HashMap::new();
     let mut pid = 0u32;
@@ -221,36 +238,119 @@ pub fn snapshot(fresh: bool) -> Snapshot {
     {
         return snap.clone();
     }
-    let procs = run(&mut ps_command(), CMD_TIMEOUT).map(|t| parse_ps(&t)).unwrap_or_default();
+    let procs = read_procs();
     let (mut ports, mut cwds, mut ports_error) = (Vec::new(), HashMap::new(), None);
     if cache.ports_failed_at.is_some_and(|t| t.elapsed() < PORTS_BACKOFF) {
         ports_error = Some("포트 읽기가 시간을 넘겨 잠시 쉬어요".to_string());
     } else {
-        let mut lsof = Command::new("lsof");
-        lsof.env("LC_ALL", "C").args(["-b", "-w", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]);
-        match run(&mut lsof, CMD_TIMEOUT) {
-            Some(text) => {
+        match read_ports() {
+            Ok((p, c)) => {
                 cache.ports_failed_at = None;
-                ports = parse_lsof_listen(&text);
-                let mut pids: Vec<u32> = ports.iter().map(|p| p.pid).collect();
-                pids.sort_unstable();
-                pids.dedup();
-                if !pids.is_empty() {
-                    let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-                    let mut c = Command::new("lsof");
-                    c.env("LC_ALL", "C").args(["-b", "-w", "-a", "-p", &list, "-d", "cwd", "-Fn"]);
-                    cwds = run(&mut c, CMD_TIMEOUT).map(|t| parse_lsof_cwd(&t)).unwrap_or_default();
-                }
+                (ports, cwds) = (p, c);
             }
-            None => {
+            Err(e) => {
                 cache.ports_failed_at = Some(Instant::now());
-                ports_error = Some("포트를 읽지 못했어요. lsof 가 없거나 시간을 넘겼어요".to_string());
+                ports_error = Some(e);
             }
         }
     }
     let snap = Snapshot { procs, ports, cwds, ports_error };
     cache.last = Some((Instant::now(), snap.clone()));
     snap
+}
+
+/// LISTEN 중인 TCP 포트와 그 프로세스들의 작업 폴더
+#[cfg(target_os = "macos")]
+fn read_ports() -> Result<(Vec<RawPort>, HashMap<u32, String>), String> {
+    let mut lsof = Command::new("lsof");
+    lsof.env("LC_ALL", "C").args(["-b", "-w", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]);
+    let text = run(&mut lsof, CMD_TIMEOUT).ok_or("포트를 읽지 못했어요. lsof 가 없거나 시간을 넘겼어요")?;
+    let ports = parse_lsof_listen(&text);
+    let mut pids: Vec<u32> = ports.iter().map(|p| p.pid).collect();
+    pids.sort_unstable();
+    pids.dedup();
+    let mut cwds = HashMap::new();
+    if !pids.is_empty() {
+        let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let mut c = Command::new("lsof");
+        c.env("LC_ALL", "C").args(["-b", "-w", "-a", "-p", &list, "-d", "cwd", "-Fn"]);
+        cwds = run(&mut c, CMD_TIMEOUT).map(|t| parse_lsof_cwd(&t)).unwrap_or_default();
+    }
+    Ok((ports, cwds))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_ports() -> Result<(Vec<RawPort>, HashMap<u32, String>), String> {
+    native::ports()
+}
+
+/// macOS 밖에서 프로세스 표 · 포트를 읽는다
+#[cfg(not(target_os = "macos"))]
+mod native {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Mutex;
+
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    use super::{Proc, RawPort};
+
+    /// CPU 몫은 앞서 읽은 때와의 차이로 세므로 표를 들고 있는다 (처음 읽은 것은 0 이다)
+    static SYSTEM: Mutex<Option<System>> = Mutex::new(None);
+
+    fn with_system<T>(f: impl FnOnce(&mut System) -> T) -> T {
+        let mut guard = SYSTEM.lock().unwrap();
+        f(guard.get_or_insert_with(System::new))
+    }
+
+    pub fn procs() -> Vec<Proc> {
+        with_system(|sys| {
+            let kind = ProcessRefreshKind::nothing().with_cpu().with_memory().with_cmd(UpdateKind::OnlyIfNotSet);
+            sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+            sys.processes()
+                .values()
+                .map(|p| {
+                    let args = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
+                    Proc {
+                        pid: p.pid().as_u32(),
+                        ppid: p.parent().map_or(0, Pid::as_u32),
+                        cpu: p.cpu_usage(),
+                        rss: p.memory() / 1024,
+                        args: if args.is_empty() { p.name().to_string_lossy().into_owned() } else { args },
+                    }
+                })
+                .collect()
+        })
+    }
+
+    pub fn ports() -> Result<(Vec<RawPort>, HashMap<u32, String>), String> {
+        let all = listeners::get_all().map_err(|e| format!("포트를 읽지 못했어요: {e}"))?;
+        let mut seen = HashSet::new();
+        let mut ports: Vec<RawPort> = all
+            .into_iter()
+            .filter(|l| l.protocol == listeners::Protocol::TCP && l.state == listeners::SocketState::Listen)
+            .filter(|l| seen.insert((l.process.pid, l.socket.port())))
+            .map(|l| {
+                let ip = l.socket.ip();
+                let address = if ip.is_unspecified() {
+                    "*".to_string()
+                } else if ip.is_ipv6() {
+                    format!("[{ip}]")
+                } else {
+                    ip.to_string()
+                };
+                RawPort { pid: l.process.pid, process: l.process.name, address, port: l.socket.port() }
+            })
+            .collect();
+        ports.sort_by_key(|p| (p.pid, p.port));
+        let pids: Vec<Pid> = ports.iter().map(|p| Pid::from_u32(p.pid)).collect::<HashSet<_>>().into_iter().collect();
+        let cwds = with_system(|sys| {
+            sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), false, ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always));
+            pids.iter()
+                .filter_map(|pid| Some((pid.as_u32(), sys.process(*pid)?.cwd()?.to_string_lossy().into_owned())))
+                .collect()
+        });
+        Ok((ports, cwds))
+    }
 }
 
 /// 리소스를 셀 세션: 번호, 셸 pid, `worktree` 꼬리표
@@ -423,14 +523,10 @@ pub fn stop_port_process(pid: u32, port: u16, roots: &[SessionRoot], worktrees: 
     if program_names(&p.command).iter().any(|n| n == "thuminald") || p.process == "thuminald" {
         return Err("thuminal 데몬은 멈출 수 없어요".into());
     }
-    let Ok(raw) = i32::try_from(pid) else { return Err("pid 가 올바르지 않아요".into()) };
-    if raw <= 1 {
+    if pid <= 1 {
         return Err("pid 가 올바르지 않아요".into());
     }
-    if unsafe { libc::kill(raw, libc::SIGTERM) } != 0 {
-        return Err(format!("pid {pid} 에 신호를 보내지 못했어요: {}", std::io::Error::last_os_error()));
-    }
-    Ok(())
+    crate::sys::terminate(pid).map_err(|e| format!("pid {pid} 를 멈추지 못했어요: {e}"))
 }
 
 #[cfg(test)]

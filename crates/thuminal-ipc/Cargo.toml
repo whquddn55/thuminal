@@ -1,0 +1,13 @@
+[package]
+name = "thuminal-ipc"
+description = "데몬과 클라이언트 사이 로컬 연결. 유닉스는 유닉스 소켓, Windows 는 named pipe 다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

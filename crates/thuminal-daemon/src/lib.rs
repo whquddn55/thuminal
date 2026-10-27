@@ -17,6 +17,7 @@ pub mod repo_icon;
 pub mod server;
 pub mod session;
 pub mod shell;
+pub mod sys;
 pub mod teams;
 
 use std::sync::Arc;
@@ -25,7 +26,6 @@ use thuminal_engine::EngineFactory;
 use thuminal_protocol::paths::Paths;
 use thuminal_pty::PtySystem;
 use thuminal_workspace::{Vcs, Workspace};
-use tokio::net::UnixListener;
 use tracing::info;
 
 pub use server::read_frame;
@@ -52,7 +52,7 @@ pub enum DaemonError {
 /// 데몬 하나가 뜬 상태. `run` 이 끝나면 소켓을 지운다.
 pub struct Daemon {
     pub server: Arc<server::Server>,
-    listener: UnixListener,
+    listener: thuminal_ipc::Listener,
     paths: Paths,
     _lock: lock::InstanceLock,
 }
@@ -65,15 +65,13 @@ impl Daemon {
         set_private(&paths.home);
         let lock = lock::InstanceLock::acquire(&paths.lock())?;
         let socket = paths.socket();
-        // 잠금을 잡았으니 남아 있는 소켓은 죽은 데몬이 남긴 것이다
-        let _ = std::fs::remove_file(&socket);
-        let listener = UnixListener::bind(&socket)?;
+        let listener = thuminal_ipc::Listener::bind(&socket)?;
         let shell = shell::ShellIntegration::new(&paths.home, config.claude_plugin);
         shell.install();
         let manager = Arc::new(manager::Manager::new(config.engine, config.pty, socket.clone(), shell, &paths.home));
         let workspace = Arc::new(Workspace::open(config.vcs, &paths.home));
         let layouts = Arc::new(layout::Layouts::load(&paths.home));
-        info!(event = "daemon_started", pid = std::process::id(), socket = %socket.display(), engine = manager.engine_name());
+        info!(event = "daemon_started", pid = std::process::id(), socket = %thuminal_ipc::display(&socket), engine = manager.engine_name());
         let teams = teams::Teams::new(manager.clone());
         let remote = remote::Remote::load(&paths.home, config.web_root);
         Ok(Self { server: server::Server::new(manager, workspace, layouts, teams, remote), listener, paths, _lock: lock })
@@ -107,7 +105,7 @@ impl Daemon {
                 server.layouts.save();
             }
         }
-        let _ = std::fs::remove_file(paths.socket());
+        thuminal_ipc::cleanup(&paths.socket());
         info!(event = "daemon_stopped", pid = std::process::id(), ?mode);
     }
 }
@@ -165,6 +163,5 @@ async fn save_all(manager: &manager::Manager, persist: &persist::Persist) {
 }
 
 fn set_private(p: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700));
+    let _ = sys::set_mode(p, 0o700);
 }

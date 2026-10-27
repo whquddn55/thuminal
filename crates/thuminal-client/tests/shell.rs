@@ -54,7 +54,8 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
     write(&home.join(".zprofile"), "export MARK_PROFILE=1\nexport PATH=\"/opt/elsewhere:$PATH\"\n");
     write(&home.join(".zshrc"), "export MARK_RC=1\nalias claude='claude --user-alias'\nPROMPT='READY> '\n");
     write(&home.join(".zlogin"), "export MARK_LOGIN=1\n");
-    write(&home.join(".bash_profile"), "export MARK_PROFILE=1\n[ -f ~/.bashrc ] && . ~/.bashrc\n");
+    // Debian 의 /etc/profile 은 PATH 를 새로 정하므로, 실제 사용자처럼 프로필에서 PATH 를 더한다
+    write(&home.join(".bash_profile"), &format!("export MARK_PROFILE=1\nexport PATH=\"{}:$PATH\"\n[ -f ~/.bashrc ] && . ~/.bashrc\n", bin.display()));
     write(&home.join(".bashrc"), "export MARK_RC=1\nalias claude='claude --user-alias'\nPS1='READY> '\n");
 
     unsafe {

@@ -68,6 +68,7 @@ import { groupKey, NEW_GROUP_NAME, normalizeGroups } from "./groups";
 import { paneOfSession, sessionsOf } from "./layout";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
+import { IS_MAC } from "./platform";
 import { RepoMark } from "./repo-icon";
 import { SessionPorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
@@ -198,8 +199,8 @@ export function Sidebar() {
 
   return (
     <aside className="relative flex min-h-0 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }}>
-      {/* 창 단추(신호등) 자리를 비운 머리. 끌어서 창을 옮긴다 */}
-      <div className="flex h-10 shrink-0 items-center justify-end gap-0.5 pr-2 pl-20" data-tauri-drag-region>
+      {/* 창 단추(신호등) 자리를 비운 머리. 끌어서 창을 옮긴다. macOS 밖은 OS 제목 표시줄이 따로 있어 비우지 않는다 */}
+      <div className={cn("flex h-10 shrink-0 items-center justify-end gap-0.5 pr-2", IS_MAC ? "pl-20" : "pl-2")} data-tauri-drag-region>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" className="size-7 text-muted-foreground" onClick={() => model.setDialog({ kind: "jump" })}>

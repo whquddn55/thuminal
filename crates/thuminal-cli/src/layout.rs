@@ -413,8 +413,8 @@ fn pane_title(p: &Pane, sessions: &[SessionInfo]) -> String {
 }
 
 fn tilde(path: &str) -> String {
-    match std::env::var("HOME") {
-        Ok(h) if !h.is_empty() && path.starts_with(&h) => format!("~{}", &path[h.len()..]),
+    match thuminal_protocol::paths::user_home().map(|h| h.to_string_lossy().into_owned()) {
+        Some(h) if !h.is_empty() && path.starts_with(&h) => format!("~{}", &path[h.len()..]),
         _ => path.to_string(),
     }
 }

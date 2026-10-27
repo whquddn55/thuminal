@@ -22,6 +22,7 @@ thuminal-client = { path = "crates/thuminal-client" }
 thuminald = { path = "crates/thuminald" }
 thuminal-workspace = { path = "crates/thuminal-workspace" }
 thuminal-vcs-git = { path = "crates/thuminal-vcs-git" }
+thuminal-ipc = { path = "crates/thuminal-ipc" }
 # snapshot API 는 crates.io 0.2.2 에 없어 커밋을 고정해 쓴다 (2026-10-19)
 libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs", rev = "0ef80413de1326685743378efbfa06d849e041a7" }
 serde = { version = "1", features = ["derive"] }

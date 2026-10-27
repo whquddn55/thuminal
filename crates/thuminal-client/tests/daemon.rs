@@ -132,10 +132,10 @@ async fn rejects_other_protocol_major() {
     use thuminal_protocol::{ClientMessage, Frame, Request, ResponseResult, ServerMessage};
     use tokio::io::AsyncWriteExt;
     let (_dir, paths) = start().await;
-    let mut stream = tokio::net::UnixStream::connect(paths.socket()).await.unwrap();
+    let (mut rd, mut wr) = thuminal_ipc::connect(&paths.socket()).await.unwrap();
     let hello = ClientMessage::Request { id: 1, request: Request::Hello { protocol_major: 99, protocol_minor: 0, client: "old".into() } };
-    stream.write_all(&Frame::json(&hello).encode()).await.unwrap();
-    let frame = thuminal_daemon::read_frame(&mut stream).await.unwrap().unwrap();
+    wr.write_all(&Frame::json(&hello).encode()).await.unwrap();
+    let frame = thuminal_daemon::read_frame(&mut rd).await.unwrap().unwrap();
     let Frame::Json(bytes) = frame else { panic!("JSON 응답이 아니다") };
     let msg: ServerMessage = serde_json::from_slice(&bytes).unwrap();
     assert!(matches!(msg, ServerMessage::Response { result: ResponseResult::Err(_), .. }), "{msg:?}");
