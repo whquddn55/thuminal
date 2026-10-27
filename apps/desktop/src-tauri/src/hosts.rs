@@ -35,17 +35,20 @@ pub fn load(file: &Path) -> Vec<HostRecord> {
     std::fs::read(file).ok().and_then(|b| serde_json::from_slice::<Stored>(&b).ok()).map(|s| s.hosts).unwrap_or_default()
 }
 
-/// 토큰이 들어 있으므로 처음부터 0600 으로 만든 임시 파일에 쓰고 바꿔 끼운다
+/// 토큰이 들어 있으므로 처음부터 0600 으로 만든 임시 파일에 쓰고 바꿔 끼운다 (Windows 는 사용자 폴더 권한을 물려받는다)
 pub fn save(file: &Path, hosts: &[HostRecord]) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let bytes = serde_json::to_vec_pretty(&Stored { hosts: hosts.to_vec() }).map_err(std::io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     let _ = std::fs::remove_file(&tmp);
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let mut f = opts.open(&tmp)?;
     f.write_all(&bytes)?;
     f.sync_all()?;
     std::fs::rename(&tmp, file)
@@ -108,14 +111,14 @@ mod tests {
 
     #[test]
     fn saves_with_owner_only_permissions() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let f = file(dir.path());
         assert!(load(&f).is_empty());
         let r = HostRecord { id: new_id(), name: "작업 맥".into(), base: "http://100.64.0.1:6780".into(), token: "abc".into(), added_at: 1 };
         save(&f, std::slice::from_ref(&r)).unwrap();
         save(&f, std::slice::from_ref(&r)).unwrap();
-        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&f).unwrap().permissions()) & 0o777, 0o600);
         let back = load(&f);
         assert_eq!(back.len(), 1);
         assert_eq!((back[0].name.as_str(), back[0].token.as_str()), ("작업 맥", "abc"));

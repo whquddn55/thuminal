@@ -51,7 +51,8 @@ async fn zsh_and_bash_read_user_config_and_wrap_claude() {
     std::process::Command::new("chmod").arg("+x").arg(bin.join("claude")).status().unwrap();
 
     // 사용자 설정: 단계마다 표시를 남기고, claude 별칭과 PATH 바꾸기를 둔다
-    write(&home.join(".zshenv"), "export MARK_ENV=1\n");
+    // Ubuntu 의 /etc/zsh/zshrc 는 compinit 을 돌리고, 폴더 권한이 느슨한 기계(CI)에서는 묻는 글을 띄워 멈춘다
+    write(&home.join(".zshenv"), "export MARK_ENV=1\nskip_global_compinit=1\n");
     write(&home.join(".zprofile"), "export MARK_PROFILE=1\nexport PATH=\"/opt/elsewhere:$PATH\"\n");
     write(&home.join(".zshrc"), "export MARK_RC=1\nalias claude='claude --user-alias'\nPROMPT='READY> '\n");
     write(&home.join(".zlogin"), "export MARK_LOGIN=1\n");
