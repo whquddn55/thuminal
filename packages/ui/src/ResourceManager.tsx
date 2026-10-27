@@ -191,7 +191,7 @@ function ResourceManager({ onClose }: { onClose: () => void }) {
   }, [report, repos, worktrees, sessions, sort]);
 
   if (supported === false) {
-    return <p className="p-4 text-xs text-muted-foreground">이 데몬은 리소스 읽기를 모른다. 데몬을 다시 띄우면 볼 수 있다.</p>;
+    return <p className="p-4 text-xs text-muted-foreground">이 데몬은 리소스 읽기를 지원하지 않아요. 데몬을 다시 시작하면 볼 수 있어요.</p>;
   }
   if (!report) return <p className="p-4 text-xs text-muted-foreground">{error ?? "읽는 중…"}</p>;
 
@@ -233,7 +233,7 @@ function ResourceManager({ onClose }: { onClose: () => void }) {
           <span className="w-6" />
         </div>
         <div className="px-1.5 py-1">
-          {tree.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">떠 있는 터미널 세션이 없다</p>}
+          {tree.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">실행 중인 터미널 세션이 없어요</p>}
           {tree.map((r) => (
             <div key={r.key} className="pb-1">
               <Row depth={0} name={r.name} title={r.title} cpu={r.cpu} rss={r.rss} className="font-semibold" />
@@ -266,9 +266,9 @@ function ResourceManager({ onClose }: { onClose: () => void }) {
       {confirm && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70 p-6" onClick={() => setConfirm(null)}>
           <div className="w-80 rounded-lg border bg-popover p-4 shadow-lg" role="alertdialog" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm font-semibold">‘{confirm.name}’ 세션을 끝낼까?</p>
+            <p className="text-sm font-semibold">‘{confirm.name}’ 세션을 끝낼까요?</p>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {confirm.agent ? `${confirm.agent}가 떠 있다. ` : ""}이 터미널을 강제로 끝낸다. 칸에서 저장하지 않은 작업은 사라진다.
+              {confirm.agent ? `${confirm.agent}가 실행 중이에요. ` : ""}이 터미널을 강제로 끝내요. 칸에서 저장하지 않은 작업은 사라져요.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" size="sm" autoFocus onClick={() => setConfirm(null)}>
@@ -320,7 +320,7 @@ function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNod
   const ports = n.sp.processes.flatMap((p) => p.ports);
   return (
     <>
-      <div className="group flex h-6 cursor-pointer items-center gap-1 rounded px-1.5 text-xs hover:bg-accent" onClick={onReveal} title={`s${n.sp.session} · 셸 pid ${n.sp.pid}\n누르면 그 칸으로 간다`}>
+      <div className="group flex h-6 cursor-pointer items-center gap-1 rounded px-1.5 text-xs hover:bg-accent" onClick={onReveal} title={`s${n.sp.session} · 셸 pid ${n.sp.pid}\n누르면 그 칸으로 가요`}>
         <span className="flex min-w-0 flex-1 items-center gap-1" style={{ paddingLeft: 18 }}>
           <button
             className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10"
@@ -375,7 +375,7 @@ function SessionRow({ n, expanded, onToggle, onReveal, onKill }: { n: SessionNod
               <span className="w-6 shrink-0" />
             </div>
           ))}
-          {n.sp.truncated && <div className="px-1.5 pl-12 text-[11px] text-muted-foreground/70">… 프로세스가 많아 앞부분만 보인다</div>}
+          {n.sp.truncated && <div className="px-1.5 pl-12 text-[11px] text-muted-foreground/70">… 프로세스가 많아 앞부분만 보여요</div>}
         </div>
       )}
     </>
@@ -406,7 +406,7 @@ function PortsSection({ ports, error, truncated }: { ports: ListenPort[]; error:
         </span>
       </div>
       {error && <p className="px-1.5 py-1 text-xs text-muted-foreground">{error}</p>}
-      {!error && mine.length === 0 && <p className="px-1.5 py-1 text-xs text-muted-foreground">워크트리 포트가 없다</p>}
+      {!error && mine.length === 0 && <p className="px-1.5 py-1 text-xs text-muted-foreground">워크트리 포트가 없어요</p>}
       {[...groups.entries()].map(([path, list]) => (
         <div key={path} className="pb-1">
           <div className="truncate px-1.5 pt-1 text-2xs text-muted-foreground" title={path || undefined}>
@@ -425,7 +425,7 @@ function PortsSection({ ports, error, truncated }: { ports: ListenPort[]; error:
           {showExternal && external.map((p) => <PortRow key={`${p.pid}:${p.port}`} p={p} />)}
         </div>
       )}
-      {truncated && <p className="px-1.5 pt-1 text-2xs text-muted-foreground/70">포트가 많아 앞부분만 보인다</p>}
+      {truncated && <p className="px-1.5 pt-1 text-2xs text-muted-foreground/70">포트가 많아 앞부분만 보여요</p>}
     </div>
   );
 }

@@ -71,11 +71,11 @@ impl AppState {
     async fn client(&self, host: Option<&str>) -> CmdResult<Arc<Client>> {
         let Some(id) = host else { return self.local().await };
         let remotes = self.remotes.lock().unwrap();
-        let r = remotes.get(id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터다: {id}"))?;
+        let r = remotes.get(id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?;
         r.link.client().ok_or_else(|| {
             let s = r.link.current();
             let why = s.error.map(|e| format!(" ({e})")).unwrap_or_default();
-            format!("원격 컴퓨터 {} 에 붙어 있지 않다{why}", r.record.name)
+            format!("원격 컴퓨터에 연결돼 있지 않아요: {}{why}", r.record.name)
         })
     }
 
@@ -127,7 +127,7 @@ impl AppState {
     fn save_hosts(&self) -> CmdResult<()> {
         let mut records: Vec<_> = self.remotes.lock().unwrap().values().map(|r| r.record.clone()).collect();
         records.sort_by_key(|r| r.added_at);
-        hosts::save(&hosts::file(&Paths::default_home().home), &records).map_err(|e| format!("hosts.json 을 쓰지 못했다: {e}"))
+        hosts::save(&hosts::file(&Paths::default_home().home), &records).map_err(|e| format!("hosts.json 을 쓰지 못했어요: {e}"))
     }
 }
 
@@ -262,7 +262,7 @@ async fn detach(state: State<'_, AppState>, host: Option<String>, id: SessionId)
 /// 앱 화면 전체 배율 (⌘+ ⌘- 를 터미널 밖에서 눌렀을 때)
 #[tauri::command]
 fn set_ui_zoom(app: tauri::AppHandle, scale: f64) -> CmdResult<()> {
-    let w = app.get_webview("main").ok_or("메인 웹뷰가 없다")?;
+    let w = app.get_webview("main").ok_or("메인 웹뷰를 찾지 못했어요")?;
     w.set_zoom(scale.clamp(0.3, 3.0)).map_err(|e| e.to_string())
 }
 
@@ -362,7 +362,7 @@ async fn browser_proxy_url(state: State<'_, AppState>, host: Option<String>, url
     let Some(id) = host else { return Ok(None) };
     let (link, record) = {
         let remotes = state.remotes.lock().unwrap();
-        let r = remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터다: {id}"))?;
+        let r = remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?;
         (r.link.clone(), r.record.clone())
     };
     if link.current().protocol.is_none_or(|(_, minor)| minor < 6) {
@@ -398,7 +398,7 @@ async fn subscribe_events(state: State<'_, AppState>, host: Option<String>, chan
     };
     let (link, generation) = {
         let remotes = state.remotes.lock().unwrap();
-        let r = remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터다: {id}"))?;
+        let r = remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?;
         (r.link.clone(), r.link.current().generation)
     };
     let mut events = state.events.lock().await;
@@ -457,7 +457,7 @@ async fn hosts_add(app: AppHandle, state: State<'_, AppState>, url: String, name
     drop(events);
     state.save_hosts()?;
     state.notify_hosts();
-    state.host_views().into_iter().find(|h| h.id == id).ok_or_else(|| "등록한 호스트를 찾지 못했다".into())
+    state.host_views().into_iter().find(|h| h.id == id).ok_or_else(|| "등록한 호스트를 찾지 못했어요".into())
 }
 
 /// 원격 호스트를 지운다. 원격 컴퓨터에 남은 기기 토큰은 그 컴퓨터의 설정 → 원격 접속에서 지운다
@@ -465,7 +465,7 @@ async fn hosts_add(app: AppHandle, state: State<'_, AppState>, url: String, name
 async fn hosts_remove(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let removed = state.remotes.lock().unwrap().remove(&id);
     if removed.is_none() {
-        return Err(format!("등록하지 않은 원격 컴퓨터다: {id}"));
+        return Err(format!("등록하지 않은 원격 컴퓨터예요: {id}"));
     }
     let key = Some(id);
     state.attachments.lock().await.retain(|(h, _), t| {
@@ -485,7 +485,7 @@ async fn hosts_remove(state: State<'_, AppState>, id: String) -> CmdResult<()> {
 #[tauri::command]
 fn hosts_reconnect(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let remotes = state.remotes.lock().unwrap();
-    remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터다: {id}"))?.link.reconnect_now();
+    remotes.get(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?.link.reconnect_now();
     Ok(())
 }
 
@@ -538,10 +538,10 @@ async fn font_faces(family: String) -> CmdResult<Vec<FontFaceInfo>> {
 async fn font_face_data(id: usize) -> CmdResult<tauri::ipc::Response> {
     tauri::async_runtime::spawn_blocking(move || {
         let f = fonts().lock().unwrap();
-        let face = *f.faces.get(id).ok_or("글꼴 번호가 없다")?;
+        let face = *f.faces.get(id).ok_or("글꼴 번호를 찾지 못했어요")?;
         f.db.with_face_data(face, |data, _| data.to_vec())
             .map(tauri::ipc::Response::new)
-            .ok_or_else(|| "글꼴 파일을 읽지 못했다".to_string())
+            .ok_or_else(|| "글꼴 파일을 읽지 못했어요".to_string())
     })
     .await
     .map_err(|e| e.to_string())?

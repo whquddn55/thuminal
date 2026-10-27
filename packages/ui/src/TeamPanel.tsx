@@ -135,7 +135,7 @@ function MateDetail({ ws, leader, paneId, mate, focused }: { ws: WorkspaceId; le
         </button>
         <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
         <span className="min-w-0 truncate font-medium">{mateName(mate)}</span>
-        {mate.state.state === "exited" && <span className="text-muted-foreground">끝났다{mate.state.code !== null && ` (코드 ${mate.state.code})`}</span>}
+        {mate.state.state === "exited" && <span className="text-muted-foreground">끝남{mate.state.code !== null && ` (코드 ${mate.state.code})`}</span>}
       </PopupHead>
       <div className="flex min-h-0 flex-1">
         {/* 글자는 그림판이 그리므로 색 띠는 터미널 자리 밖에 둔다 */}

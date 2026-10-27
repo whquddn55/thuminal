@@ -14,12 +14,12 @@ use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VcsError {
-    #[error("git 저장소가 아니다: {0}")]
+    #[error("git 저장소가 아니에요: {0}")]
     NotARepo(String),
     #[error("{0}")]
     Command(String),
     /// 합치지 않은 커밋이 있어 `force` 없이는 브랜치를 지우지 않았다
-    #[error("브랜치 {0} 에 합치지 않은 커밋이 있다")]
+    #[error("브랜치에 합치지 않은 커밋이 있어요: {0}")]
     NotMerged(String),
 }
 
@@ -67,15 +67,15 @@ pub struct VcsWorktree {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceError {
-    #[error("등록하지 않은 저장소: {0}")]
+    #[error("등록하지 않은 저장소예요: {0}")]
     UnknownRepo(String),
     #[error(transparent)]
     Vcs(#[from] VcsError),
-    #[error("목록 파일을 쓰지 못했다: {0}")]
+    #[error("목록 파일을 쓰지 못했어요: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(String),
-    #[error("파일이 그사이 바뀌었다: {0}")]
+    #[error("파일이 그사이 바뀌었어요: {0}")]
     Conflict(String),
 }
 
@@ -275,10 +275,10 @@ impl Workspace {
         let mut seen = std::collections::HashSet::new();
         for g in &groups {
             if g.name.trim().is_empty() {
-                return Err(WorkspaceError::Invalid("워크스페이스 이름이 비었다".into()));
+                return Err(WorkspaceError::Invalid("워크스페이스 이름이 비어 있어요".into()));
             }
             if !g.id.is_empty() && !seen.insert(g.id.as_str()) {
-                return Err(WorkspaceError::Invalid(format!("워크스페이스 id 가 겹친다: {}", g.id)));
+                return Err(WorkspaceError::Invalid(format!("워크스페이스 id 가 겹쳐요: {}", g.id)));
             }
         }
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
@@ -339,13 +339,13 @@ impl Workspace {
     /// 저장소 옆 폴더 `<저장소>-thm-wt-<브랜치>` 에 새 워크트리를 만든다
     pub fn create_worktree(&self, repo: &str, branch: &str, base: Option<&str>, name: Option<&str>, parent: Option<&str>) -> Result<WorktreeInfo, WorkspaceError> {
         if branch.trim().is_empty() {
-            return Err(WorkspaceError::Invalid("브랜치 이름이 비었다".into()));
+            return Err(WorkspaceError::Invalid("브랜치 이름이 비어 있어요".into()));
         }
         let root = self.repo_path(repo)?;
         let folder = format!("{}-thm-wt-{}", root.file_name().unwrap_or_default().to_string_lossy(), branch_slug(branch));
         let path = root.parent().unwrap_or(&root).join(folder);
         if path.exists() {
-            return Err(WorkspaceError::Invalid(format!("이미 있는 폴더: {}", path.display())));
+            return Err(WorkspaceError::Invalid(format!("이미 있는 폴더예요: {}", path.display())));
         }
         // 부모는 만들기 전에 확인한다 (등록한 워크트리여야 한다)
         let parent = parent.filter(|p| !p.is_empty()).map(|p| self.known_worktree(p)).transpose()?;
@@ -362,7 +362,7 @@ impl Workspace {
         self.worktrees(Some(repo))?
             .into_iter()
             .find(|w| w.path == path_s)
-            .ok_or_else(|| WorkspaceError::Invalid("만든 워크트리를 목록에서 찾지 못했다".into()))
+            .ok_or_else(|| WorkspaceError::Invalid("만든 워크트리를 목록에서 찾지 못했어요".into()))
     }
 
     /// 워크트리를 지운다. `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도) 쓴다.
@@ -370,7 +370,7 @@ impl Workspace {
     pub fn remove_worktree(&self, repo: &str, path: &Path, force: bool, delete_branch: bool, force_branch: bool) -> Result<String, WorkspaceError> {
         let root = self.repo_path(repo)?;
         if path == root {
-            return Err(WorkspaceError::Invalid("메인 워크트리는 지우지 않는다".into()));
+            return Err(WorkspaceError::Invalid("메인 워크트리는 지울 수 없어요".into()));
         }
         let path_s = path.to_string_lossy();
         let branch = self.worktrees(Some(repo))?.into_iter().find(|w| w.path == path_s).and_then(|w| w.branch);
@@ -390,8 +390,8 @@ impl Workspace {
         if let (true, Some(b)) = (delete_branch, branch) {
             match self.vcs.delete_branch(&root, &b, force_branch) {
                 Ok(()) => {}
-                Err(VcsError::NotMerged(_)) => note = format!("브랜치 {b} 는 합치지 않은 커밋이 있어 남겼다"),
-                Err(e) => note = format!("브랜치 {b} 는 지우지 못해 남겼다: {e}"),
+                Err(VcsError::NotMerged(_)) => note = format!("합치지 않은 커밋이 있어 브랜치를 남겨 뒀어요: {b}"),
+                Err(e) => note = format!("브랜치를 지우지 못해 남겨 뒀어요 ({b}): {e}"),
             }
         }
         info!(event = "worktree_removed", repo, path = %path.display(), delete_branch, force_branch, branch_kept = !note.is_empty());
@@ -406,7 +406,7 @@ impl Workspace {
             Err(WorkspaceError::Vcs(VcsError::NotARepo(_))) => {}
             Err(e) => return Err(e),
         }
-        let entries = std::fs::read_dir(path).map_err(|e| WorkspaceError::Invalid(format!("폴더를 읽지 못했다: {} ({e})", path.display())))?;
+        let entries = std::fs::read_dir(path).map_err(|e| WorkspaceError::Invalid(format!("폴더를 읽지 못했어요: {} ({e})", path.display())))?;
         let mut dirs: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.join(".git").exists()).collect();
         dirs.sort();
         let mut found: Vec<RepoInfo> = Vec::new();
@@ -422,14 +422,14 @@ impl Workspace {
             }
         }
         if found.is_empty() {
-            return Err(first_error.unwrap_or_else(|| WorkspaceError::Invalid(format!("git 저장소를 찾지 못했다: {}", path.display()))));
+            return Err(first_error.unwrap_or_else(|| WorkspaceError::Invalid(format!("git 저장소를 찾지 못했어요: {}", path.display()))));
         }
         Ok(found)
     }
 
     /// 등록한 저장소의 워크트리인지 확인하고 경로를 돌려준다
     fn known_worktree(&self, path: &str) -> Result<PathBuf, WorkspaceError> {
-        let p = std::fs::canonicalize(path).map_err(|_| WorkspaceError::Invalid(format!("없는 폴더: {path}")))?;
+        let p = std::fs::canonicalize(path).map_err(|_| WorkspaceError::Invalid(format!("폴더를 찾지 못했어요: {path}")))?;
         // 방금 확인한 목록에 있으면 git 을 다시 부르지 않는다. 없으면 목록을 새로 받아 본다 (막 만든 워크트리)
         if let Some((at, list)) = &*self.known.lock().unwrap()
             && at.elapsed() < KNOWN_WORKTREE_TTL
@@ -443,7 +443,7 @@ impl Workspace {
         if found {
             Ok(p)
         } else {
-            Err(WorkspaceError::Invalid(format!("등록한 저장소의 워크트리가 아니다: {path}")))
+            Err(WorkspaceError::Invalid(format!("등록한 저장소의 워크트리가 아니에요: {path}")))
         }
     }
 
@@ -458,7 +458,7 @@ impl Workspace {
                 let mut cur = Some(q.clone());
                 while let Some(c) = cur {
                     if c == p {
-                        return Err(WorkspaceError::Invalid("자기 자신이나 자기 밑의 워크트리를 부모로 삼을 수 없다".into()));
+                        return Err(WorkspaceError::Invalid("자기 자신이나 자기 밑의 워크트리를 부모로 삼을 수 없어요".into()));
                     }
                     cur = meta.get(&c).and_then(|m| m.parent.clone());
                 }
@@ -517,7 +517,7 @@ impl Workspace {
 
     pub fn commit(&self, worktree: &str, message: &str, all: bool) -> Result<String, WorkspaceError> {
         if message.trim().is_empty() {
-            return Err(WorkspaceError::Invalid("커밋 메시지가 비었다".into()));
+            return Err(WorkspaceError::Invalid("커밋 메시지가 비어 있어요".into()));
         }
         let w = self.known_worktree(worktree)?;
         let id = self.vcs.commit(&w, message, all)?;
@@ -610,12 +610,12 @@ impl Workspace {
     pub fn write_file(&self, worktree: &str, file: &str, text: &str, expect_modified: Option<u64>) -> Result<FileContent, WorkspaceError> {
         let w = self.known_worktree(worktree)?;
         let p = inside(&w, file)?;
-        let meta = std::fs::metadata(&p).map_err(|_| WorkspaceError::Invalid(format!("없는 파일: {file}")))?;
+        let meta = std::fs::metadata(&p).map_err(|_| WorkspaceError::Invalid(format!("파일을 찾지 못했어요: {file}")))?;
         if !meta.is_file() {
-            return Err(WorkspaceError::Invalid(format!("파일이 아니다: {file}")));
+            return Err(WorkspaceError::Invalid(format!("파일이 아니에요: {file}")));
         }
         if text.len() as u64 > MAX_WRITE {
-            return Err(WorkspaceError::Invalid(format!("{}MB 넘는 파일은 고쳐 쓰지 않는다: {file}", MAX_WRITE / 1024 / 1024)));
+            return Err(WorkspaceError::Invalid(format!("{}MB 넘는 파일은 고쳐 쓸 수 없어요: {file}", MAX_WRITE / 1024 / 1024)));
         }
         if let Some(expect) = expect_modified
             && modified_ms(&p) != Some(expect)
@@ -647,7 +647,7 @@ fn modified_ms(p: &Path) -> Option<u64> {
 
 /// `rel` 이 `root` 밖으로 나가지 않는지 확인하고 절대 경로를 돌려준다
 fn inside(root: &Path, rel: &str) -> Result<PathBuf, WorkspaceError> {
-    let outside = || WorkspaceError::Invalid(format!("워크트리 밖 경로: {rel}"));
+    let outside = || WorkspaceError::Invalid(format!("워크트리 밖 경로예요: {rel}"));
     if Path::new(rel).is_absolute() || rel.split('/').any(|c| c == "..") {
         return Err(outside());
     }

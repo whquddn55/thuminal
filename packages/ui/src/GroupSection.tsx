@@ -154,7 +154,7 @@ export function GroupSection({
                 dragging && "border-drop/60",
               )}
             >
-              {empty ?? (droppable ? "프로젝트를 여기로 끌어 놓는다" : "프로젝트가 없다")}
+              {empty ?? (droppable ? "프로젝트를 여기로 끌어 놓아 주세요" : "프로젝트가 없어요")}
             </div>
           )}
         </div>

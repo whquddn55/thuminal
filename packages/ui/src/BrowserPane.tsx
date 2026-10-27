@@ -92,7 +92,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
         opened = true;
         model.browserOpened(paneId);
       },
-      (e) => model.fail(`브라우저 칸을 열지 못했다: ${e}`),
+      (e) => model.fail(`브라우저 칸을 열지 못했어요: ${e}`),
     );
     raf = requestAnimationFrame(tick);
     return () => {
@@ -206,7 +206,7 @@ export function FramePane({ paneId, url, focused }: { paneId: number; url: strin
   useEffect(() => {
     let alive = true;
     if (!/^https?:/i.test(url)) {
-      setView({ for: url, src: null, error: "이 주소는 데스크톱 브라우저 칸에서만 열린다" });
+      setView({ for: url, src: null, error: "이 주소는 데스크톱 브라우저 칸에서만 열려요" });
       return;
     }
     if (!local) {
@@ -215,11 +215,11 @@ export function FramePane({ paneId, url, focused }: { paneId: number; url: strin
     }
     if (supported === null) return;
     if (!supported || !host.browserProxyUrl) {
-      setView({ for: url, src: null, error: "데몬이 옛 판이라 이 컴퓨터의 개발 서버를 대신 보여 줄 수 없다. 데몬을 다시 띄우면 여기서 보인다" });
+      setView({ for: url, src: null, error: "데몬이 이전 버전이라 이 컴퓨터의 개발 서버를 대신 보여 줄 수 없어요. 데몬을 다시 시작하면 여기서 볼 수 있어요" });
       return;
     }
     host.browserProxyUrl(url).then(
-      (p) => alive && setView(p ? { for: url, src: p } : { for: url, src: null, error: "데몬 원격 접속이 꺼져 있어 대신 보여 줄 수 없다" }),
+      (p) => alive && setView(p ? { for: url, src: p } : { for: url, src: null, error: "데몬 원격 접속이 꺼져 있어서 대신 보여 줄 수 없어요" }),
       (e) => alive && setView({ for: url, src: null, error: String(e) }),
     );
     return () => {
@@ -263,7 +263,7 @@ export function FramePane({ paneId, url, focused }: { paneId: number; url: strin
             }}
           />
         </div>
-        <button className={btn} title="새 탭으로 열기 (칸 안에 안 보이는 사이트)" onClick={() => void openOutside(host, url).catch(model.fail)}>
+        <button className={btn} title="칸 안에 안 보이는 사이트를 새 탭으로 열기" onClick={() => void openOutside(host, url).catch(model.fail)}>
           <ArrowSquareOutIcon />
         </button>
       </div>

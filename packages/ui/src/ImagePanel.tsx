@@ -34,7 +34,7 @@ export function GalleryButton({ session, floating }: { session: SessionId; float
           ? "flex h-5 items-center gap-1 rounded-md border bg-popover/90 px-1.5 text-[10px] text-popover-foreground shadow-sm hover:bg-accent"
           : "flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
       }
-      title={`claude 에 붙여 보낸 그림 ${count}장 (눌러서 ${open ? "닫기" : "보기"})`}
+      title={`claude 에 붙여 보낸 그림 ${count}장. 눌러서 ${open ? "닫기" : "보기"}`}
       onClick={() => model.toggleGallery(session)}
     >
       <ImageIcon className="size-3" />
@@ -115,7 +115,7 @@ export function ImageGallery({ session }: { session: SessionId }) {
       </PopupHead>
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto p-1.5 thm-scroll">
         {error ? (
-          <div className="p-2 text-xs text-destructive">그림 목록을 읽지 못했다: {error}</div>
+          <div className="p-2 text-xs text-destructive">그림 목록을 읽지 못했어요: {error}</div>
         ) : list === null ? (
           <div className="p-2 text-xs text-muted-foreground">읽는 중…</div>
         ) : (
@@ -166,7 +166,7 @@ function Thumb({ host, session, transcript, img, onOpen }: { host: HostApi; sess
       {src ? (
         <img src={src} alt={`붙인 그림 #${img.n}`} className="size-full object-cover" draggable={false} />
       ) : (
-        <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">{failed ? "읽지 못했다" : ""}</span>
+        <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">{failed ? "읽기 실패" : ""}</span>
       )}
       <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">#{img.n}</span>
     </button>
@@ -247,7 +247,7 @@ function Lightbox({
           </div>
           <div className="relative flex min-h-0 flex-1 items-center justify-center px-16 pb-6" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
             {error ? (
-              <span className="text-sm text-white/80">그림을 읽지 못했다: {error}</span>
+              <span className="text-sm text-white/80">그림을 읽지 못했어요: {error}</span>
             ) : src ? (
               <img src={src} alt={`붙인 그림 #${img.n}`} className={cn("max-h-full max-w-full object-contain shadow-2xl", src !== full?.url && "blur-[1px]")} draggable={false} />
             ) : null}

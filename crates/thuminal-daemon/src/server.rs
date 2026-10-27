@@ -136,7 +136,7 @@ impl Server {
                                 break;
                             }
                             _ => {
-                                let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "hello 를 먼저 보내야 한다".into()));
+                                let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "hello 를 먼저 보내야 해요".into()));
                                 break;
                             }
                         }
@@ -145,7 +145,7 @@ impl Server {
                     // 바로 처리되게 한다 (응답은 id 로 짝을 맞추므로 순서가 바뀌어도 된다).
                     // 세션·배치 요청은 순서가 중요해(붙기 → 떼기 등) 받은 차례대로 처리한다
                     if remote.is_some() && matches!(request, Request::SetRemote { .. } | Request::PairRemote { .. } | Request::RemoveRemoteDevice { .. }) {
-                        let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "원격 연결에서는 원격 접속 설정을 바꿀 수 없다".into()));
+                        let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "원격 연결에서는 원격 접속 설정을 바꿀 수 없어요".into()));
                         continue;
                     }
                     if is_slow(&request) {
@@ -378,7 +378,7 @@ impl Server {
             Request::ListRepos => Ok(Response::Repos { repos: self.workspace.repos() }),
             Request::ListGroups => Ok(Response::Groups { groups: self.workspace.groups() }),
             Request::RepoIcon { repo } => match self.workspace.repos().into_iter().find(|r| r.id == repo) {
-                None => Err(ErrorBody { code: ErrorCode::NotFound, message: format!("등록하지 않은 저장소다: {repo}") }),
+                None => Err(ErrorBody { code: ErrorCode::NotFound, message: format!("등록하지 않은 저장소예요: {repo}") }),
                 Some(r) => match tokio::task::spawn_blocking(move || crate::repo_icon::find(std::path::Path::new(&r.path))).await {
                     Ok(found) => Ok(Response::RepoIcon {
                         icon: found.map(|i| {
@@ -665,9 +665,9 @@ fn save_paste_image(data: &str, ext: &str) -> Result<std::path::PathBuf, String>
     use base64::Engine as _;
     let ext = ext.to_ascii_lowercase();
     if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "heic") {
-        return Err(format!("그림 형식이 아니다: {ext}"));
+        return Err(format!("그림 형식이 아니에요: {ext}"));
     }
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("base64 를 풀지 못했다: {e}"))?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("base64 를 풀지 못했어요: {e}"))?;
     let dir = std::env::temp_dir().join("thuminal-paste");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     if let Ok(entries) = std::fs::read_dir(&dir) {

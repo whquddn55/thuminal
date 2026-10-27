@@ -30,19 +30,19 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("데몬에 붙지 못했다 ({path}): {source}")]
+    #[error("데몬에 연결하지 못했어요 ({path}): {source}")]
     Connect { path: PathBuf, source: std::io::Error },
-    #[error("원격 데몬에 붙지 못했다 ({url}): {reason}")]
+    #[error("원격 데몬에 연결하지 못했어요 ({url}): {reason}")]
     ConnectRemote { url: String, reason: String },
-    #[error("원격 데몬이 토큰을 받지 않았다. 원격 컴퓨터에서 기기를 다시 등록한다")]
+    #[error("원격 데몬이 토큰을 거절했어요. 원격 컴퓨터에서 기기를 다시 등록해 주세요")]
     Unauthorized,
-    #[error("프로토콜 주 판이 다르다: {0}")]
+    #[error("프로토콜 주 버전이 달라요: {0}")]
     VersionMismatch(String),
-    #[error("데몬을 띄우지 못했다: {0}")]
+    #[error("데몬을 시작하지 못했어요: {0}")]
     Spawn(String),
-    #[error("데몬이 오류로 답했다: {0:?} {1}")]
+    #[error("데몬이 오류로 답했어요: {0:?} {1}")]
     Daemon(thuminal_protocol::ErrorCode, String),
-    #[error("데몬과 연결이 끊겼다")]
+    #[error("데몬과 연결이 끊겼어요")]
     Disconnected,
     #[error("예상하지 못한 응답: {0:?}")]
     Unexpected(Box<Response>),
@@ -399,10 +399,10 @@ pub fn check_hello(hello: &Response) -> Result<Option<String>> {
     Ok(match protocol_minor.cmp(&PROTOCOL_MINOR) {
         std::cmp::Ordering::Equal => None,
         std::cmp::Ordering::Less => Some(format!(
-            "데몬({daemon_version})이 옛 판이다 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 새 기능 일부가 안 될 수 있다. 그 컴퓨터의 thuminal 을 업데이트한다"
+            "데몬({daemon_version})이 이전 버전이에요 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 새 기능 일부가 동작하지 않을 수 있어요. 그 컴퓨터의 thuminal 을 업데이트해 주세요"
         )),
         std::cmp::Ordering::Greater => Some(format!(
-            "데몬({daemon_version})이 더 새 판이다 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 이 앱을 업데이트한다"
+            "데몬({daemon_version})이 더 새 버전이에요 (프로토콜 {protocol_major}.{protocol_minor}, 앱은 {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}). 이 앱을 업데이트해 주세요"
         )),
     })
 }

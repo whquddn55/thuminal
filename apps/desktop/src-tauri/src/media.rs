@@ -43,9 +43,9 @@ async fn read(app: &AppHandle, host: Option<&str>, worktree: &str, file: &str, o
 }
 
 pub async fn serve(app: AppHandle, req: HttpRequest<Vec<u8>>) -> HttpResponse<Vec<u8>> {
-    let Ok(url) = tauri::Url::parse(&req.uri().to_string()) else { return plain(StatusCode::BAD_REQUEST, "주소를 읽지 못했다") };
+    let Ok(url) = tauri::Url::parse(&req.uri().to_string()) else { return plain(StatusCode::BAD_REQUEST, "주소를 읽지 못했어요") };
     let q = |k: &str| url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned());
-    let (Some(worktree), Some(file)) = (q("worktree"), q("file")) else { return plain(StatusCode::BAD_REQUEST, "worktree · file 이 없다") };
+    let (Some(worktree), Some(file)) = (q("worktree"), q("file")) else { return plain(StatusCode::BAD_REQUEST, "worktree, file 이 없어요") };
     let host = q("host").filter(|h| !h.is_empty());
     let host = host.as_deref();
     let range = req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_string);
@@ -66,7 +66,7 @@ pub async fn serve(app: AppHandle, req: HttpRequest<Vec<u8>>) -> HttpResponse<Ve
                     .unwrap();
             }
         },
-        None if size > WHOLE_FILE_MAX => return plain(StatusCode::PAYLOAD_TOO_LARGE, "Range 로 나눠 받는다"),
+        None if size > WHOLE_FILE_MAX => return plain(StatusCode::PAYLOAD_TOO_LARGE, "파일이 커서 Range 로 나눠 받아야 해요"),
         None => (0, size.saturating_sub(1), false),
     };
     let want = if size == 0 { 0 } else { end + 1 - start };

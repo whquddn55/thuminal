@@ -125,15 +125,15 @@ export function statusOf(sessions: SessionInfo[]): Status {
 }
 
 const STATUS_LABEL: Record<Status, string> = {
-  attention: "에이전트가 묻고 있다",
-  working: "에이전트가 일하는 중",
-  error: "에이전트 턴이 오류로 끝났다",
-  interrupted: "에이전트를 멈췄다",
-  done: "에이전트가 일을 마쳤다",
-  ready: "에이전트가 첫 입력을 기다린다",
-  active: "터미널이 열려 있다",
-  failed: "터미널이 끝났다",
-  inactive: "열린 터미널이 없다",
+  attention: "에이전트가 묻고 있어요",
+  working: "에이전트가 일하는 중이에요",
+  error: "에이전트 턴이 오류로 끝났어요",
+  interrupted: "에이전트를 멈췄어요",
+  done: "에이전트가 일을 마쳤어요",
+  ready: "에이전트가 첫 입력을 기다려요",
+  active: "터미널이 열려 있어요",
+  failed: "터미널이 끝났어요",
+  inactive: "열린 터미널이 없어요",
 };
 
 export function StatusIndicator({ status, className }: { status: Status; className?: string }) {
@@ -270,7 +270,7 @@ export function Sidebar() {
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" disabled={g.id === DEFAULT_GROUP} onSelect={() => model.deleteGroup(g.id)}>
-                      {g.id === DEFAULT_GROUP ? "기본 워크스페이스는 지우지 못한다" : "지우기 (프로젝트는 기본으로)"}
+                      {g.id === DEFAULT_GROUP ? "기본 워크스페이스는 지울 수 없어요" : "지우기 (프로젝트는 기본으로)"}
                     </DropdownMenuItem>
                   </>
                 }
@@ -303,7 +303,7 @@ export function Sidebar() {
         )}
         {repos.length === 0 && (
           <button className="mx-2 mt-2 w-[calc(100%-1rem)] rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" onClick={() => model.setDialog({ kind: "import-orca" })}>
-            Orca에서 프로젝트·claude 세션 가져오기
+            Orca에서 프로젝트와 claude 세션 가져오기
           </button>
         )}
       </div>
@@ -352,10 +352,10 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
         collapsed={collapsed.has(key)}
         onToggle={() => onToggle(key)}
         remote={{ state: host.state, title }}
-        empty={host.state === "connected" ? "이 컴퓨터에 등록한 프로젝트가 없다" : `${HOST_STATE_LABEL[host.state]} · 붙으면 프로젝트가 보인다`}
+        empty={host.state === "connected" ? "이 컴퓨터에 등록한 프로젝트가 없어요" : `${HOST_STATE_LABEL[host.state]} · 연결되면 프로젝트가 보여요`}
         menu={
           <>
-            <DropdownMenuItem onSelect={() => void model.root.services.host.hosts?.reconnect(host.id).catch(model.fail)}>다시 붙기</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void model.root.services.host.hosts?.reconnect(host.id).catch(model.fail)}>다시 연결</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => model.root.setDialog({ kind: "settings", section: "hosts" })}>설정에서 다시 등록…</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => copy(host.address)}>주소 복사</DropdownMenuItem>
@@ -721,7 +721,7 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
             void model.newTab(w.path, "claude");
           }}
         >
-          claude 띄우기
+          claude 실행
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => copy(title)}>이름 복사</ContextMenuItem>
@@ -809,7 +809,7 @@ function WorkspaceCard({
                 )}
               </span>
             </TooltipTrigger>
-            <TooltipContent side="right">{unread ? "새 출력이 있다" : STATUS_LABEL[status]}</TooltipContent>
+            <TooltipContent side="right">{unread ? "새 출력이 있어요" : STATUS_LABEL[status]}</TooltipContent>
           </Tooltip>
         </div>
         {/* overflow-hidden 을 두지 않는다: 에이전트 줄은 왼쪽으로 내밀어 그려 상태 아이콘이 반쪽으로 잘린다. 줄임은 줄마다 truncate 가 한다 */}

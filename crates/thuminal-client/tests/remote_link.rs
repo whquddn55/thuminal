@@ -152,7 +152,7 @@ async fn version_mismatch_is_refused_and_minor_is_warned() {
 
     if PROTOCOL_MINOR > 0 {
         let c = Client::connect_ws(&fake_daemon(hello(PROTOCOL_MAJOR, PROTOCOL_MINOR - 1)).await, "t", "test").await.unwrap();
-        assert!(c.version_warning.as_deref().unwrap().contains("옛 판"), "{:?}", c.version_warning);
+        assert!(c.version_warning.as_deref().unwrap().contains("이전 버전"), "{:?}", c.version_warning);
     }
 
     let r = Client::connect_ws(&fake_daemon(hello(PROTOCOL_MAJOR + 1, 0)).await, "t", "test").await;

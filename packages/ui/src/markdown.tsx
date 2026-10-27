@@ -129,7 +129,7 @@ function onLink(h: LinkHandlers, href: string | undefined, e: React.MouseEvent) 
       h.openFile(t.file, t.line);
       return;
     case "outside":
-      h.notice(`워크트리 밖 파일은 열지 않는다: ${t.path}`);
+      h.notice(`워크트리 밖 파일은 열지 않아요: ${t.path}`);
       return;
   }
 }
@@ -235,7 +235,7 @@ function Mermaid({ code }: { code: string }) {
   if (error)
     return (
       <div className="md-mermaid-error">
-        <div>mermaid를 그리지 못했다: {error}</div>
+        <div>mermaid를 그리지 못했어요: {error}</div>
         <pre>
           <code>{code}</code>
         </pre>

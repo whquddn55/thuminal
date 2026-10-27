@@ -61,7 +61,7 @@ pub struct NoSpawn;
 
 impl Spawner for NoSpawn {
     fn spawn(&mut self, _req: SpawnRequest) -> Result<SessionId> {
-        Err(invalid("이 op 는 세션을 만들 수 없다"))
+        Err(invalid("이 op 는 세션을 만들 수 없어요"))
     }
 }
 
@@ -87,7 +87,7 @@ pub fn check_workspace(ws: &str) -> Result<()> {
     if ws.starts_with('/') || ws == FLOATING_WORKSPACE || ws == OTHER_WORKSPACE {
         Ok(())
     } else {
-        Err(invalid(format!("workspace 는 워크트리 절대 경로나 floating, other 다: {ws}")))
+        Err(invalid(format!("workspace 는 워크트리 절대 경로나 floating, other 중 하나여야 해요: {ws}")))
     }
 }
 
@@ -230,30 +230,30 @@ impl Store {
     fn resolve_pane(&self, r: &PaneRef) -> Result<(At, PaneId)> {
         let id = match r {
             PaneRef::Id(id) => *id,
-            PaneRef::Session(s) => self.pane_of_session(*s).ok_or_else(|| LayoutError::NotFound(format!("세션 {s} 이 든 칸이 없다")))?,
+            PaneRef::Session(s) => self.pane_of_session(*s).ok_or_else(|| LayoutError::NotFound(format!("세션이 든 칸을 찾지 못했어요: {s}")))?,
             PaneRef::Focused(ws) => {
-                let l = self.workspaces.get(ws).ok_or_else(|| LayoutError::NotFound(format!("{ws} 에 배치가 없다")))?;
+                let l = self.workspaces.get(ws).ok_or_else(|| LayoutError::NotFound(format!("배치를 찾지 못했어요: {ws}")))?;
                 let t = l
                     .active_tab
                     .and_then(|a| l.tabs.iter().find(|t| t.id == a))
-                    .ok_or_else(|| LayoutError::NotFound(format!("{ws} 에 활성 탭이 없다")))?;
+                    .ok_or_else(|| LayoutError::NotFound(format!("활성 탭이 없어요: {ws}")))?;
                 t.focused
             }
         };
-        let at = self.find_pane(id).ok_or_else(|| LayoutError::NotFound(format!("칸 {id} 이 없다")))?;
+        let at = self.find_pane(id).ok_or_else(|| LayoutError::NotFound(format!("칸을 찾지 못했어요: {id}")))?;
         Ok((at, id))
     }
 
     fn resolve_tab(&self, r: &TabRef) -> Result<At> {
         match r {
-            TabRef::Id(id) => self.find_tab(*id).ok_or_else(|| LayoutError::NotFound(format!("탭 {id} 이 없다"))),
+            TabRef::Id(id) => self.find_tab(*id).ok_or_else(|| LayoutError::NotFound(format!("탭을 찾지 못했어요: {id}"))),
             TabRef::Pane(p) => self.resolve_pane(p).map(|(at, _)| at),
             TabRef::Active(ws) => {
-                let l = self.workspaces.get(ws).ok_or_else(|| LayoutError::NotFound(format!("{ws} 에 배치가 없다")))?;
+                let l = self.workspaces.get(ws).ok_or_else(|| LayoutError::NotFound(format!("배치를 찾지 못했어요: {ws}")))?;
                 l.active_tab
                     .and_then(|a| l.tabs.iter().position(|t| t.id == a))
                     .map(|i| (ws.clone(), i))
-                    .ok_or_else(|| LayoutError::NotFound(format!("{ws} 에 활성 탭이 없다")))
+                    .ok_or_else(|| LayoutError::NotFound(format!("활성 탭이 없어요: {ws}")))
             }
         }
     }
@@ -281,7 +281,7 @@ impl Store {
 
     /// 칸을 트리에서 빼낸다. 탭이 비면 탭을 지운다
     fn take_pane(&mut self, id: PaneId) -> Result<Pane> {
-        let at = self.find_pane(id).ok_or_else(|| LayoutError::NotFound(format!("칸 {id} 이 없다")))?;
+        let at = self.find_pane(id).ok_or_else(|| LayoutError::NotFound(format!("칸을 찾지 못했어요: {id}")))?;
         let t = self.tab_mut(&at);
         let root = std::mem::replace(&mut t.root, tree::leaf(Pane { id: PaneId(0), content: PaneContent::Doc { doc: BTreeMap::new() } }));
         let order = tree::pane_ids(&root);
@@ -369,7 +369,7 @@ impl Store {
             LayoutOp::Split { target, side, size, spawn, focus, doc } => {
                 let size = size.unwrap_or(0.5);
                 if !(MIN_SIZE..=1.0 - MIN_SIZE).contains(&size) {
-                    return Err(invalid(format!("size 는 0.05~0.95 다: {size}")));
+                    return Err(invalid(format!("size 는 0.05~0.95 사이여야 해요: {size}")));
                 }
                 let (at, id) = self.resolve_pane(&target)?;
                 touched.push(at.0.clone());
@@ -380,7 +380,7 @@ impl Store {
                 };
                 let new = pane.id;
                 let t = self.tab_mut(&at);
-                tree::insert_beside(&mut t.root, id, side, size, tree::leaf(pane)).map_err(|_| invalid("칸을 넣지 못했다"))?;
+                tree::insert_beside(&mut t.root, id, side, size, tree::leaf(pane)).map_err(|_| invalid("칸을 넣지 못했어요"))?;
                 t.zoomed = None;
                 if focus {
                     self.focus(&at, new);
@@ -392,34 +392,34 @@ impl Store {
                 let t = self.tab_mut(&at);
                 match tree::find_mut(&mut t.root, id) {
                     Some(Pane { content: PaneContent::Doc { doc: d }, .. }) => *d = doc,
-                    _ => return Err(invalid(format!("칸 {id} 은 문서 칸이 아니다"))),
+                    _ => return Err(invalid(format!("문서 칸이 아니에요: {id}"))),
                 }
             }
             LayoutOp::Resize { target, size, axis } => {
                 if !(MIN_SIZE..=1.0 - MIN_SIZE).contains(&size) {
-                    return Err(invalid(format!("size 는 0.05~0.95 다: {size}")));
+                    return Err(invalid(format!("size 는 0.05~0.95 사이여야 해요: {size}")));
                 }
                 self.resize(&target, axis, touched, |_| size)?;
             }
             LayoutOp::ResizeBy { target, delta, axis } => {
                 if !delta.is_finite() {
-                    return Err(invalid("delta 가 숫자가 아니다"));
+                    return Err(invalid("delta 가 숫자가 아니에요"));
                 }
                 self.resize(&target, axis, touched, |cur| cur + delta)?;
             }
             LayoutOp::SetSizes { tab, path, sizes } => {
-                let at = self.find_tab(tab).ok_or_else(|| LayoutError::NotFound(format!("탭 {tab} 이 없다")))?;
+                let at = self.find_tab(tab).ok_or_else(|| LayoutError::NotFound(format!("탭을 찾지 못했어요: {tab}")))?;
                 touched.push(at.0.clone());
                 let t = self.tab_mut(&at);
                 match tree::node_at_mut(&mut t.root, &path) {
                     Some(PaneNode::Split { children, sizes: cur, .. }) => {
                         if sizes.len() != children.len() || sizes.iter().any(|s| !s.is_finite() || *s <= 0.0) {
-                            return Err(invalid(format!("sizes 는 양수 {}개다", children.len())));
+                            return Err(invalid(format!("sizes 는 양수 {}개여야 해요", children.len())));
                         }
                         *cur = sizes;
                         tree::fix_sizes(cur, children.len());
                     }
-                    _ => return Err(invalid(format!("경로 {path:?} 가 분할이 아니다"))),
+                    _ => return Err(invalid(format!("분할이 아닌 경로예요: {path:?}"))),
                 }
             }
             LayoutOp::Equalize { tab } => {
@@ -463,12 +463,12 @@ impl Store {
                 let (_, id) = self.resolve_pane(&pane)?;
                 let (_, to_id) = self.resolve_pane(&to)?;
                 if id == to_id {
-                    return Err(invalid(format!("칸 {id} 을 자기 옆으로 옮길 수 없다")));
+                    return Err(invalid(format!("칸을 자기 옆으로 옮길 수 없어요: {id}")));
                 }
                 let moved = self.take_pane(id)?;
                 let at = self.find_pane(to_id).expect("남아 있는 칸");
                 let t = self.tab_mut(&at);
-                tree::insert_beside(&mut t.root, to_id, side, 0.5, tree::leaf(moved)).map_err(|_| invalid("칸을 넣지 못했다"))?;
+                tree::insert_beside(&mut t.root, to_id, side, 0.5, tree::leaf(moved)).map_err(|_| invalid("칸을 넣지 못했어요"))?;
                 t.zoomed = None;
                 self.focus(&at, id);
             }
@@ -513,12 +513,12 @@ impl Store {
                 let at = self.resolve_tab(&tab)?;
                 let (_, to_id) = self.resolve_pane(&to)?;
                 if tree::contains(&self.tab(&at).root, to_id) {
-                    return Err(invalid(format!("탭을 자기 칸 {to_id} 옆으로 합칠 수 없다")));
+                    return Err(invalid(format!("탭을 자기 칸 옆으로 합칠 수 없어요: {to_id}")));
                 }
                 let joined = self.take_tab(&at);
                 let dest = self.find_pane(to_id).expect("남아 있는 칸");
                 let t = self.tab_mut(&dest);
-                tree::insert_beside(&mut t.root, to_id, side, 0.5, joined.root).map_err(|_| invalid("칸을 넣지 못했다"))?;
+                tree::insert_beside(&mut t.root, to_id, side, 0.5, joined.root).map_err(|_| invalid("칸을 넣지 못했어요"))?;
                 t.zoomed = None;
                 self.focus(&dest, joined.focused);
             }
@@ -562,7 +562,7 @@ impl Store {
         let (at, id) = self.resolve_pane(target)?;
         touched.push(at.0.clone());
         let t = self.tab_mut(&at);
-        let (path, index) = tree::resize_target(&t.root, id, axis).ok_or_else(|| invalid(format!("칸 {id} 이 든 분할이 없다")))?;
+        let (path, index) = tree::resize_target(&t.root, id, axis).ok_or_else(|| invalid(format!("칸이 든 분할을 찾지 못했어요: {id}")))?;
         let Some(PaneNode::Split { sizes, .. }) = tree::node_at_mut(&mut t.root, &path) else { unreachable!("분할 길") };
         let want = share(sizes[index]);
         tree::set_share(sizes, index, want);
@@ -587,19 +587,19 @@ impl Store {
             match s {
                 LayoutSpec::Split { children, sizes, .. } => {
                     if children.is_empty() {
-                        return Err(invalid("분할에 칸이 없다"));
+                        return Err(invalid("분할에 칸이 없어요"));
                     }
                     if let Some(sz) = sizes
                         && (sz.len() != children.len() || sz.iter().any(|v| !v.is_finite() || *v <= 0.0))
                     {
-                        return Err(invalid(format!("sizes 는 양수 {}개다", children.len())));
+                        return Err(invalid(format!("sizes 는 양수 {}개여야 해요", children.len())));
                     }
                     children.iter().try_for_each(|c| scan(c, st, refs))
                 }
                 LayoutSpec::Pane { pane } => {
                     let (_, id) = st.resolve_pane(pane)?;
                     if refs.contains(&id) {
-                        return Err(invalid(format!("칸 {id} 이 두 번 나온다")));
+                        return Err(invalid(format!("칸이 두 번 나와요: {id}")));
                     }
                     refs.push(id);
                     Ok(())

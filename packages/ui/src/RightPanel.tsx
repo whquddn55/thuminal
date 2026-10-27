@@ -165,7 +165,7 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
       if (typeof r === "string" && r) setNote(r.split("\n").slice(-2).join(" "));
       await model.refreshStatus(worktree);
     } catch (e) {
-      model.fail(`${label} 실패: ${e}`);
+      model.fail(`${label}에 실패했어요: ${e}`);
     } finally {
       setBusy(null);
     }
@@ -189,8 +189,8 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
   const discard = (paths: string[]) =>
     model.setDialog({
       kind: "confirm",
-      title: paths.length === 1 ? `${base(paths[0])}의 변경을 버릴까?` : `변경 ${paths.length}개를 버릴까?`,
-      body: "되돌릴 수 없다. 새로 만든 파일은 지워진다.",
+      title: paths.length === 1 ? `${base(paths[0])}의 변경을 버릴까요?` : `변경 ${paths.length}개를 버릴까요?`,
+      body: "되돌릴 수 없어요. 새로 만든 파일은 지워져요.",
       action: "버리기",
       run: () => void run("되돌리기", () => host.git.discard(worktree, paths)),
     });
@@ -308,13 +308,13 @@ function ChangesPanel({ worktree, status }: { worktree: string; status: GitStatu
           className="flex-1"
           disabled={!!busy || !status?.branch}
           onClick={() => void run("푸시", () => host.git.push(worktree))}
-          title="지금 브랜치를 올린다"
+          title="지금 브랜치를 올려요"
         >
           {busy === "푸시" ? "올리는 중…" : status?.upstream ? `푸시${status.ahead ? ` ↑${status.ahead}` : ""}` : "푸시 (원격 만들기)"}
         </Button>
       </div>
       {note && <div className="mx-3 mb-1.5 break-all text-2xs text-muted-foreground">{note}</div>}
-      {files.length === 0 && <div className="p-4 text-muted-foreground">바뀐 파일이 없다</div>}
+      {files.length === 0 && <div className="p-4 text-muted-foreground">바뀐 파일이 없어요</div>}
       {group("스테이지됨", staged, true)}
       {group("변경", unstaged, false)}
       {group("새 파일", untracked, false)}
@@ -425,7 +425,7 @@ function NameMatches({ worktree, query, kindOf }: { worktree: string; query: str
   }, [model, worktree]);
   const matches = useMemo(() => (all ? matchFiles(all.files, query, 300) : []), [all, query]);
   if (!all) return <div className="px-3 py-2 text-muted-foreground">파일 목록을 읽는 중…</div>;
-  if (!matches.length) return <div className="px-3 py-2 text-muted-foreground">맞는 파일이 없다</div>;
+  if (!matches.length) return <div className="px-3 py-2 text-muted-foreground">맞는 파일이 없어요</div>;
   return (
     <div>
       {matches.map((f) => {
@@ -442,7 +442,7 @@ function NameMatches({ worktree, query, kindOf }: { worktree: string; query: str
           </div>
         );
       })}
-      {(matches.length === 300 || all.truncated) && <div className="px-3 py-1.5 text-2xs text-muted-foreground">더 있다. 더 길게 쳐서 좁힌다</div>}
+      {(matches.length === 300 || all.truncated) && <div className="px-3 py-1.5 text-2xs text-muted-foreground">더 있어요. 더 길게 쳐서 좁혀 주세요</div>}
     </div>
   );
 }
@@ -570,7 +570,7 @@ function SearchPanel({ worktree }: { worktree: string }) {
           ))}
         </div>
       ))}
-      {query.trim() && result && result.hits.length === 0 && <div className="px-3 py-2 text-muted-foreground">찾은 것이 없다</div>}
+      {query.trim() && result && result.hits.length === 0 && <div className="px-3 py-2 text-muted-foreground">찾은 것이 없어요</div>}
     </div>
   );
 }

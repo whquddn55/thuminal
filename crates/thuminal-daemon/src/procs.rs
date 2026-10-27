@@ -224,7 +224,7 @@ pub fn snapshot(fresh: bool) -> Snapshot {
     let procs = run(&mut ps_command(), CMD_TIMEOUT).map(|t| parse_ps(&t)).unwrap_or_default();
     let (mut ports, mut cwds, mut ports_error) = (Vec::new(), HashMap::new(), None);
     if cache.ports_failed_at.is_some_and(|t| t.elapsed() < PORTS_BACKOFF) {
-        ports_error = Some("포트 읽기가 시간을 넘겨 잠시 쉰다".to_string());
+        ports_error = Some("포트 읽기가 시간을 넘겨 잠시 쉬어요".to_string());
     } else {
         let mut lsof = Command::new("lsof");
         lsof.env("LC_ALL", "C").args(["-b", "-w", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]);
@@ -244,7 +244,7 @@ pub fn snapshot(fresh: bool) -> Snapshot {
             }
             None => {
                 cache.ports_failed_at = Some(Instant::now());
-                ports_error = Some("포트를 읽지 못했다 (lsof 가 없거나 시간을 넘겼다)".to_string());
+                ports_error = Some("포트를 읽지 못했어요. lsof 가 없거나 시간을 넘겼어요".to_string());
             }
         }
     }
@@ -407,28 +407,28 @@ pub fn report(snap: &Snapshot, roots: &[SessionRoot], worktrees: &[String], me: 
 pub fn stop_port_process(pid: u32, port: u16, roots: &[SessionRoot], worktrees: &[String]) -> Result<(), String> {
     let me = std::process::id();
     if pid == me {
-        return Err("thuminal 데몬 자신은 멈추지 않는다".into());
+        return Err("thuminal 데몬 자신은 멈출 수 없어요".into());
     }
     let r = report(&snapshot(true), roots, worktrees, me);
     if let Some(e) = r.ports_error {
         return Err(e);
     }
     let Some(p) = r.ports.iter().find(|p| p.pid == pid && p.port == port) else {
-        return Err(format!("pid {pid} 는 이제 포트 {port} 를 열고 있지 않다"));
+        return Err(format!("pid {pid} 는 이제 포트 {port} 를 열고 있지 않아요"));
     };
     if p.via == PortVia::External {
-        return Err(format!("포트 {port} 는 세션 · 워크트리 밖 프로세스라 멈추지 않는다"));
+        return Err(format!("포트 {port} 는 세션이나 워크트리 밖 프로세스라 멈출 수 없어요"));
     }
     // 다른 thuminal 데몬(개발 데몬 등)은 그 밑 터미널이 모두 끝나므로 멈추지 않는다
     if program_names(&p.command).iter().any(|n| n == "thuminald") || p.process == "thuminald" {
-        return Err("thuminal 데몬은 멈추지 않는다".into());
+        return Err("thuminal 데몬은 멈출 수 없어요".into());
     }
-    let Ok(raw) = i32::try_from(pid) else { return Err("pid 가 맞지 않다".into()) };
+    let Ok(raw) = i32::try_from(pid) else { return Err("pid 가 올바르지 않아요".into()) };
     if raw <= 1 {
-        return Err("pid 가 맞지 않다".into());
+        return Err("pid 가 올바르지 않아요".into());
     }
     if unsafe { libc::kill(raw, libc::SIGTERM) } != 0 {
-        return Err(format!("pid {pid} 에 신호를 보내지 못했다: {}", std::io::Error::last_os_error()));
+        return Err(format!("pid {pid} 에 신호를 보내지 못했어요: {}", std::io::Error::last_os_error()));
     }
     Ok(())
 }

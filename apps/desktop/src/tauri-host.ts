@@ -53,7 +53,7 @@ import type {
 /** 앱 화면 배율. 창 하나의 것이라 로컬·원격 HostApi 가 같이 본다 */
 let uiZoom = 1;
 
-const remoteOnly = (what: string) => Promise.reject(new Error(`원격 컴퓨터에서는 아직 ${what}을(를) 할 수 없다`));
+const remoteOnly = (what: string) => Promise.reject(new Error(`원격 컴퓨터에서는 아직 쓸 수 없는 기능이에요: ${what}`));
 
 /** 원격 호스트 관리 (src-tauri hosts_* 명령). 호스트마다 HostApi 를 하나씩 만들어 둔다 */
 class TauriHosts implements RemoteHostsApi {
@@ -163,7 +163,7 @@ export class TauriHostApi implements HostApi {
     all: (worktree) => this.req({ type: "list_files", worktree }, (r) => ({ files: r.files as string[], truncated: !!r.truncated })),
     write: (worktree, file, text, expectModified) =>
       this.req<FileContent>({ type: "write_file", worktree, file, text, expect_modified: expectModified ?? null }, (r) => r.file).catch((e) => {
-        // 데몬 오류는 `데몬이 오류로 답했다: Conflict …` 글로 온다 (src-tauri err)
+        // 데몬 오류는 `데몬이 오류로 답했어요: Conflict …` 글로 온다 (src-tauri err)
         throw /: Conflict /.test(String(e)) ? new FileConflictError(String(e).replace(/^.*?: Conflict /, "")) : e;
       }),
     // src-tauri media.rs 가 Range 를 받아 데몬에서 조각씩 읽는다

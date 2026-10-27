@@ -207,7 +207,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
                 {a.cmd === defaultAgent && <DropdownMenuShortcut>⌥⌘T</DropdownMenuShortcut>}
               </DropdownMenuItem>
             ))}
-            {installed.length === 0 && <div className="px-2 py-1.5 text-[12px] leading-5 text-muted-foreground">에이전트를 찾지 못했다</div>}
+            {installed.length === 0 && <div className="px-2 py-1.5 text-[12px] leading-5 text-muted-foreground">에이전트를 찾지 못했어요</div>}
             <DropdownMenuItem className={ITEM} onSelect={agentSettings}>
               <GearSixIcon className={ICON} />
               에이전트 설정…

@@ -32,6 +32,6 @@ pub async fn notify(title: String, subtitle: Option<String>, body: String, sessi
 /// Dock 배지 숫자. 0 이면 지운다
 #[tauri::command]
 pub async fn set_badge(app: AppHandle, count: u32) -> CmdResult<()> {
-    let w = app.get_webview_window("main").ok_or("메인 창이 없다")?;
+    let w = app.get_webview_window("main").ok_or("메인 창을 찾지 못했어요")?;
     w.set_badge_count(if count == 0 { None } else { Some(count as i64) }).map_err(|e| e.to_string())
 }

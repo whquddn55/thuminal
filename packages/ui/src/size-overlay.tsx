@@ -44,7 +44,7 @@ export function SizeTakenOverlay({ c, cols, rows }: { c: TerminalController; col
       onWheel={stop}
     >
       <div className="text-sm text-foreground">
-        다른 기기 크기{cols && rows ? `(${cols}×${rows})` : ""}로 그려지는 중
+        다른 기기 크기{cols && rows ? `(${cols}×${rows})` : ""}로 그리는 중
       </div>
       <Button size="sm" onClick={() => c.claimSize()}>
         세션 가져오기

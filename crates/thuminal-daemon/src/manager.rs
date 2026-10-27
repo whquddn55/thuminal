@@ -174,7 +174,7 @@ pub struct Manager {
 }
 
 fn not_found(id: SessionId) -> ErrorBody {
-    ErrorBody { code: ErrorCode::NotFound, message: format!("세션 {id} 이 없다") }
+    ErrorBody { code: ErrorCode::NotFound, message: format!("세션을 찾지 못했어요: {id}") }
 }
 
 fn internal(msg: impl ToString) -> ErrorBody {
@@ -212,7 +212,7 @@ impl Manager {
     }
 
     fn send(&self, id: SessionId, cmd: Cmd) -> Result<(), ErrorBody> {
-        self.handle(id)?.cmd.send(cmd).map_err(|_| internal("세션 스레드가 끝났다"))
+        self.handle(id)?.cmd.send(cmd).map_err(|_| internal("세션 스레드가 끝났어요"))
     }
 
     pub fn create(&self, req: CreateSession) -> Result<SessionInfo, ErrorBody> {
@@ -309,7 +309,7 @@ impl Manager {
 
     pub fn attach(&self, id: SessionId, conn: ConnId, tx: Outbox, format: SnapshotFormat, req_id: u64) -> Result<(), ErrorBody> {
         if format == SnapshotFormat::Native && !self.engine.supports_native_snapshot() {
-            return Err(ErrorBody { code: ErrorCode::InvalidRequest, message: "이 데몬 엔진은 고유 저장본을 만들지 못한다. vt 를 쓴다".into() });
+            return Err(ErrorBody { code: ErrorCode::InvalidRequest, message: "이 데몬 엔진은 고유 저장본을 만들지 못해요. vt 를 써 주세요".into() });
         }
         self.send(id, Cmd::Attach { conn, tx, format, req_id })
     }
@@ -451,7 +451,7 @@ impl Manager {
 
     /// 그림 하나 (형식, 바이트). `thumb` 이면 줄인 그림
     pub fn agent_image(&self, id: SessionId, image: &str, thumb: bool) -> Result<(String, Vec<u8>), ErrorBody> {
-        let Some(t) = self.transcript_of(id)? else { return Err(ErrorBody { code: ErrorCode::NotFound, message: "에이전트 대화 기록이 없다".into() }) };
+        let Some(t) = self.transcript_of(id)? else { return Err(ErrorBody { code: ErrorCode::NotFound, message: "에이전트 대화 기록이 없어요".into() }) };
         self.images.image(id, &t, image, thumb).map_err(|message| ErrorBody { code: ErrorCode::NotFound, message })
     }
 
@@ -523,7 +523,7 @@ impl Manager {
     /// 기본색을 바꾼다: 저장하고, 모든 세션 엔진에 넣고, 알린다
     pub fn set_colors(&self, colors: TerminalColors) -> Result<(), ErrorBody> {
         if colors.palette.len() > 256 {
-            return Err(ErrorBody { code: ErrorCode::InvalidRequest, message: "palette 는 256개까지다".into() });
+            return Err(ErrorBody { code: ErrorCode::InvalidRequest, message: "palette 는 256개까지 넣을 수 있어요".into() });
         }
         *self.colors.lock().unwrap() = Some(colors.clone());
         let tmp = self.colors_file.with_extension("json.tmp");

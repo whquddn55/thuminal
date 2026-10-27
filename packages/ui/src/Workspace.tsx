@@ -241,13 +241,13 @@ export function EmptyWorkspace({ ws }: { ws: WorkspaceId }) {
   return (
     <div className="grid h-full place-content-center gap-3 text-center text-muted-foreground">
       <TerminalWindowIcon className="mx-auto size-8 opacity-50" />
-      <p>{ws.startsWith("/") ? "이 워크트리에 열린 터미널이 없다." : "열린 터미널이 없다."}</p>
+      <p>{ws.startsWith("/") ? "이 워크트리에 열린 터미널이 없어요." : "열린 터미널이 없어요."}</p>
       <div className="flex justify-center gap-2">
         <Button size="sm" variant="outline" onClick={() => void model.newTab(ws)}>
           새 터미널 (⌘T)
         </Button>
         <Button size="sm" variant="outline" onClick={() => void model.newTab(ws, "claude")}>
-          claude 띄우기
+          claude 실행
         </Button>
       </div>
       <p className="text-2xs">⌘D 오른쪽에 나누기 · ⌘⇧D 아래에 나누기 · ⌘⌥A {floating ? "플로팅 닫기" : "플로팅"}</p>
@@ -403,7 +403,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           {mates.length > 0 && pane.type === "terminal" && (
             <button
               className="flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
-              title={`팀원 ${mates.map(mateName).join(", ")} (눌러서 목록 ${teamOpen ? "닫기" : "보기"})`}
+              title={`팀원 ${mates.map(mateName).join(", ")}. 눌러서 목록 ${teamOpen ? "닫기" : "보기"}`}
               onClick={() => model.toggleTeam(pane.session)}
             >
               {mates.map((m) => (
@@ -439,7 +439,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
         {session?.state.state === "exited" && (
           <div className="absolute right-2 bottom-2 z-[8] flex items-center gap-2 rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md">
             <span>
-              끝났다{session.state.code !== null && ` (코드 ${session.state.code})`}
+              끝남{session.state.code !== null && ` (코드 ${session.state.code})`}
             </span>
             <Button size="xs" variant="outline" onClick={() => void model.op({ op: "close_pane", target: id })}>
               닫기
@@ -483,7 +483,7 @@ export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; pan
           onSelect={() =>
             void navigator.clipboard.readText().then(
               (t) => c().paste(t),
-              (e) => model.fail(`클립보드를 읽지 못했다: ${e}`),
+              (e) => model.fail(`클립보드를 읽지 못했어요: ${e}`),
             )
           }
         >

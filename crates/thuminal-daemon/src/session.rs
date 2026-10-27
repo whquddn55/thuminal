@@ -142,7 +142,7 @@ pub fn start(
             }
             if let Some(replay) = restore.replay {
                 engine.feed(&replay);
-                engine.feed("\r\n\x1b[2m── thuminal: 이전 화면을 되살렸다 ──\x1b[0m\r\n".as_bytes());
+                engine.feed("\r\n\x1b[2m── thuminal: 이전 화면을 되살렸어요 ──\x1b[0m\r\n".as_bytes());
                 // 저장본 안의 질의(커서 위치 등)에 대한 답은 새 셸에 보내지 않는다. 벨·알림도 옛것이다
                 engine.take_replies();
                 engine.take_events();

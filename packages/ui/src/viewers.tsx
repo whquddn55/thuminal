@@ -139,7 +139,7 @@ function DiffView({ host, worktree, doc, generation }: { host: HostApi; worktree
         <span className="text-red-500">−{dels}</span>
       </Head>
       {lines.length === 0 ? (
-        <div className="p-4 text-muted-foreground">바뀐 내용이 없다 (이미 스테이지했거나 되돌렸다)</div>
+        <div className="p-4 text-muted-foreground">바뀐 내용이 없어요. 이미 스테이지했거나 되돌렸어요.</div>
       ) : (
         <table className={cn("w-full border-collapse", ROW)}>
           <tbody>
@@ -281,12 +281,12 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
     <Head>
       <span className="flex-1 truncate font-mono">{doc.file}</span>
       {dirty && (
-        <span className="shrink-0 text-amber-500" title="저장하지 않은 고친 내용이 있다">
+        <span className="shrink-0 text-amber-500" title="저장하지 않은 고친 내용이 있어요">
           ● 저장 안 됨
         </span>
       )}
       {!dirty && <span className="text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>}
-      {file.truncated && <span className="text-amber-500">앞 2MB만 보인다</span>}
+      {file.truncated && <span className="text-amber-500">앞 2MB만 보여요</span>}
       {markdown && !file.binary && <Toggle value={view} onChange={changeView} />}
       {dirty && editable && (
         <button
@@ -311,8 +311,8 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
       return bar(
         "bg-amber-500/10 text-amber-600 dark:text-amber-400",
         <>
-          <span className="flex-1">다른 곳에서 이 파일을 바꿨다. 저장하면 그 내용을 덮어쓴다.</span>
-          {btn("다시 읽기 (고친 것 버림)", reload)}
+          <span className="flex-1">다른 곳에서 이 파일을 바꿨어요. 저장하면 그 내용을 덮어써요.</span>
+          {btn("고친 것 버리고 다시 읽기", reload)}
           {btn("덮어쓰기", () => doSave(true))}
         </>,
       );
@@ -320,7 +320,7 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
       return bar(
         "bg-destructive/10 text-destructive",
         <>
-          <span className="flex-1">저장하지 못했다: {save.message}</span>
+          <span className="flex-1">저장하지 못했어요: {save.message}</span>
           {btn("닫기", () => setSave({ kind: "idle" }))}
         </>,
       );
@@ -332,7 +332,7 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
       <>
         {head}
         <div className="p-4 text-muted-foreground">
-          {media && supported === false ? "데몬이 옛 판이라 그림 · 영상을 보일 수 없다. 데몬을 다시 띄우면 보인다." : "글자 파일이 아니다"}
+          {media && supported === false ? "데몬이 이전 버전이라 그림, 영상을 볼 수 없어요. 데몬을 다시 시작하면 볼 수 있어요." : "글자 파일이 아니에요"}
         </div>
       </>,
     );
@@ -362,7 +362,7 @@ function FileView({ host, worktree, doc, generation, actions }: { host: HostApi;
         {head}
         {banner}
         {supported === false && (
-          <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">데몬이 옛 판이라 읽기만 된다. 데몬을 다시 띄우면 여기서 고칠 수 있다.</div>
+          <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">데몬이 이전 버전이라 읽기만 할 수 있어요. 데몬을 다시 시작하면 여기서 고칠 수 있어요.</div>
         )}
         <div className="min-h-0 flex-1">
           <Suspense fallback={<div className="p-4 text-muted-foreground">불러오는 중…</div>}>
@@ -412,7 +412,7 @@ function MediaView({ host, worktree, file, kind }: { host: HostApi; worktree: st
       </Head>
       <div className={cn("min-h-0 flex-1 thm-scroll", actual ? "overflow-auto" : "flex items-center justify-center overflow-hidden p-3")}>
         {failed ? (
-          <div className="p-4 text-muted-foreground">열지 못했다. 이 앱이 재생하지 못하는 형식이거나 파일을 읽지 못했다.</div>
+          <div className="p-4 text-muted-foreground">열지 못했어요. 이 앱이 재생하지 못하는 형식이거나 파일을 읽지 못했어요.</div>
         ) : kind === "image" ? (
           <img
             src={url}

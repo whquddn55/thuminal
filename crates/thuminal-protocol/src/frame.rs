@@ -44,9 +44,9 @@ pub enum Frame {
 pub enum FrameError {
     #[error("알 수 없는 프레임 종류 {0}")]
     UnknownKind(u8),
-    #[error("프레임이 너무 크다: {0} 바이트")]
+    #[error("프레임이 너무 커요: {0} 바이트")]
     TooLarge(usize),
-    #[error("프레임이 잘렸다")]
+    #[error("프레임이 잘렸어요")]
     Truncated,
     #[error("알 수 없는 저장본 형식 {0}")]
     UnknownSnapshotFormat(u8),

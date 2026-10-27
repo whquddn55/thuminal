@@ -126,7 +126,7 @@ function useFileDrop(root: AppModel) {
       if (!el) return;
       const model = root.hostModel(hostAt(el));
       if (!model) return;
-      if (model.services.host.isRemote) return model.notice("원격 컴퓨터 터미널에는 아직 파일을 끌어 놓을 수 없다");
+      if (model.services.host.isRemote) return model.notice("원격 컴퓨터 터미널에는 아직 파일을 끌어 놓을 수 없어요");
       const id = Number(el.dataset.dropPane);
       const pane = Object.values(model.get().layouts)
         .flatMap((l) => l.tabs)
@@ -230,7 +230,7 @@ function HostBand() {
       <span className="min-w-0 flex-1 truncate">
         {host.name}: {HOST_STATE_LABEL[host.state]}
         {host.error && ` (${host.error})`}
-        {host.state === "disconnected" && host.retryInMs !== null && ` · ${Math.ceil(host.retryInMs / 1000)}초 뒤 다시 붙는다`}
+        {host.state === "disconnected" && host.retryInMs !== null && ` · ${Math.ceil(host.retryInMs / 1000)}초 뒤 다시 연결`}
       </span>
       {error ? (
         <Button size="xs" variant="outline" onClick={() => model.setDialog({ kind: "settings", section: "hosts" })}>
@@ -238,7 +238,7 @@ function HostBand() {
         </Button>
       ) : (
         <Button size="xs" variant="outline" onClick={() => void model.root.services.host.hosts?.reconnect(model.hostKey).catch(model.fail)}>
-          다시 붙기
+          다시 연결
         </Button>
       )}
     </div>

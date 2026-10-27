@@ -96,7 +96,7 @@ async fn restores_sessions_after_signal_stop_but_not_after_user_stop() {
     assert_eq!((s.cols, s.rows), (70, 12));
     let screen = wait_screen(&c, s.id, "claude --resume abc-123").await;
     assert!(screen.contains("before-reboot"), "이전 화면이 없다:\n{screen}");
-    assert!(screen.contains("이전 화면을 되살렸다"));
+    assert!(screen.contains("이전 화면을 되살렸어요"));
 
     // 4. 사용자가 daemon stop 으로 내리면 다음에 되살리지 않는다
     c.shutdown().await.unwrap();

@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
-    #[error("PTY 를 열지 못했다: {0}")]
+    #[error("PTY 를 열지 못했어요: {0}")]
     Open(String),
-    #[error("프로그램을 띄우지 못했다: {0}")]
+    #[error("프로그램을 실행하지 못했어요: {0}")]
     Spawn(String),
     #[error("PTY 오류: {0}")]
     Io(String),

@@ -57,27 +57,27 @@ pub fn parse_pair_url(input: &str) -> std::result::Result<PairUrl, String> {
     let rest = if let Some(r) = s.strip_prefix("http://") {
         r
     } else if s.starts_with("https://") {
-        return Err("thuminal 원격 접속은 https 가 아니라 http 주소다 (Tailscale 이 길을 암호화한다)".into());
+        return Err("thuminal 원격 접속은 https 가 아니라 http 주소를 써요. 연결은 Tailscale 이 암호화해요".into());
     } else {
-        return Err("http:// 로 시작하는 주소를 붙여 넣는다 (원격 컴퓨터에서 thuminal remote pair <이름>)".into());
+        return Err("http:// 로 시작하는 주소를 붙여 넣어 주세요. 주소는 원격 컴퓨터에서 thuminal remote pair <이름> 으로 만들어요".into());
     };
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
     if authority.contains('@') {
-        return Err("주소에 사용자 정보를 넣지 않는다".into());
+        return Err("주소에 사용자 정보는 넣을 수 없어요".into());
     }
     let (host, port) = split_host_port(authority)?;
-    let ip: IpAddr = host.parse().map_err(|_| format!("IP 주소가 아니다: {host} (Tailscale 주소 100.x.y.z 를 쓴다)"))?;
+    let ip: IpAddr = host.parse().map_err(|_| format!("IP 주소가 아니에요: {host}. Tailscale 주소(100.x.y.z)를 써 주세요"))?;
     if !allowed_ip(ip) {
-        return Err(format!("Tailscale 주소가 아니다: {ip}. 암호화되지 않는 길이라 받지 않는다 (100.64.0.0/10, fd7a:115c:a1e0::/48 만 받는다)"));
+        return Err(format!("Tailscale 주소가 아니에요: {ip}. 암호화되지 않는 연결이라 쓸 수 없어요. 100.64.0.0/10, fd7a:115c:a1e0::/48 주소만 쓸 수 있어요"));
     }
     let token = tail
         .split(['#', '?', '&'])
         .find_map(|part| part.strip_prefix("token="))
         .filter(|t| !t.is_empty())
-        .ok_or("주소에 토큰(#token=…)이 없다")?;
+        .ok_or("주소에 토큰(#token=…)이 없어요")?;
     if !token.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err("토큰 모양이 이상하다 (영문·숫자만)".into());
+        return Err("토큰 모양이 올바르지 않아요. 영문과 숫자만 쓸 수 있어요".into());
     }
     let base = match ip {
         IpAddr::V4(_) => format!("http://{ip}:{port}"),
@@ -88,12 +88,12 @@ pub fn parse_pair_url(input: &str) -> std::result::Result<PairUrl, String> {
 
 fn split_host_port(authority: &str) -> std::result::Result<(&str, u16), String> {
     let (host, port) = if let Some(r) = authority.strip_prefix('[') {
-        let close = r.find(']').ok_or("IPv6 주소의 ] 가 없다")?;
+        let close = r.find(']').ok_or("IPv6 주소에 ] 가 없어요")?;
         let after = &r[close + 1..];
         let port = match after.strip_prefix(':') {
             Some(p) => Some(p),
             None if after.is_empty() => None,
-            None => return Err(format!("주소 모양이 이상하다: {authority}")),
+            None => return Err(format!("주소 모양이 올바르지 않아요: {authority}")),
         };
         (&r[..close], port)
     } else {
@@ -103,10 +103,10 @@ fn split_host_port(authority: &str) -> std::result::Result<(&str, u16), String> 
         }
     };
     if host.is_empty() {
-        return Err("주소가 비었다".into());
+        return Err("주소가 비어 있어요".into());
     }
     let port = match port {
-        Some(p) => p.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("포트가 이상하다: {p}"))?,
+        Some(p) => p.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("포트가 올바르지 않아요: {p}"))?,
         None => DEFAULT_PORT,
     };
     Ok((host, port))
@@ -119,14 +119,14 @@ pub(crate) async fn connect(base: &str, token: &str) -> Result<(ReadHalf<DuplexS
     } else if base.starts_with("ws://") {
         base.to_string()
     } else {
-        return Err(ClientError::ConnectRemote { url: base.into(), reason: "http:// 주소가 아니다".into() });
+        return Err(ClientError::ConnectRemote { url: base.into(), reason: "http:// 주소가 아니에요".into() });
     };
     let url = format!("{}/ws?token={token}", ws_base.trim_end_matches('/'));
     let shown = format!("{}/ws", ws_base.trim_end_matches('/'));
     let config = WebSocketConfig::default().max_message_size(Some(MAX_FRAME)).max_frame_size(Some(MAX_FRAME));
     let fail = |reason: String| ClientError::ConnectRemote { url: shown.clone(), reason };
     let ws = match tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async_with_config(url, Some(config), true)).await {
-        Err(_) => return Err(fail(format!("{}초 안에 답이 없다", CONNECT_TIMEOUT.as_secs()))),
+        Err(_) => return Err(fail(format!("{}초 안에 응답이 없어요", CONNECT_TIMEOUT.as_secs()))),
         Ok(Err(tokio_tungstenite::tungstenite::Error::Http(r))) if r.status().as_u16() == 401 => return Err(ClientError::Unauthorized),
         Ok(Err(tokio_tungstenite::tungstenite::Error::Http(r))) => return Err(fail(format!("HTTP {}", r.status()))),
         Ok(Err(e)) => return Err(fail(e.to_string())),

@@ -22,7 +22,7 @@ fn host_tag(host: &Option<String>) -> CmdResult<Option<&str>> {
     match host.as_deref() {
         None => Ok(None),
         Some(h) if !h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(Some(h)),
-        Some(h) => Err(format!("호스트 id 가 이상하다: {h}")),
+        Some(h) => Err(format!("호스트 id 가 올바르지 않아요: {h}")),
     }
 }
 
@@ -101,7 +101,7 @@ fn emit(app: &AppHandle, event: &str, e: BrowserEvent) {
 }
 
 fn webview(app: &AppHandle, host: &Option<String>, id: u64) -> CmdResult<tauri::Webview> {
-    app.get_webview(&label(host_tag(host)?, id)).ok_or_else(|| format!("{id}번 브라우저 칸이 없다"))
+    app.get_webview(&label(host_tag(host)?, id)).ok_or_else(|| format!("브라우저 칸을 찾지 못했어요: {id}"))
 }
 
 /// 칸 자리에 웹뷰를 연다. 이미 있으면 자리만 옮기고 보인다
@@ -113,7 +113,7 @@ pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, 
         v.set_bounds(rect(x, y, w, h)).map_err(|e| e.to_string())?;
         return v.show().map_err(|e| e.to_string());
     }
-    let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 이상하다: {url} ({e})"))?;
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 올바르지 않아요: {url} ({e})"))?;
     let (a1, a2, a3, a4) = (app.clone(), app.clone(), app.clone(), app.clone());
     let ev = event_name(tag);
     let (e1, e2, e3, e4) = (ev.clone(), ev.clone(), ev.clone(), ev);
@@ -169,7 +169,7 @@ pub async fn browser_visible(app: AppHandle, host: Option<String>, id: u64, visi
 
 #[tauri::command]
 pub async fn browser_navigate(app: AppHandle, host: Option<String>, id: u64, url: String) -> CmdResult<()> {
-    let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 이상하다: {url} ({e})"))?;
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 올바르지 않아요: {url} ({e})"))?;
     webview(&app, &host, id)?.navigate(parsed).map_err(|e| e.to_string())
 }
 

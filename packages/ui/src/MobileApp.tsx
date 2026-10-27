@@ -132,7 +132,7 @@ function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => voi
         <DropdownMenuItem onSelect={() => location.reload()}>새로 고침</DropdownMenuItem>
         {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>다른 데스크톱으로</DropdownMenuItem>}
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onSelect={() => confirm("이 기기의 접속 정보를 지울까? 다시 쓰려면 데스크톱에서 등록해야 한다") && onForget()}>
+        <DropdownMenuItem className="text-destructive" onSelect={() => confirm("이 기기의 접속 정보를 지울까요? 다시 쓰려면 데스크톱에서 등록해야 해요.") && onForget()}>
           접속 정보 지우기
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -144,10 +144,10 @@ function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => voi
       {state !== "open" && (
         <button className="shrink-0 bg-agent-attention/15 px-3 py-1.5 text-left text-[12px] text-foreground" onClick={() => conn.reconnectNow()}>
           {state === "unauthorized"
-            ? "이 기기의 토큰이 더는 맞지 않는다. 데스크톱 설정 → 원격 접속에서 다시 등록한다"
+            ? "이 기기의 토큰이 더는 맞지 않아요. 데스크톱 설정 → 원격 접속에서 다시 등록해 주세요."
             : state === "connecting"
-              ? "데스크톱에 붙는 중…"
-              : "데스크톱과 연결이 끊겼다. 다시 붙는 중 (누르면 바로)"}
+              ? "데스크톱에 연결하는 중…"
+              : "데스크톱과 연결이 끊겼어요. 다시 연결하는 중이에요. 누르면 바로 연결해요."}
         </button>
       )}
       {error && (
@@ -200,14 +200,14 @@ function WebScreen({ ws, pane, back }: { ws: WorkspaceId; pane: number; back: ()
     <>
       <Header title="브라우저" sub={wsTitle(ws, worktrees)} back={back} />
       <div className="relative min-h-0 flex-1">
-        {url ? <FramePane paneId={pane} url={url} focused /> : <p className="p-6 text-center text-[13px] text-muted-foreground">칸이 닫혔다</p>}
+        {url ? <FramePane paneId={pane} url={url} focused /> : <p className="p-6 text-center text-[13px] text-muted-foreground">칸이 닫혔어요</p>}
       </div>
     </>
   );
 }
 
 function wsTitle(ws: WorkspaceId, worktrees: WorktreeInfo[]): string {
-  if (ws === FLOATING_WORKSPACE) return "떠 있는 터미널";
+  if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
   if (ws === OTHER_WORKSPACE) return "기타";
   const w = worktrees.find((x) => x.path === ws);
   return w ? worktreeTitle(w) : ws.split("/").pop() || ws;
@@ -283,7 +283,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{g.name}</span>
                 <span className="text-[11px] tabular-nums text-muted-foreground">{g.repos.length}</span>
               </button>
-              {open && (projects.length ? projects : <p className="px-4 pb-2 text-[12px] text-muted-foreground">워크트리가 있는 프로젝트가 없다</p>)}
+              {open && (projects.length ? projects : <p className="px-4 pb-2 text-[12px] text-muted-foreground">워크트리가 있는 프로젝트가 없어요</p>)}
             </div>
           );
         })}
@@ -299,7 +299,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
             ))}
           </Section>
         )}
-        {!repos.length && !extra.length && <p className="p-6 text-center text-[13px] text-muted-foreground">데스크톱에 등록한 프로젝트가 없다</p>}
+        {!repos.length && !extra.length && <p className="p-6 text-center text-[13px] text-muted-foreground">데스크톱에 등록한 프로젝트가 없어요</p>}
       </div>
     </>
   );
@@ -400,7 +400,7 @@ function LineageToggle({ paths, count, open, onToggle, nested }: { paths: string
 }
 
 function statusText(s: Status): string {
-  return { attention: "묻고 있다", error: "오류로 끝났다", working: "일하는 중", interrupted: "멈췄다", done: "끝냈다", ready: "기다리는 중" }[s as string] ?? "";
+  return { attention: "응답 대기", error: "오류로 끝남", working: "일하는 중", interrupted: "멈춤", done: "끝남", ready: "기다리는 중" }[s as string] ?? "";
 }
 
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
@@ -453,7 +453,7 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
     <>
       <Header title={wsTitle(ws, worktrees)} sub={w?.branch} back={back} right={menu} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {ids.length === 0 && webs.length === 0 && <p className="p-6 text-center text-[13px] text-muted-foreground">열린 터미널이 없다</p>}
+        {ids.length === 0 && webs.length === 0 && <p className="p-6 text-center text-[13px] text-muted-foreground">열린 터미널이 없어요</p>}
         {ids.map((id) => {
           const s = sessions[id];
           const mates = Object.values(sessions).filter((m) => m.labels[TEAM_LEADER_LABEL] === String(id));
@@ -465,7 +465,7 @@ function WorkspaceScreen({ ws, go, back, menu }: { ws: WorkspaceId; go: (s: Scre
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px]">{sessionLabel(s)}</div>
                   <div className="truncate text-[11px] text-muted-foreground">
-                    {s?.state.state === "exited" ? "끝났다" : s?.agent?.last_assistant_message || s?.agent?.prompt || s?.cwd || ""}
+                    {s?.state.state === "exited" ? "끝남" : s?.agent?.last_assistant_message || s?.agent?.prompt || s?.cwd || ""}
                   </div>
                 </div>
                 <CaretRightIcon className="size-4 text-muted-foreground" />
@@ -711,7 +711,7 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
         >
           <input
             className="h-10 min-w-0 flex-1 rounded-lg border bg-background px-3 text-[15px] outline-none focus:border-ring"
-            placeholder="명령이나 메시지를 쓰고 보낸다"
+            placeholder="명령이나 메시지 입력"
             value={line}
             enterKeyHint="send"
             onChange={(e) => setLine(e.target.value)}
@@ -754,7 +754,7 @@ export function PairScreen({ onToken }: { onToken: (token: string) => void }) {
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background p-6 text-foreground">
       <h1 className="text-xl font-semibold">thuminal</h1>
       <p className="max-w-sm text-center text-[14px] leading-6 text-muted-foreground">
-        이 기기는 아직 등록하지 않았다. 데스크톱 thuminal의 설정 → 원격 접속에서 [기기 등록]을 누르고, 나온 QR을 찍거나 주소를 붙여 넣는다.
+        이 기기는 아직 등록하지 않았어요. 데스크톱 thuminal의 설정 → 원격 접속에서 [기기 등록]을 누르고, 나온 QR을 찍거나 주소를 붙여 넣어 주세요.
       </p>
       <input
         className="h-11 w-full max-w-sm rounded-lg border bg-card px-3 text-[14px] outline-none focus:border-ring"
@@ -767,7 +767,7 @@ export function PairScreen({ onToken }: { onToken: (token: string) => void }) {
         className="h-11 w-full max-w-sm rounded-lg bg-primary text-[14px] font-medium text-primary-foreground disabled:opacity-40"
         onClick={() => token && onToken(token)}
       >
-        붙기
+        연결
       </button>
     </div>
   );

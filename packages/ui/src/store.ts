@@ -247,7 +247,7 @@ export const HOST_STATE_LABEL: Record<RemoteHostState, string> = {
   connecting: "연결 중",
   disconnected: "끊김",
   unauthorized: "토큰 거절",
-  version_mismatch: "판이 다름",
+  version_mismatch: "버전이 다름",
 };
 
 /** 다시 등록해야 풀리는 상태 (다시 붙어도 그대로다) */
@@ -708,7 +708,7 @@ export class AppModel {
       };
       c.isAgent = () => !!this.get().sessions[id]?.agent;
       this.controllers.set(id, c);
-      c.open().catch((e) => this.fail(`세션 ${id}에 붙지 못했다: ${e}`));
+      c.open().catch((e) => this.fail(`세션 ${id}에 연결하지 못했어요: ${e}`));
     }
     return c;
   }
@@ -744,19 +744,19 @@ export class AppModel {
     const remote = !!host.isRemote;
     if (mode === "system" && host.openPath && !remote) return void host.openPath(link.path).catch(fail);
     // thuminal 안: 폴더는 Finder, HTML 은 브라우저 칸, 워크트리 안 파일은 파일 칸 (줄까지)
-    if (link.isDir) return remote ? this.notice("원격 컴퓨터 폴더는 아직 열 수 없다") : void host.reveal(link.path).catch(fail);
+    if (link.isDir) return remote ? this.notice("원격 컴퓨터 폴더는 아직 열 수 없어요") : void host.reveal(link.path).catch(fail);
     if (/\.html?$/i.test(link.path) && host.browser && !remote) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
     const wt = this.get()
       .worktrees.filter((w) => link.path.startsWith(`${w.path}/`))
       .sort((a, b) => b.path.length - a.path.length)[0];
     if (!wt) {
-      if (remote) return this.notice("원격 컴퓨터의 워크트리 밖 파일은 아직 열 수 없다");
+      if (remote) return this.notice("원격 컴퓨터의 워크트리 밖 파일은 아직 열 수 없어요");
       // 파일 칸은 워크트리 안 파일만 연다. 밖이면 기본 앱으로
       if (host.openPath) {
-        this.notice("워크트리 밖 파일이라 기본 앱으로 열었다");
+        this.notice("워크트리 밖 파일이라 기본 앱으로 열었어요");
         return void host.openPath(link.path).catch(fail);
       }
-      return this.notice("워크트리 밖 파일은 열 수 없다");
+      return this.notice("워크트리 밖 파일은 열 수 없어요");
     }
     if (this.get().active !== wt.path) this.select(wt.path);
     this.openDoc({ kind: "file", file: link.path.slice(wt.path.length + 1), ...(link.line ? { line: String(link.line) } : {}) });
@@ -1050,8 +1050,8 @@ export class AppModel {
     const ask = (busy: string[]) =>
       this.setDialog({
         kind: "confirm",
-        title: `${what} 닫을까?`,
-        body: `${[...new Set(busy)].join(", ")}가 돌고 있다. 닫으면 그 세션이 끝난다.`,
+        title: `${what} 닫을까요?`,
+        body: `${[...new Set(busy)].join(", ")}가 실행 중이에요. 닫으면 그 세션이 끝나요.`,
         action: "닫기",
         run,
       });
@@ -1332,7 +1332,7 @@ export class AppModel {
       const main = this.get().worktrees.find((w) => w.repo === repos[0]?.id && w.is_main);
       if (main) this.select(main.path);
     } catch (e) {
-      this.fail(`프로젝트를 등록하지 못했다: ${e}`);
+      this.fail(`프로젝트를 등록하지 못했어요: ${e}`);
     }
   };
 
@@ -1386,7 +1386,7 @@ export class AppModel {
       if (s.running && pick.running === "move") {
         const stopped = await host.stopClaudeSession(s.session_id).then(
           () => true,
-          (e) => (failed.push(`${s.title || s.session_id}: Orca 쪽 claude를 끄지 못했다 (${e})`), false),
+          (e) => (failed.push(`${s.title || s.session_id}: Orca 쪽 claude를 끄지 못했어요 (${e})`), false),
         );
         if (!stopped) continue;
       }
@@ -1397,7 +1397,7 @@ export class AppModel {
       );
     }
     if (names || parents) await this.refreshWorkspace();
-    const done = `Orca에서 가져왔다: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, 하위 워크트리 ${parents}개, claude 세션 ${sessions}개`;
+    const done = `Orca에서 가져왔어요: 프로젝트 ${repos}개, 워크트리 이름 ${names}개, 하위 워크트리 ${parents}개, claude 세션 ${sessions}개`;
     if (failed.length) this.fail(`${done}. 못 가져온 것: ${failed.join(" / ")}`);
     else this.notice(done);
   };
@@ -1420,7 +1420,7 @@ export class AppModel {
       return groups;
     } catch (e) {
       this.set({ groups: prev });
-      this.fail(`워크스페이스를 바꾸지 못했다: ${e}`);
+      this.fail(`워크스페이스를 바꾸지 못했어요: ${e}`);
       return null;
     }
   };
@@ -1458,7 +1458,7 @@ export class AppModel {
       if (req.start === "shell") await this.newTab(w.path);
       else if (req.start === "claude") await this.newTab(w.path, "claude");
     } catch (e) {
-      this.fail(`워크트리를 만들지 못했다: ${e}`);
+      this.fail(`워크트리를 만들지 못했어요: ${e}`);
     } finally {
       this.set((s) => ({ creating: s.creating.filter((c) => c !== item) }));
     }
@@ -1472,7 +1472,7 @@ export class AppModel {
       if (this.get().active === w.path) this.set({ active: OTHER_WORKSPACE });
       await this.refreshWorkspace();
     } catch (e) {
-      this.fail(`워크트리를 지우지 못했다: ${e}`);
+      this.fail(`워크트리를 지우지 못했어요: ${e}`);
     }
   };
 

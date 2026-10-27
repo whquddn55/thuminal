@@ -192,7 +192,7 @@ async fn forward(State(ctx): State<Arc<Ctx>>, mut req: Request) -> Response {
     let (query_token, clean) = take_token(req.uri());
     if let Some(t) = query_token {
         if ctx.remote.device_for(&t).is_none() {
-            return page(StatusCode::UNAUTHORIZED, "thuminal 원격 접속 토큰이 맞지 않는다. 데스크톱 앱 설정 → 원격 접속에서 기기를 다시 등록한다");
+            return page(StatusCode::UNAUTHORIZED, "thuminal 원격 접속 토큰이 맞지 않아요. 데스크톱 앱 설정 → 원격 접속에서 기기를 다시 등록해 주세요");
         }
         let cookie = format!("{TOKEN_NAME}={t}; Path=/; HttpOnly; SameSite=Lax");
         return Response::builder()
@@ -204,7 +204,7 @@ async fn forward(State(ctx): State<Arc<Ctx>>, mut req: Request) -> Response {
             .unwrap();
     }
     if take_cookie(req.headers_mut()).is_none_or(|t| ctx.remote.device_for(&t).is_none()) {
-        return page(StatusCode::UNAUTHORIZED, "thuminal 원격 접속으로 연 브라우저 칸에서만 볼 수 있다");
+        return page(StatusCode::UNAUTHORIZED, "thuminal 원격 접속으로 연 브라우저 칸에서만 볼 수 있어요");
     }
 
     let upgrade = req.headers().contains_key(header::UPGRADE);
@@ -233,19 +233,19 @@ async fn forward(State(ctx): State<Arc<Ctx>>, mut req: Request) -> Response {
     let stream = match tokio::net::TcpStream::connect(&ctx.target.connect).await {
         Ok(s) => s,
         Err(e) => {
-            return page(StatusCode::BAD_GATEWAY, &format!("이 컴퓨터의 {} 에 붙지 못했다 ({e}). 개발 서버가 떠 있는지 본다", ctx.target.authority));
+            return page(StatusCode::BAD_GATEWAY, &format!("이 컴퓨터의 개발 서버에 연결하지 못했어요 ({}): {e}. 개발 서버가 실행 중인지 확인해 주세요", ctx.target.authority));
         }
     };
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(TokioIo::new(stream)).await {
         Ok(v) => v,
-        Err(e) => return page(StatusCode::BAD_GATEWAY, &format!("{} 와 이야기하지 못했다: {e}", ctx.target.authority)),
+        Err(e) => return page(StatusCode::BAD_GATEWAY, &format!("개발 서버와 통신하지 못했어요 ({}): {e}", ctx.target.authority)),
     };
     tokio::spawn(async move {
         let _ = conn.with_upgrades().await;
     });
     let mut res = match sender.send_request(axum::http::Request::from_parts(parts, body)).await {
         Ok(r) => r,
-        Err(e) => return page(StatusCode::BAD_GATEWAY, &format!("{} 가 답하지 않았다: {e}", ctx.target.authority)),
+        Err(e) => return page(StatusCode::BAD_GATEWAY, &format!("개발 서버가 응답하지 않았어요 ({}): {e}", ctx.target.authority)),
     };
 
     if res.status() == StatusCode::SWITCHING_PROTOCOLS

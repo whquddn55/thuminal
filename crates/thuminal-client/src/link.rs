@@ -127,7 +127,7 @@ where
                 inner.client.lock().unwrap().take();
                 inner.status.send_modify(|s| {
                     s.state = LinkState::Disconnected;
-                    s.error = Some("연결이 끊겼다".into());
+                    s.error = Some("연결이 끊겼어요".into());
                 });
                 delay = FIRST_DELAY;
                 Some(next(&mut delay))

@@ -244,7 +244,7 @@ fn parse_time_ms(s: &str) -> Option<u64> {
 
 /// 원본을 긴 변 [`THUMB_SIZE`] 로 줄인다. 투명이 있으면 PNG, 없으면 JPEG
 pub fn thumbnail(bytes: &[u8]) -> Result<(String, Vec<u8>), String> {
-    let img = image::load_from_memory(bytes).map_err(|e| format!("그림을 풀지 못했다: {e}"))?;
+    let img = image::load_from_memory(bytes).map_err(|e| format!("그림을 풀지 못했어요: {e}"))?;
     let small = if img.width() > THUMB_SIZE || img.height() > THUMB_SIZE { img.thumbnail(THUMB_SIZE, THUMB_SIZE) } else { img };
     let mut out = std::io::Cursor::new(Vec::new());
     if small.color().has_alpha() {
@@ -298,9 +298,9 @@ impl Images {
             if scan.images.iter().all(|f| f.info.id != id) {
                 let _ = scan.update();
             }
-            scan.read(id).map_err(|e| format!("대화 기록을 읽지 못했다: {e}"))?
+            scan.read(id).map_err(|e| format!("대화 기록을 읽지 못했어요: {e}"))?
         };
-        let Some((media_type, bytes)) = found else { return Err(format!("그림이 없다: {id}")) };
+        let Some((media_type, bytes)) = found else { return Err(format!("그림을 찾지 못했어요: {id}")) };
         if !thumb {
             return Ok((media_type, bytes));
         }

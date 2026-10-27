@@ -151,7 +151,7 @@ impl Remote {
     /// 설정을 바꾸고 받는 주소를 다시 맞춘다
     pub async fn set(&self, enabled: Option<bool>, port: Option<u16>, lan: Option<bool>) -> Result<RemoteStatus, String> {
         if port == Some(0) {
-            return Err("포트는 1 이상이어야 한다".into());
+            return Err("포트는 1 이상이어야 해요".into());
         }
         {
             let mut st = self.state.lock().unwrap();
@@ -207,7 +207,7 @@ impl Remote {
             let before = st.devices.len();
             st.devices.retain(|d| d.id != id);
             if st.devices.len() == before {
-                return Err(format!("등록한 기기가 아니다: {id}"));
+                return Err(format!("등록한 기기가 아니에요: {id}"));
             }
             self.save(&st);
         }
@@ -322,7 +322,7 @@ impl Remote {
                         }),
                     );
                 }
-                Err(e) => errors.push(format!("{addr} 에서 받지 못했다: {e}")),
+                Err(e) => errors.push(format!("수신 대기하지 못했어요 ({addr}): {e}")),
             }
         }
         *self.error.lock().unwrap() = (!errors.is_empty()).then(|| errors.join("\n"));
@@ -408,7 +408,7 @@ struct TokenQuery {
 }
 
 fn unauthorized() -> Response {
-    (StatusCode::UNAUTHORIZED, "토큰이 맞지 않는다. 데스크톱 앱 설정 → 원격 접속에서 기기를 다시 등록한다").into_response()
+    (StatusCode::UNAUTHORIZED, "토큰이 맞지 않아요. 데스크톱 앱 설정 → 원격 접속에서 기기를 다시 등록해 주세요").into_response()
 }
 
 /// 브라우저 웹소켓은 거절된 까닭(401)을 알려 주지 않는다. 붙기 전에 토큰이 맞는지 여기서 본다
@@ -534,7 +534,7 @@ async fn worktree_file(State(server): State<Arc<Server>>, Query(q): Query<FileQu
                     return Ok((StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{size}"))]).into_response());
                 }
             },
-            None if size > WHOLE_FILE_MAX => return Ok((StatusCode::PAYLOAD_TOO_LARGE, "Range 로 나눠 받는다").into_response()),
+            None if size > WHOLE_FILE_MAX => return Ok((StatusCode::PAYLOAD_TOO_LARGE, "파일이 커서 Range 로 나눠 받아야 해요").into_response()),
             None => (0, size.saturating_sub(1), false),
         };
         let mut body = Vec::with_capacity((end + 1 - start) as usize);
@@ -569,7 +569,7 @@ async fn worktree_file(State(server): State<Arc<Server>>, Query(q): Query<FileQu
 /// 웹 화면 파일. 없는 경로(확장자 없는 것)는 index.html 로 답한다
 async fn static_file(State(server): State<Arc<Server>>, uri: Uri) -> Response {
     let Some(root) = server.remote.web_root.clone() else {
-        return (StatusCode::NOT_FOUND, "웹 화면 파일을 찾지 못했다 (apps/web 을 빌드하거나 앱 번들 Resources/web)").into_response();
+        return (StatusCode::NOT_FOUND, "웹 화면 파일을 찾지 못했어요. apps/web 을 빌드하거나 앱 번들의 Resources/web 을 확인해 주세요").into_response();
     };
     let rel = uri.path().trim_start_matches('/');
     let rel = if rel.is_empty() { "index.html" } else { rel };

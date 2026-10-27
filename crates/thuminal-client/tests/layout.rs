@@ -143,7 +143,7 @@ async fn split_spawns_shell_types_input_and_close_removes_session() {
     assert!(c.list().await.unwrap().iter().all(|s| s.id != new));
     // 없는 칸은 NotFound
     let err = c.layout(LayoutOp::Focus { target: PaneRef::Id(PaneId(99)) }).await.unwrap_err();
-    assert!(matches!(err, ClientError::Daemon(ErrorCode::NotFound, ref m) if m == "칸 p99 이 없다"), "{err:?}");
+    assert!(matches!(err, ClientError::Daemon(ErrorCode::NotFound, ref m) if m == "칸을 찾지 못했어요: p99"), "{err:?}");
 }
 
 #[tokio::test]

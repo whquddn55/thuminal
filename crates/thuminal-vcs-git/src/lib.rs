@@ -23,7 +23,7 @@ fn git_raw(dir: &Path, args: &[&str]) -> Result<Vec<u8>, VcsError> {
         .env("GIT_PAGER", "cat")
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
-        .map_err(|e| VcsError::Command(format!("git 을 실행하지 못했다: {e}")))?;
+        .map_err(|e| VcsError::Command(format!("git 을 실행하지 못했어요: {e}")))?;
     if out.status.success() {
         Ok(out.stdout)
     } else {
@@ -172,7 +172,7 @@ impl Vcs for GitCli {
             .env("LC_ALL", "C")
             .env("GIT_TERMINAL_PROMPT", "0")
             .output()
-            .map_err(|e| VcsError::Command(format!("git 을 실행하지 못했다: {e}")))?;
+            .map_err(|e| VcsError::Command(format!("git 을 실행하지 못했어요: {e}")))?;
         if out.status.success() {
             return Ok(());
         }

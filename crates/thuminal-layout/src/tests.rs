@@ -94,7 +94,7 @@ fn failed_spawn_leaves_layout_unchanged() {
     let r = s.apply(LayoutOp::Apply { workspace: W.into(), tab: None, spec, focus: true }, &mut f);
     assert!(matches!(r, Err(LayoutError::Spawn(_))));
     assert_eq!(s, before);
-    assert!(matches!(s.apply(split(9, Side::Right), &mut f), Err(LayoutError::NotFound(m)) if m == "칸 p9 이 없다"));
+    assert!(matches!(s.apply(split(9, Side::Right), &mut f), Err(LayoutError::NotFound(m)) if m == "칸을 찾지 못했어요: p9"));
     assert!(matches!(
         s.apply(LayoutOp::Split { target: id(1), side: Side::Right, size: Some(0.99), spawn: Spawn::default(), focus: true, doc: None }, &mut f),
         Err(LayoutError::Invalid(_))

@@ -114,10 +114,10 @@ export class WebHostApi implements HostApi {
         if (this.ws !== ws) return;
         this.ws = null;
         this.ready = null;
-        for (const w of this.waits.values()) w.reject(new Error("데몬과 연결이 끊겼다"));
+        for (const w of this.waits.values()) w.reject(new Error("데몬과 연결이 끊겼어요"));
         this.waits.clear();
         this.outputs.clear();
-        if (!opened) reject(new Error("데몬에 붙지 못했다"));
+        if (!opened) reject(new Error("데몬에 연결하지 못했어요"));
         void this.afterClose();
       };
     });
@@ -175,7 +175,7 @@ export class WebHostApi implements HostApi {
   /** 요청을 보내고 응답 `ok` 를 돌려준다 (붙기 전에는 쓰지 않는다: hello 가 쓴다) */
   private send(request: Json): Promise<Json> {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("데몬과 연결이 끊겼다"));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("데몬과 연결이 끊겼어요"));
     const id = this.nextId++;
     const body = enc.encode(JSON.stringify({ kind: "request", id, request }));
     const frame = new Uint8Array(1 + body.length);
@@ -417,7 +417,7 @@ export class WebHostApi implements HostApi {
 
   /** 브라우저에는 폴더 고르기 창이 없다. 데스크톱의 경로를 글로 받는다 */
   async pickFolder(): Promise<string | null> {
-    const p = window.prompt("데스크톱 컴퓨터의 폴더 경로 (예: ~/workspace/my-app)");
+    const p = window.prompt("데스크톱 컴퓨터의 폴더 경로를 적어 주세요 (예: ~/workspace/my-app)");
     return p?.trim() || null;
   }
 

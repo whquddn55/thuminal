@@ -138,8 +138,8 @@ function NewWorktreeDialog({ initialRepo, parent, onClose }: { initialRepo: stri
           <DialogTitle>{parentWt ? "하위 워크트리" : "새 워크트리"}</DialogTitle>
           <DialogDescription>
             {parentWt
-              ? `"${worktreeTitle(parentWt)}" 밑에 하위 워크트리를 만든다. 부모 브랜치에서 시작하고, 사이드바에서 부모 밑에 들여 보인다.`
-              : "새 브랜치를 저장소 옆 폴더에 꺼내고 터미널을 띄운다."}
+              ? `"${worktreeTitle(parentWt)}" 밑에 하위 워크트리를 만들어요. 부모 브랜치에서 시작하고, 사이드바에서는 부모 밑에 들여 써서 보여요.`
+              : "새 브랜치를 저장소 옆 폴더에 꺼내고 터미널을 열어요."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -191,7 +191,7 @@ function NewWorktreeDialog({ initialRepo, parent, onClose }: { initialRepo: stri
               </SelectContent>
             </Select>
           </Field>
-          <Field label="처음 띄울 것">
+          <Field label="처음 실행할 것">
             <div className="inline-flex w-fit rounded-md border p-0.5">
               {(
                 [
@@ -227,15 +227,15 @@ function NewWorktreeDialog({ initialRepo, parent, onClose }: { initialRepo: stri
           <div className="text-xs text-muted-foreground">
             {effectiveBranch ? (
               taken ? (
-                <span className="text-destructive">이미 있는 브랜치다: {effectiveBranch}</span>
+                <span className="text-destructive">이미 있는 브랜치예요: {effectiveBranch}</span>
               ) : (
                 <>
-                  <code className="font-mono text-foreground">{base || "HEAD"}</code>에서 브랜치를 만든다:{" "}
+                  <code className="font-mono text-foreground">{base || "HEAD"}</code>에서 브랜치를 만들어요:{" "}
                   <code className="font-mono text-foreground">{effectiveBranch}</code>
                 </>
               )
             ) : (
-              "이름을 적으면 브랜치 이름을 만든다"
+              "이름을 적으면 브랜치 이름을 만들어요"
             )}
           </div>
         </div>
@@ -265,23 +265,23 @@ function DeleteWorktreeDialog({ worktree, onClose }: { worktree: WorktreeInfo; o
         <DialogHeader>
           <DialogTitle>워크트리 지우기: {worktreeTitle(worktree)}</DialogTitle>
           <DialogDescription className="break-all">
-            <code className="font-mono">{worktree.path}</code> 폴더를 지운다.
-            {terminals > 0 && <> 이 워크트리의 탭 {terminals}개도 닫는다.</>}
+            <code className="font-mono">{worktree.path}</code> 폴더를 지워요.
+            {terminals > 0 && <> 이 워크트리의 탭 {terminals}개도 닫아요.</>}
           </DialogDescription>
         </DialogHeader>
-        {dirty > 0 && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">커밋하지 않은 변경이 {dirty}개 있다. 지우면 사라진다.</div>}
+        {dirty > 0 && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">커밋하지 않은 변경이 {dirty}개 있어요. 지우면 사라져요.</div>}
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-          바뀐 파일이 있어도 지운다
+          바뀐 파일이 있어도 지우기
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={deleteBranch} onCheckedChange={(v) => setDeleteBranch(v === true)} />
-          브랜치 <code className="font-mono">{worktree.branch}</code>도 지운다
+          브랜치 <code className="font-mono">{worktree.branch}</code>도 지우기
         </label>
         {deleteBranch && (
           <label className="ml-6 flex items-center gap-2 text-sm text-muted-foreground">
             <Checkbox checked={forceBranch} onCheckedChange={(v) => setForceBranch(v === true)} />
-            합치지 않은 커밋이 있어도 지운다 (없으면 브랜치는 남긴다)
+            합치지 않은 커밋이 있어도 지우기 (끄면 그런 브랜치는 남겨요)
           </label>
         )}
         <DialogFooter>
@@ -392,7 +392,7 @@ function JumpPalette({ onClose }: { onClose: () => void }) {
               </span>
             </div>
           ))}
-          {list.length === 0 && <div className="px-3 py-6 text-center text-muted-foreground">맞는 워크트리가 없다</div>}
+          {list.length === 0 && <div className="px-3 py-6 text-center text-muted-foreground">맞는 워크트리가 없어요</div>}
         </div>
       </DialogContent>
     </Dialog>
@@ -466,7 +466,7 @@ function MarkdownPalette({ onClose }: { onClose: () => void }) {
             </div>
           ))}
           {files && list.length === 0 && (
-            <div className="px-3 py-6 text-center text-muted-foreground">{files.length ? "맞는 Markdown 파일이 없다" : "이 워크트리에 Markdown 파일이 없다"}</div>
+            <div className="px-3 py-6 text-center text-muted-foreground">{files.length ? "맞는 Markdown 파일이 없어요" : "이 워크트리에 Markdown 파일이 없어요"}</div>
           )}
           {!files && <div className="px-3 py-6 text-center text-muted-foreground">파일 목록을 읽는 중…</div>}
         </div>
@@ -513,7 +513,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
   const named = (scan?.worktrees ?? []).filter((w) => w.name);
   const children = (scan?.worktrees ?? []).filter((w) => w.parent);
   const place = (s: OrcaSession) => {
-    if (s.floating) return "떠 있는 터미널";
+    if (s.floating) return "플로팅 터미널";
     const w = worktrees.find((x) => x.path === s.worktree);
     const o = scan?.worktrees.find((x) => x.path === s.worktree);
     return w ? worktreeTitle(w) : o?.name || s.worktree?.split("/").pop() || s.cwd;
@@ -547,7 +547,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
       <DialogContent className="flex max-h-[85vh] flex-col gap-3 sm:max-w-[620px]">
         <DialogHeader>
           <DialogTitle>Orca에서 가져오기</DialogTitle>
-          <DialogDescription>Orca에 등록한 프로젝트, 워크트리 이름, 탭의 claude 세션을 골라 가져온다. Orca 쪽은 바꾸지 않는다.</DialogDescription>
+          <DialogDescription>Orca에 등록한 프로젝트, 워크트리 이름, 탭의 claude 세션을 골라서 가져와요. Orca 쪽은 바꾸지 않아요.</DialogDescription>
         </DialogHeader>
         {error ? (
           <p className="text-sm text-destructive">{error}</p>
@@ -566,7 +566,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                   />
                   <span className="font-medium">{r.name}</span>
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">{r.path}</span>
-                  {r.registered && <span className="text-muted-foreground">이미 있다</span>}
+                  {r.registered && <span className="text-muted-foreground">이미 있음</span>}
                   {!r.exists && <span className="text-muted-foreground">폴더 없음</span>}
                 </label>
               ))}
@@ -575,7 +575,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
               <label className={row}>
                 <Checkbox checked={names} onCheckedChange={(v) => setNames(v === true)} />
                 <span>
-                  워크트리 이름 {named.length}개 가져오기 <span className="text-muted-foreground">(thuminal에서 이름을 붙이지 않은 워크트리만. Orca 메모는 아직 자리가 없어 가져오지 않는다)</span>
+                  워크트리 이름 {named.length}개 가져오기 <span className="text-muted-foreground">thuminal에서 이름을 붙이지 않은 워크트리만 가져와요. Orca 메모는 아직 넣을 자리가 없어서 가져오지 않아요.</span>
                 </span>
               </label>
             )}
@@ -583,13 +583,13 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
               <label className={row}>
                 <Checkbox checked={lineage} onCheckedChange={(v) => setLineage(v === true)} />
                 <span>
-                  하위 워크트리 관계 {children.length}개 가져오기 <span className="text-muted-foreground">(사이드바에서 부모 워크트리 밑에 들여 보인다. thuminal에서 부모를 정하지 않은 워크트리만)</span>
+                  하위 워크트리 관계 {children.length}개 가져오기 <span className="text-muted-foreground">thuminal에서 부모를 정하지 않은 워크트리만 가져와요. 사이드바에서 부모 워크트리 밑에 들여 써서 보여요.</span>
                 </span>
               </label>
             )}
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center">
-                <span className={cn(section, "flex-1")}>claude 세션 {scan.sessions.length} (고른 세션은 새 탭에서 claude --resume으로 이어진다)</span>
+                <span className={cn(section, "flex-1")}>claude 세션 {scan.sessions.length} <span className="font-normal">고른 세션은 새 탭에서 claude --resume으로 이어져요</span></span>
                 <Button
                   variant="ghost"
                   size="xs"
@@ -604,7 +604,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                   <label
                     key={x.session_id}
                     className={cn(row, x.running && !takeRunning && "opacity-60")}
-                    title={x.running && !takeRunning ? "이 세션으로 claude가 지금 떠 있다 (Orca 등). 아래 \"떠 있는 claude도 가져오기\"를 켜면 고를 수 있다" : undefined}
+                    title={x.running && !takeRunning ? "Orca 등에서 이 세션으로 claude가 지금 실행 중이에요. 아래 \"실행 중인 claude도 가져오기\"를 켜면 고를 수 있어요" : undefined}
                   >
                     <Checkbox
                       checked={sessions.has(x.session_id)}
@@ -612,7 +612,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                       onCheckedChange={(v) => setSessions((s) => toggle(s, x.session_id, v === true))}
                     />
                     <span className="min-w-0 flex-1 truncate">{x.title || x.session_id}</span>
-                    {x.running && <span className="shrink-0 rounded bg-amber-500/15 px-1 text-amber-600 dark:text-amber-400">지금 떠 있음</span>}
+                    {x.running && <span className="shrink-0 rounded bg-amber-500/15 px-1 text-amber-600 dark:text-amber-400">실행 중</span>}
                     <span className="max-w-44 shrink-0 truncate text-muted-foreground">{place(x)}</span>
                     <span className="w-14 shrink-0 text-right text-muted-foreground tabular-nums">{ago(x.updated_at)}</span>
                   </label>
@@ -630,7 +630,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                     }}
                   />
                   <span>
-                    떠 있는 claude도 가져오기 <span className="text-muted-foreground">("지금 떠 있음" {runningCount}개. 이 대화를 하는 claude도 들어 있을 수 있다)</span>
+                    실행 중인 claude도 가져오기 <span className="text-muted-foreground">"실행 중" 세션이 {runningCount}개 있어요. 이 대화를 하는 claude도 들어 있을 수 있어요.</span>
                   </span>
                 </label>
                 {takeRunning && (
@@ -638,18 +638,18 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
                     <label className="flex items-start gap-2">
                       <input type="radio" className="mt-0.5" checked={runningMode === "fork"} onChange={() => setRunningMode("fork")} />
                       <span>
-                        복사본으로 이어 가기: <span className="text-muted-foreground">대화 기록을 복사한 새 세션으로 연다 (claude --fork-session). Orca 쪽 claude는 그대로 돌고, 지금부터 두 대화가 따로 간다</span>
+                        복사본으로 이어 가기: <span className="text-muted-foreground">대화 기록을 복사한 새 세션으로 열어요 (claude --fork-session). Orca 쪽 claude는 그대로 돌고, 이제부터 두 대화가 따로 진행돼요.</span>
                       </span>
                     </label>
                     <label className="flex items-start gap-2">
                       <input type="radio" className="mt-0.5" checked={runningMode === "move"} onChange={() => setRunningMode("move")} />
                       <span>
-                        옮겨 오기: <span className="text-muted-foreground">Orca 쪽 claude를 끝내고(기록은 남는다) 같은 세션을 이어 붙인다. 하던 일이 있으면 멈춘다</span>
+                        옮겨 오기: <span className="text-muted-foreground">Orca 쪽 claude를 끝내고 같은 세션을 이어서 열어요. 기록은 남지만 하던 일이 있으면 멈춰요.</span>
                       </span>
                     </label>
                   </div>
                 )}
-                {!takeRunning && <span className="text-amber-700 dark:text-amber-300">켜지 않으면 "지금 떠 있음" 세션은 고를 수 없다 (두 claude가 한 세션을 같이 쓰지 않게)</span>}
+                {!takeRunning && <span className="text-amber-700 dark:text-amber-300">켜지 않으면 "실행 중" 세션은 고를 수 없어요. 두 claude가 한 세션을 같이 쓰지 않게 하려는 거예요.</span>}
               </div>
             )}
           </div>

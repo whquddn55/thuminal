@@ -39,9 +39,9 @@ fn documents(profile: &Path, domains: &[&str]) -> Result<BTreeMap<String, Value>
             .arg(&db)
             .arg(format!("select domain, payload from profile_state_documents where domain in ({list})"))
             .output()
-            .map_err(|e| format!("sqlite3 을 실행하지 못했다: {e}"))?;
+            .map_err(|e| format!("sqlite3 을 실행하지 못했어요: {e}"))?;
         if !out.status.success() {
-            return Err(format!("Orca 상태 파일을 읽지 못했다: {}", String::from_utf8_lossy(&out.stderr).trim()));
+            return Err(format!("Orca 상태 파일을 읽지 못했어요: {}", String::from_utf8_lossy(&out.stderr).trim()));
         }
         let rows: Vec<Value> = if out.stdout.iter().all(u8::is_ascii_whitespace) { Vec::new() } else { serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())? };
         return Ok(rows
@@ -54,7 +54,7 @@ fn documents(profile: &Path, domains: &[&str]) -> Result<BTreeMap<String, Value>
             .collect());
     }
     let json = profile.join("orca-data.json");
-    let all: Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("Orca 데이터가 없다: {} ({e})", json.display()))?).map_err(|e| e.to_string())?;
+    let all: Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("Orca 데이터를 찾지 못했어요: {} ({e})", json.display()))?).map_err(|e| e.to_string())?;
     Ok(domains.iter().filter_map(|d| all.get(*d).map(|v| (d.to_string(), v.clone()))).collect())
 }
 
@@ -108,7 +108,7 @@ pub fn stop_session(session_id: &str) -> Result<(), String> {
     let comm = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().map_err(|e| e.to_string())?;
     let comm = String::from_utf8_lossy(&comm.stdout);
     if !comm.contains("claude") && !comm.trim().rsplit('/').next().is_some_and(|n| n.starts_with("2.")) {
-        return Err(format!("pid {pid} 은 claude 가 아니다 ({})", comm.trim()));
+        return Err(format!("claude 프로세스가 아니에요: pid {pid} ({})", comm.trim()));
     }
     info!(event = "claude_stop", session = session_id, pid);
     unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -118,7 +118,7 @@ pub fn stop_session(session_id: &str) -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Err(format!("claude(pid {pid})가 5초 안에 끝나지 않았다"))
+    Err(format!("claude(pid {pid})가 5초 안에 끝나지 않았어요"))
 }
 
 /// Orca 워크트리 id(`<저장소 id>::<경로>`)에서 경로
@@ -127,7 +127,7 @@ fn worktree_path(id: &str) -> Option<String> {
 }
 
 pub fn scan(registered: &[String]) -> Result<OrcaScan, String> {
-    let home = orca_home().filter(|h| h.is_dir()).ok_or("Orca 데이터 폴더가 없다 (~/Library/Application Support/orca)")?;
+    let home = orca_home().filter(|h| h.is_dir()).ok_or("Orca 데이터 폴더가 없어요 (~/Library/Application Support/orca)")?;
     let profile = profile_dir(&home);
     let docs = documents(&profile, &["repos", "worktreeMeta", "workspaceSession", "worktreeLineageById"])?;
 

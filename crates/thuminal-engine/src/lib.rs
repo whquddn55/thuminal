@@ -9,7 +9,7 @@ pub use thuminal_protocol::{ColorScheme, ScreenFormat, SnapshotFormat, TerminalC
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    #[error("엔진이 이 저장본 형식을 만들지 못한다: {0:?}")]
+    #[error("엔진이 이 저장본 형식을 만들지 못해요: {0:?}")]
     UnsupportedFormat(SnapshotFormat),
     #[error("엔진 오류: {0}")]
     Engine(String),
