@@ -319,7 +319,8 @@ impl Workspace {
         for path in repos {
             let id = repo_id(&path);
             let meta = self.meta.lock().unwrap();
-            for w in self.vcs.list_worktrees(&path)? {
+            // 폴더를 지웠는데 git 이 아직 기억하는 것(prunable)은 쓸 수 없으니 뺀다
+            for w in self.vcs.list_worktrees(&path)?.into_iter().filter(|w| w.path.exists()) {
                 let m = meta.get(&w.path).cloned().unwrap_or_default();
                 out.push(WorktreeInfo {
                     repo: id.clone(),
@@ -365,6 +366,30 @@ impl Workspace {
             .ok_or_else(|| WorkspaceError::Invalid("만든 워크트리를 목록에서 찾지 못했어요".into()))
     }
 
+    /// 없어진 워크트리의 기록(이름 · 고정 · 부모)을 지운다. 하위 워크트리는 그 부모 밑으로 옮긴다 (없으면 맨 위로).
+    /// 밖에서(`git worktree remove`) 지운 워크트리도 데몬이 알아챈 뒤 이것으로 정리한다
+    pub fn forget_worktree(&self, path: &Path) -> Result<(), WorkspaceError> {
+        {
+            let mut meta = self.meta.lock().unwrap();
+            if !meta.contains_key(path) && !meta.values().any(|m| m.parent.as_deref() == Some(path)) {
+                return Ok(());
+            }
+            let grand = meta.remove(path).and_then(|m| m.parent);
+            for m in meta.values_mut().filter(|m| m.parent.as_deref() == Some(path)) {
+                m.parent = grand.clone();
+            }
+            meta.retain(|_, m| !m.is_empty());
+        }
+        let repos = self.repos.lock().unwrap().clone();
+        self.save(&repos)
+    }
+
+    /// 폴더가 없어진 워크트리 기록을 모두 지운다. 지운 수를 돌려준다
+    pub fn forget_missing_worktrees(&self) -> usize {
+        let gone: Vec<PathBuf> = self.meta.lock().unwrap().keys().filter(|p| !p.exists()).cloned().collect();
+        gone.iter().filter(|p| self.forget_worktree(p).is_ok()).count()
+    }
+
     /// 워크트리를 지운다. `force` 는 워크트리에만(바뀐 파일이 있어도), `force_branch` 는 브랜치에만(합치지 않았어도) 쓴다.
     /// 브랜치를 지우지 못해도 워크트리는 지운 채로 두고, 남긴 까닭을 글로 돌려준다 (알릴 것이 없으면 빈 글)
     pub fn remove_worktree(&self, repo: &str, path: &Path, force: bool, delete_branch: bool, force_branch: bool) -> Result<String, WorkspaceError> {
@@ -375,17 +400,7 @@ impl Workspace {
         let path_s = path.to_string_lossy();
         let branch = self.worktrees(Some(repo))?.into_iter().find(|w| w.path == path_s).and_then(|w| w.branch);
         self.vcs.remove_worktree(&root, path, force)?;
-        {
-            // 지운 워크트리의 하위 워크트리는 그 부모 밑으로 옮긴다 (없으면 맨 위로)
-            let mut meta = self.meta.lock().unwrap();
-            let grand = meta.remove(path).and_then(|m| m.parent);
-            for m in meta.values_mut().filter(|m| m.parent.as_deref() == Some(path)) {
-                m.parent = grand.clone();
-            }
-            meta.retain(|_, m| !m.is_empty());
-        }
-        let repos = self.repos.lock().unwrap().clone();
-        self.save(&repos)?;
+        self.forget_worktree(path)?;
         let mut note = String::new();
         if let (true, Some(b)) = (delete_branch, branch) {
             match self.vcs.delete_branch(&root, &b, force_branch) {

@@ -567,7 +567,10 @@ export class AppModel {
 
   private async refreshWorkspace() {
     const [repos, groups, worktrees] = await Promise.all([this.services.host.listRepos(), this.loadGroups(), this.services.host.listWorktrees()]);
-    this.set({ repos, groups, worktrees });
+    // 보던 워크트리가 없어졌으면(밖에서 지웠으면 데몬이 탭을 워크트리 밖으로 옮긴다) 워크트리 밖 터미널로 간다
+    const { active } = this.get();
+    const gone = active !== OTHER_WORKSPACE && active !== FLOATING_WORKSPACE && !worktrees.some((w) => w.path === active);
+    this.set({ repos, groups, worktrees, ...(gone ? { active: OTHER_WORKSPACE } : {}) });
   }
 
   /** 옛 데몬은 모르는 요청을 받으면 연결을 끊는다. 한 번 실패하면 이 앱 실행 동안 다시 묻지 않는다 (안 그러면 붙자마자 끊기길 되풀이한다) */
