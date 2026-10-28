@@ -71,7 +71,7 @@ import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapse
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel, primaryMod } from "./platform";
 import { RepoMark } from "./repo-icon";
-import { SessionPorts } from "./ports-ui";
+import { SessionPorts, WorktreePorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
 import { type AppState, FLOATING_WORKSPACE, HOST_STATE_LABEL, ModelContext, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 
@@ -858,6 +858,7 @@ function WorkspaceCard({
           </div>
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{subtitle}</span>
+            {ws.startsWith("/") && <WorktreePorts worktree={ws} />}
           </div>
           {agents.length > 0 && (
             <div className="-ml-2 flex w-[calc(100%+0.5rem)] flex-col gap-0.5">

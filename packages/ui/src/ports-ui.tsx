@@ -1,8 +1,9 @@
-// 포트 표시와 동작: 세션 아이콘(탭 · 칸 머리 · 사이드바 세션 줄)에 마우스를 올리거나 우클릭하면 그 세션이 연 포트 팝업.
+// 포트 표시와 동작: 사이드바 워크트리 줄에 포트 수(플러그 아이콘), 세션 아이콘(탭 · 칸 머리 · 사이드바 세션 줄)에 마우스를
+// 올리거나 우클릭하면 그 세션이 연 포트 팝업.
 // 같은 워크트리에서 어느 세션에도 붙지 않은 포트(셸에서 떨어져 나간 서버)도 그 워크트리 세션 팝업에 함께 보인다.
 // 포트마다 [브라우저로 열기] · [주소 복사] · [프로세스 멈추기]. 워크트리 밖 포트(밖)는 화면 어디에도 보이지 않는다.
 
-import { CopyIcon, GlobeIcon, StopCircleIcon } from "@phosphor-icons/react";
+import { CopyIcon, GlobeIcon, PlugIcon, StopCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ListenPort, SessionId } from "@thuminal/term-core";
@@ -10,7 +11,7 @@ import type { ListenPort, SessionId } from "@thuminal/term-core";
 import { Popover, PopoverAnchor, PopoverContent } from "./components/ui/popover";
 import { cn } from "./lib/utils";
 import { keyLabel, primaryMod } from "./platform";
-import { BACKGROUND_POLL_MS, portsOfSessions, portUrl, processesOf, programName, strayPortsOfWorktree, useProcesses } from "./processes";
+import { BACKGROUND_POLL_MS, portsOfSessions, portsOfWorktree, portUrl, processesOf, programName, strayPortsOfWorktree, useProcesses } from "./processes";
 import { type AppModel, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel } from "./store";
 
 /** 원격 컴퓨터 포트면 그 컴퓨터 이름 (주소에 쓴다). 이 컴퓨터면 null */
@@ -67,6 +68,33 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
   const ports = useMemo(() => portsOfSessions(report, key ? key.split(",").map(Number) : []), [report, key]);
   const ws = useApp(() => (sessions[0] === undefined ? null : model.workspaceOf(sessions[0])));
   const stray = useMemo(() => (ws && ws !== FLOATING_WORKSPACE && ws !== OTHER_WORKSPACE ? strayPortsOfWorktree(report, ws) : []), [report, ws]);
+  if (!ports.length && !stray.length) return <>{children}</>;
+  return (
+    <PortsPopover ports={ports} stray={stray} className={cn("inline-flex shrink-0 items-center gap-1", marked && "text-foreground")}>
+      {children}
+    </PortsPopover>
+  );
+}
+
+/**
+ * 사이드바 워크트리 줄의 포트 표시: 그 워크트리에 열린 포트가 있으면 플러그 아이콘과 수를 보인다 (세션 · 작업 폴더 · 명령줄 어느 근거든).
+ * 마우스를 올리거나 누르거나 우클릭하면 포트 팝업. 눌러도 워크트리를 고르지 않는다
+ */
+export function WorktreePorts({ worktree }: { worktree: string }) {
+  const model = useModel();
+  const { report } = useProcesses(model.services.host, BACKGROUND_POLL_MS);
+  const ports = useMemo(() => portsOfWorktree(report, worktree).sort((a, b) => a.port - b.port), [report, worktree]);
+  if (!ports.length) return null;
+  return (
+    <PortsPopover ports={ports} stray={[]} click className="ml-auto flex shrink-0 items-center gap-0.5 rounded px-0.5 text-[10px] leading-none tabular-nums text-muted-foreground/80 hover:bg-foreground/10 hover:text-foreground">
+      <PlugIcon className="size-2.5" />
+      {ports.length}
+    </PortsPopover>
+  );
+}
+
+/** 포트 팝업: 감싼 것에 마우스를 올리면(잠깐 머물면) · 우클릭하면 (`click` 이면 누르면도) 연다 */
+function PortsPopover({ ports, stray, className, click, children }: { ports: ListenPort[]; stray: ListenPort[]; className?: string; click?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(0);
   const later = (v: boolean, ms: number) => {
@@ -74,20 +102,22 @@ export function SessionPorts({ sessions, children, marked }: { sessions: Session
     timer.current = window.setTimeout(() => setOpen(v), ms);
   };
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  if (!ports.length && !stray.length) return <>{children}</>;
+  const openNow = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.clearTimeout(timer.current);
+    setOpen(true);
+  };
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
         <span
-          className={cn("inline-flex shrink-0 items-center gap-1", marked && "text-foreground")}
+          className={className}
           onMouseEnter={() => later(true, 300)}
           onMouseLeave={() => later(false, 200)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.clearTimeout(timer.current);
-            setOpen(true);
-          }}
+          onContextMenu={openNow}
+          onClick={click ? openNow : undefined}
+          onPointerDown={click ? (e) => e.stopPropagation() : undefined}
         >
           {children}
         </span>
