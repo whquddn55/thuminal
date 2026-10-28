@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "dunce",
@@ -4741,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -4762,7 +4762,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -4825,7 +4825,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.21",
  "thuminal-protocol",
@@ -4833,7 +4833,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-engine-ghostty"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libghostty-vt",
  "thuminal-engine",
@@ -4841,7 +4841,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-ipc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tempfile",
  "tokio",
@@ -4849,7 +4849,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-layout"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4859,7 +4859,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4868,14 +4868,14 @@ dependencies = [
 
 [[package]]
 name = "thuminal-pty"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "thuminal-pty-portable"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "portable-pty",
@@ -4884,7 +4884,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-vcs-git"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dunce",
  "tempfile",
@@ -4893,7 +4893,7 @@ dependencies = [
 
 [[package]]
 name = "thuminal-workspace"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dunce",
  "serde",
@@ -4906,7 +4906,7 @@ dependencies = [
 
 [[package]]
 name = "thuminald"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "dunce",
