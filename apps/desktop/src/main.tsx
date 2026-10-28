@@ -5,17 +5,19 @@ import { createRoot } from "react-dom/client";
 
 import { ghosttyWasmEngineForBrowser } from "@thuminal/engine-ghostty-wasm/browser";
 import { webglRenderer } from "@thuminal/renderer-webgl";
-import { App, loadTerminalFont, registerTerminalFonts, type Services } from "@thuminal/ui";
+import { App, bootFail, bootStart, bootTrack, loadTerminalFont, registerTerminalFonts, type Services } from "@thuminal/ui";
 
 import { TauriHostApi } from "./tauri-host";
 
 async function boot() {
+  // 테마를 입히고 시작 화면을 띄운다. 데몬 목록까지 읽으면 화면이 걷는다
+  bootStart();
   const engines = ghosttyWasmEngineForBrowser();
   const host = new TauriHostApi();
-  // 글꼴은 렌더러가 글자 그림판을 만들기 전에 등록해 둔다 (글꼴 · 크기는 설정창에서 바꾼다)
-  await Promise.all([engines.load(), registerTerminalFonts(host, loadTerminalFont().family)]);
+  // 글꼴 보통 굵기 면은 렌더러가 글자 그림판을 만들기 전에 등록해 둔다 (글꼴 · 크기는 설정창에서 바꾼다)
+  await Promise.all([bootTrack("엔진 불러오는 중", engines.load()), bootTrack("글꼴 불러오는 중", registerTerminalFonts(host, loadTerminalFont().family))]);
   const services: Services = { host, engines, renderer: webglRenderer, scrollback: 10_000 };
   createRoot(document.getElementById("root")!).render(<App services={services} />);
 }
 
-void boot();
+boot().catch(bootFail);

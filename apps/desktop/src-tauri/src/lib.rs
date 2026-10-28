@@ -546,8 +546,12 @@ async fn font_faces(family: String) -> CmdResult<Vec<FontFaceInfo>> {
             .collect();
         ids.into_iter()
             .map(|(id, weight, italic)| {
-                f.faces.push(id);
-                FontFaceInfo { id: f.faces.len() - 1, weight, italic }
+                // 같은 면은 같은 번호 (부를 때마다 늘리지 않는다)
+                let n = f.faces.iter().position(|x| *x == id).unwrap_or_else(|| {
+                    f.faces.push(id);
+                    f.faces.len() - 1
+                });
+                FontFaceInfo { id: n, weight, italic }
             })
             .collect()
     })
@@ -599,6 +603,10 @@ pub fn run() {
             app.set_menu(app_menu(app.handle())?)?;
             notify::init(app.handle());
             update::manage(app.handle());
+            // 설치 글꼴 목록을 미리 읽어 둔다 (화면이 시작하자마자 터미널 글꼴을 찾는다)
+            std::thread::spawn(|| {
+                let _ = fonts();
+            });
             // 등록한 원격 호스트마다 연결을 띄운다 (끊겨 있으면 스스로 다시 붙는다)
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

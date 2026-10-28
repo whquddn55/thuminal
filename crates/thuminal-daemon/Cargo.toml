@@ -34,6 +34,8 @@ memchr = "2"
 if-addrs = "0.15"
 # 붙인 그림 썸네일 (claude 기록의 png · jpeg)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# 웹 화면 파일 · 글꼴을 gzip 으로 줄여 보낸다 (폰은 Tailscale 너머라 받는 양이 시작 시간을 정한다)
+flate2 = "1"
 
 # macOS 는 ps · lsof 로 읽는다 (procs.rs). 그 밖에서는 프로세스 표와 LISTEN 포트를 이것으로 읽는다
 [target.'cfg(not(target_os = "macos"))'.dependencies]

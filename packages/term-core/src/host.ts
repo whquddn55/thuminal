@@ -191,6 +191,14 @@ export interface DaemonInfo {
   protocol?: [number, number];
 }
 
+/** 설치된 글꼴 면 하나 */
+export interface FontFaceInfo {
+  /** 껍데기가 면을 찾는 번호 · 열쇠 */
+  id: number | string;
+  weight: number;
+  italic: boolean;
+}
+
 export interface HostApi {
   daemon(): Promise<DaemonInfo>;
   listSessions(): Promise<SessionInfo[]>;
@@ -260,10 +268,12 @@ export interface HostApi {
    */
   removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string>;
   /**
-   * 설치된 글꼴 파일을 웹 글꼴로 등록한다. WebKit 처럼 사용자 설치 글꼴을 웹에 숨기는 껍데기에서 필요하다.
-   * 찾은 글꼴 면(굵기, 기울임) 수를 돌려준다. 없으면 0.
+   * 설치된 글꼴의 면(굵기, 기울임) 목록. 화면이 이것을 웹 글꼴로 등록한다.
+   * WebKit 처럼 사용자 설치 글꼴을 웹에 숨기는 껍데기에서 필요하다. 없으면 빈 목록.
    */
-  registerFont?(family: string): Promise<number>;
+  fontFaces?(family: string): Promise<FontFaceInfo[]>;
+  /** 글꼴 면 하나의 `FontFace` 소스 (파일 내용, 또는 브라우저가 받아 캐시하는 `url(…)`) */
+  fontSource?(face: FontFaceInfo): Promise<ArrayBuffer | string>;
   /**
    * 앱 화면 전체 배율 (1 이 원래 크기). 껍데기가 웹뷰 확대를 지원할 때만 있다.
    * 없으면(웹) 브라우저가 ⌘+ ⌘- 로 스스로 확대한다

@@ -5,7 +5,7 @@
 // (Safari 에서 캔버스에 그려 확인했다. 시스템 글꼴 이름이 `.SF NS Mono` 로 숨겨져 있다). Chrome 은 "SF Mono" 로 찾는다.
 // 프롬프트의 Nerd 아이콘은 SF Mono 에 없어서 Meslo Nerd Font 를 뒤에 둬 그 글자만 채운다.
 
-import type { HostApi, RendererOptions } from "@thuminal/term-core";
+import type { FontFaceInfo, HostApi, RendererOptions } from "@thuminal/term-core";
 
 export interface TerminalFont {
   /** 글꼴 이름. "SF Mono" 면 시스템 고정폭 글꼴(ui-monospace)을 쓴다 */
@@ -65,16 +65,41 @@ export function rendererOptions(font: TerminalFont, size = font.size): RendererO
   return { fontFamily: fontStack(font.family), fontSize: clampFontSize(size), fontWeight: font.weight, fontWeightBold: font.weightBold };
 }
 
+/** 보통 굵기 면: 기울이지 않은 것 가운데 굵기가 400 에 가장 가까운 것 */
+function regularFace(faces: FontFaceInfo[]): FontFaceInfo | undefined {
+  const upright = faces.filter((f) => !f.italic);
+  return (upright.length ? upright : faces).reduce<FontFaceInfo | undefined>((best, f) => (!best || Math.abs(f.weight - 400) < Math.abs(best.weight - 400) ? f : best), undefined);
+}
+
+async function addFace(host: HostApi, family: string, face: FontFaceInfo): Promise<void> {
+  const src = await host.fontSource!(face);
+  const ff = new FontFace(family, src, { weight: String(face.weight), style: face.italic ? "italic" : "normal" });
+  document.fonts.add(await ff.load());
+}
+
+let rest: Promise<void> = Promise.resolve();
+
 /**
- * 글꼴을 쓸 수 있게 등록한다 (아이콘 글꼴과 고른 글꼴). 등록한 글꼴 면 수를 돌려준다.
- * 시스템 고정폭 글꼴은 등록하지 않아도 된다
+ * 글꼴을 쓸 수 있게 등록한다 (아이콘 글꼴과 고른 글꼴). 시스템 고정폭 글꼴은 등록하지 않아도 된다.
+ * 보통 굵기 면만 기다리고, 굵게 · 기울임 면은 뒤에서 받는다 ([`terminalFontsLoaded`]).
+ * 한 벌이 3MB 쯤이라 폰은 네 벌을 다 기다리면 첫 화면이 몇 초 늦는다. 등록할 면 수를 돌려준다
  */
 export async function registerTerminalFonts(host: HostApi, family: string): Promise<number> {
-  if (!host.registerFont) return 0;
+  if (!host.fontFaces || !host.fontSource) return 0;
   const families = [NERD_FONT, ...(isSystemMono(family) || family.trim() === NERD_FONT ? [] : [family.trim()])];
-  const counts = await Promise.all(families.map((f) => host.registerFont!(f).catch(() => 0)));
-  return counts.reduce((a, b) => a + b, 0);
+  const lists = await Promise.all(families.map((f) => host.fontFaces!(f).then((faces) => ({ f, faces }), () => ({ f, faces: [] as FontFaceInfo[] }))));
+  const first = lists.flatMap(({ f, faces }) => {
+    const r = regularFace(faces);
+    return r ? [{ f, face: r }] : [];
+  });
+  const later = lists.flatMap(({ f, faces }) => faces.filter((x) => !first.some((p) => p.face === x)).map((face) => ({ f, face })));
+  await Promise.all(first.map(({ f, face }) => addFace(host, f, face).catch(() => undefined)));
+  rest = Promise.all(later.map(({ f, face }) => addFace(host, f, face).catch(() => undefined))).then(() => undefined);
+  return first.length + later.length;
 }
+
+/** 마지막으로 등록한 글꼴의 나머지 면(굵게 · 기울임)을 다 받았을 때 */
+export const terminalFontsLoaded = (): Promise<void> => rest;
 
 /** 확대 단계에서 다음 배율 */
 export function nextUiZoom(now: number, dir: 1 | -1): number {

@@ -13,6 +13,7 @@ import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentImage,
+  FontFaceInfo,
   AppUpdate,
   AgentSettings,
   AgentSettingsState,
@@ -447,16 +448,12 @@ export class TauriHostApi implements HostApi {
     await invoke("set_ui_zoom", { scale });
   }
 
-  async registerFont(family: string): Promise<number> {
-    const faces = await invoke<{ id: number; weight: number; italic: boolean }[]>("font_faces", { family });
-    await Promise.all(
-      faces.map(async (f) => {
-        const data = await invoke<ArrayBuffer>("font_face_data", { id: f.id });
-        const face = new FontFace(family, data, { weight: String(f.weight), style: f.italic ? "italic" : "normal" });
-        document.fonts.add(await face.load());
-      }),
-    );
-    return faces.length;
+  fontFaces(family: string): Promise<FontFaceInfo[]> {
+    return invoke<FontFaceInfo[]>("font_faces", { family });
+  }
+
+  fontSource(face: FontFaceInfo): Promise<ArrayBuffer> {
+    return invoke<ArrayBuffer>("font_face_data", { id: face.id });
   }
 
   onFileDrop(cb: (paths: string[], x: number, y: number) => void): () => void {

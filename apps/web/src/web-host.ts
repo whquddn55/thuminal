@@ -8,6 +8,7 @@
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentImage,
+  FontFaceInfo,
   AgentSettings,
   AgentSettingsState,
   Attachment,
@@ -429,19 +430,15 @@ export class WebHostApi implements HostApi {
     window.open(url, "_blank", "noopener");
   }
 
-  /** 데스크톱에 설치된 글꼴 파일을 받아 웹 글꼴로 등록한다 (폰에는 Nerd Font 가 없어 프롬프트 기호가 깨진다) */
-  async registerFont(family: string): Promise<number> {
-    const q = `token=${encodeURIComponent(this.token)}`;
-    const r = await fetch(`${this.base}/api/fonts?${q}&family=${encodeURIComponent(family)}`);
-    if (!r.ok) return 0;
-    const faces = (await r.json()) as { id: number; weight: number; italic: boolean }[];
-    await Promise.all(
-      faces.map(async (f) => {
-        const face = new FontFace(family, `url(${this.base}/api/font/${f.id}?${q})`, { weight: String(f.weight), style: f.italic ? "italic" : "normal" });
-        document.fonts.add(await face.load());
-      }),
-    );
-    return faces.length;
+  /** 데스크톱에 설치된 글꼴 (폰에는 Nerd Font 가 없어 프롬프트 기호가 깨진다) */
+  async fontFaces(family: string): Promise<FontFaceInfo[]> {
+    const r = await fetch(`${this.base}/api/fonts?token=${encodeURIComponent(this.token)}&family=${encodeURIComponent(family)}`);
+    return r.ok ? ((await r.json()) as FontFaceInfo[]) : [];
+  }
+
+  /** 면 주소는 파일 내용을 따라 정해져 브라우저가 캐시해 둔다 (다음 시작에는 받지 않는다) */
+  async fontSource(face: FontFaceInfo): Promise<string> {
+    return `url(${this.base}/api/font/${encodeURIComponent(String(face.id))}?token=${encodeURIComponent(this.token)})`;
   }
 
   onEvent(cb: (e: DaemonEvent) => void): () => void {

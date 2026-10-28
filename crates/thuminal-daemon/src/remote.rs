@@ -81,7 +81,41 @@ struct StoredDevice {
 /// 웹 화면이 쓰는 설치 글꼴 (WebKit·폰에는 사용자 글꼴이 없다)
 struct Fonts {
     db: fontdb::Database,
-    faces: Vec<fontdb::ID>,
+    /// 면 열쇠([`face_key`]) → 면. 열쇠가 주소에 들어가므로 데몬이 다시 떠도 같은 파일이면 브라우저 캐시를 그대로 쓴다
+    faces: HashMap<String, fontdb::ID>,
+    /// gzip 으로 줄인 면 내용 (한 번 줄여 두고 다시 쓴다)
+    gzipped: HashMap<String, Arc<Vec<u8>>>,
+}
+
+/// 글꼴 면 하나를 가리키는 열쇠. 파일 경로 · 면 번호 · 크기 · 고친 때로 만들어 파일이 바뀌면 열쇠도 바뀐다
+fn face_key(face: &fontdb::FaceInfo) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match &face.source {
+        fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => {
+            path.hash(&mut h);
+            if let Ok(meta) = std::fs::metadata(path) {
+                meta.len().hash(&mut h);
+                meta.modified().ok().hash(&mut h);
+            }
+        }
+        fontdb::Source::Binary(_) => format!("{:?}", face.id).hash(&mut h),
+    }
+    face.index.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// gzip 으로 줄인다 (글꼴 · 웹 화면 파일. 폰은 Tailscale 너머라 받는 양이 시작 시간을 정한다)
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut enc = flate2::write::GzEncoder::new(Vec::with_capacity(bytes.len() / 2), flate2::Compression::default());
+    let _ = enc.write_all(bytes);
+    enc.finish().unwrap_or_default()
+}
+
+/// 받는 쪽이 gzip 을 받는지
+fn accepts_gzip(headers: &axum::http::HeaderMap) -> bool {
+    headers.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(',').any(|e| e.trim().starts_with("gzip")))
 }
 
 pub struct Remote {
@@ -373,28 +407,38 @@ impl Remote {
         let f = slot.get_or_insert_with(|| {
             let mut db = fontdb::Database::new();
             db.load_system_fonts();
-            Fonts { db, faces: Vec::new() }
+            Fonts { db, faces: HashMap::new(), gzipped: HashMap::new() }
         });
         let found: Vec<_> = f
             .db
             .faces()
             .filter(|face| face.families.iter().any(|(name, _)| name.eq_ignore_ascii_case(family)))
-            .map(|face| (face.id, face.weight.0, face.style != fontdb::Style::Normal))
+            .map(|face| (face_key(face), face.id, face.weight.0, face.style != fontdb::Style::Normal))
             .collect();
         found
             .into_iter()
-            .map(|(id, weight, italic)| {
-                f.faces.push(id);
-                serde_json::json!({ "id": f.faces.len() - 1, "weight": weight, "italic": italic })
+            .map(|(key, id, weight, italic)| {
+                f.faces.insert(key.clone(), id);
+                serde_json::json!({ "id": key, "weight": weight, "italic": italic })
             })
             .collect()
     }
 
-    fn font_data(&self, id: usize) -> Option<Vec<u8>> {
-        let slot = self.fonts.lock().unwrap();
-        let f = slot.as_ref()?;
-        let face = *f.faces.get(id)?;
-        f.db.with_face_data(face, |data, _| data.to_vec())
+    /// 면 내용. gzip 이면 줄인 것을 (처음 한 번 줄여 둔다)
+    fn font_data(&self, key: &str, gzip_ok: bool) -> Option<Arc<Vec<u8>>> {
+        let mut slot = self.fonts.lock().unwrap();
+        let f = slot.as_mut()?;
+        if gzip_ok && let Some(z) = f.gzipped.get(key) {
+            return Some(z.clone());
+        }
+        let face = *f.faces.get(key)?;
+        let data = f.db.with_face_data(face, |data, _| data.to_vec())?;
+        if !gzip_ok {
+            return Some(Arc::new(data));
+        }
+        let z = Arc::new(gzip(&data));
+        f.gzipped.insert(key.to_string(), z.clone());
+        Some(z)
     }
 }
 
@@ -534,13 +578,25 @@ async fn fonts(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>) -
     }
 }
 
-async fn font(State(server): State<Arc<Server>>, UrlPath(id): UrlPath<usize>, Query(q): Query<TokenQuery>) -> Response {
+async fn font(State(server): State<Arc<Server>>, UrlPath(key): UrlPath<String>, Query(q): Query<TokenQuery>, headers: axum::http::HeaderMap) -> Response {
     if server.remote.device_for(&q.token).is_none() {
         return unauthorized();
     }
     let remote = server.remote.clone();
-    match tokio::task::spawn_blocking(move || remote.font_data(id)).await {
-        Ok(Some(bytes)) => ([(header::CONTENT_TYPE, "font/ttf"), (header::CACHE_CONTROL, "max-age=86400")], bytes).into_response(),
+    let gzip_ok = accepts_gzip(&headers);
+    match tokio::task::spawn_blocking(move || remote.font_data(&key, gzip_ok)).await {
+        Ok(Some(bytes)) => {
+            let mut res = Vec::clone(&bytes).into_response();
+            let h = res.headers_mut();
+            h.insert(header::CONTENT_TYPE, HeaderValue::from_static("font/ttf"));
+            // 열쇠가 파일 내용을 따라 바뀌므로 오래 둬도 된다
+            h.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=31536000, immutable"));
+            h.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+            if gzip_ok {
+                h.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+            }
+            res
+        }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -607,7 +663,7 @@ async fn worktree_file(State(server): State<Arc<Server>>, Query(q): Query<FileQu
 }
 
 /// 웹 화면 파일. 없는 경로(확장자 없는 것)는 index.html 로 답한다
-async fn static_file(State(server): State<Arc<Server>>, uri: Uri) -> Response {
+async fn static_file(State(server): State<Arc<Server>>, uri: Uri, headers: axum::http::HeaderMap) -> Response {
     let Some(root) = server.remote.web_root.clone() else {
         return (StatusCode::NOT_FOUND, "웹 화면 파일을 찾지 못했어요. apps/web 을 빌드하거나 앱 번들의 Resources/web 을 확인해 주세요").into_response();
     };
@@ -623,12 +679,18 @@ async fn static_file(State(server): State<Arc<Server>>, uri: Uri) -> Response {
         }
         file = root.join("index.html");
     }
-    let Ok(Ok(bytes)) = tokio::task::spawn_blocking(move || std::fs::read(&file).map(|b| (b, file))).await else { return StatusCode::NOT_FOUND.into_response() };
-    let (bytes, file) = bytes;
-    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+    // 글자로 된 파일과 wasm 은 gzip 으로 줄인다 (그림 · apk 는 이미 줄어 있다)
+    let zip = accepts_gzip(&headers) && matches!(ext.as_str(), "html" | "js" | "mjs" | "css" | "json" | "webmanifest" | "wasm" | "svg");
+    let read = move || std::fs::read(&file).map(|b| if zip { gzip(&b) } else { b });
+    let Ok(Ok(bytes)) = tokio::task::spawn_blocking(read).await else { return StatusCode::NOT_FOUND.into_response() };
     let mut res = bytes.into_response();
     let h = res.headers_mut();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(ext)));
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(&ext)));
+    h.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    if zip {
+        h.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
     // 빌드 결과 assets/ 는 이름에 해시가 들어 있어 오래 둬도 된다. index.html 은 매번 새로 받는다
     let cache = if rel.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));

@@ -56,7 +56,8 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 - 터미널 그림판(WebGL 렌더러)은 **면마다 하나**다 (메인 면, 플로팅 패널). 칸 자리는 DOM 이 잡고 글자는 그 위 canvas 가 그린다. 칸이 옮겨지면 `renderer.layout()` 을 불러야 자리가 다시 잡힌다.
 - 끌어 놓기는 pointer 이벤트로 직접 한다 (`dnd.ts`). 놓을 곳은 `data-drop-pane`, `data-drop-tabbar`(+`data-tab-index`), `data-drop-workspace` 속성으로 찾는다.
 - **브라우저 칸**은 Tauri `unstable` 자식 웹뷰(진짜 WKWebView)를 칸 자리에 얹는다 (`src-tauri/src/browser.rs`, `ui/src/BrowserPane.tsx`). 네이티브 뷰라 HTML 위에 그려지므로 메뉴·창·끌기·플로팅 패널이 겹치면 숨긴다. 페이지가 키보드를 잡고 있으면 ⌘ 단축키를 `thuminal-key://` 이동으로 바꿔 메인 웹뷰로 넘긴다. capabilities 는 메인 웹뷰(`webviews: ["main"]`)에만 준다.
-- **터미널 글꼴**은 설정창 값(`ui/src/terminal-font.ts`, localStorage)이다. 기본은 Orca 와 같은 SF Mono 14px · 굵기 500. WebKit 은 시스템 SF Mono 를 `ui-monospace` 로만 주고, 사용자 설치 글꼴은 숨기므로 `registerFont` 로 직접 등록한다. 글꼴이 바뀌면 면의 렌더러를 새로 만든다.
+- **터미널 글꼴**은 설정창 값(`ui/src/terminal-font.ts`, localStorage)이다. 기본은 Orca 와 같은 SF Mono 14px · 굵기 500. WebKit 은 시스템 SF Mono 를 `ui-monospace` 로만 주고, 사용자 설치 글꼴은 숨기므로 껍데기(`fontFaces` · `fontSource`)에서 파일을 받아 직접 등록한다. 시작할 때는 보통 굵기 면만 기다리고 굵게 · 기울임 면은 뒤에서 받는다. 글꼴이 바뀌거나 남은 면이 들어오면 면의 렌더러를 새로 만든다.
+- **시작 화면**(`ui/src/boot.ts`): 저장된 테마를 맨 먼저 입히고, 엔진 · 글꼴 · 데몬 목록 다섯을 받는 동안 화면 전체를 진행 막대로 덮는다. root 모델이 처음 다 읽으면 걷는다.
 - **테마** 하나로 세 곳을 맞춘다: 화면 토큰(`<html>` CSS 변수, `themes` 의 `uiTokens`), 앱 엔진 기본색(`setColors`), 데몬 엔진 기본색(`set_terminal_colors`).
 - 한글 IME: 조합 중인 글자는 엔진 `setPreedit` 으로 커서 자리에 밑줄로 그린다. textarea 는 조합이 모두 끝난 뒤에만 비운다 (WebKit 은 다음 글자 조합 시작이 앞 글자 조합 끝보다 먼저 오기도 한다). 입력 소스를 바꾼 직후 입력기가 붙지 않아 자모가 keyCode 229 없이 하나씩 오면 `hangul.ts` 가 직접 묶는다.
 

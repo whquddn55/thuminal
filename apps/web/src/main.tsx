@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 
 import { ghosttyWasmEngineForBrowser } from "@thuminal/engine-ghostty-wasm/browser";
 import { webglRenderer } from "@thuminal/renderer-webgl";
-import { App, appBridge, loadTerminalFont, MobileApp, PairScreen, registerTerminalFonts, type Services } from "@thuminal/ui";
+import { App, appBridge, bootFail, bootFinish, bootStart, bootTrack, loadTerminalFont, MobileApp, PairScreen, registerTerminalFonts, type Services } from "@thuminal/ui";
 
 import { WebHostApi } from "./web-host";
 
@@ -31,16 +31,19 @@ function mobileUi(): boolean {
 }
 
 async function boot() {
+  // 테마를 입히고 시작 화면을 띄운다. 데몬 목록까지 읽으면 화면이 걷는다
+  bootStart();
   const root = createRoot(document.getElementById("root")!);
   const token = takeToken();
   if (!token) {
+    bootFinish();
     root.render(<PairScreen onToken={(t) => (localStorage.setItem(TOKEN_KEY, t), location.reload())} />);
     return;
   }
   const engines = ghosttyWasmEngineForBrowser();
   const host = new WebHostApi(location.origin, token);
-  // 글꼴은 데몬이 있는 컴퓨터에서 받아 등록한다 (글꼴 · 크기는 설정창에서 바꾼다. 폰은 폰 화면의 글자 크기를 쓴다)
-  await Promise.all([engines.load(), registerTerminalFonts(host, loadTerminalFont().family)]);
+  // 글꼴은 데몬이 있는 컴퓨터에서 받아 보통 굵기 면만 기다린다 (글꼴 · 크기는 설정창에서 바꾼다. 폰은 폰 화면의 글자 크기를 쓴다)
+  await Promise.all([bootTrack("엔진 불러오는 중", engines.load()), bootTrack("글꼴 불러오는 중", registerTerminalFonts(host, loadTerminalFont().family))]);
   const mobile = mobileUi();
   const services: Services = { host, engines, renderer: webglRenderer, scrollback: 10_000 };
   const forget = () => {
@@ -59,4 +62,4 @@ async function boot() {
   );
 }
 
-void boot();
+boot().catch(bootFail);

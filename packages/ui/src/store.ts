@@ -35,6 +35,7 @@ import {
 
 import type { AppUpdate } from "@thuminal/term-core";
 import { AGENTS } from "./agents";
+import { bootFinish, bootTrack } from "./boot";
 import { pageKey, setPage } from "./browser-state";
 import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
@@ -50,6 +51,7 @@ import {
   registerTerminalFonts,
   saveTerminalFont,
   saveZoom,
+  terminalFontsLoaded,
   type TerminalFont,
   type Zoom,
 } from "./terminal-font";
@@ -453,11 +455,15 @@ export class AppModel {
       offBadge();
       offHosts?.();
     };
+    // 테마는 데몬 답을 기다리지 않고 입힌다 (엔진 기본색도 터미널이 붙기 전에 맞춘다)
+    void this.applyTheme();
+    if (this.isRoot) void terminalFontsLoaded().then(() => this.refreshRenderers());
     // 원격이 아직 붙지 않았으면 읽지 않는다. 붙으면 hostStateChanged 가 읽는다
     if (this.isRoot || this.hostState() === "connected") {
       this.loading = true;
       try {
-        await this.reloadAll();
+        // 처음 읽는 동안은 시작 화면이 진행 막대로 덮는다 (root 만)
+        await this.reloadAll(this.isRoot);
         this.loaded = true;
         this.pickInitial();
       } catch (e) {
@@ -466,6 +472,7 @@ export class AppModel {
         this.loading = false;
       }
     }
+    if (this.isRoot) bootFinish();
     if (this.isRoot && host.updates) {
       // 새 앱 버전: 시작하고 조금 뒤 한 번, 그 뒤로 6시간마다
       this.timers.push(window.setTimeout(() => void this.checkUpdate(), 5000));
@@ -475,7 +482,6 @@ export class AppModel {
       this.markSeen();
       if (this.get().zoom.ui !== 1) void host.setUiZoom?.(this.get().zoom.ui).catch(() => undefined);
     }
-    void this.applyTheme();
     if (this.loaded) this.findAgents();
     if (opts.gitStatus === false) return;
     void this.refreshStatus();
@@ -539,14 +545,16 @@ export class AppModel {
     }
   }
 
-  private async reloadAll() {
+  /** 데몬 것을 모두 읽는다. track 이면 시작 화면 진행 막대가 하나씩 센다 */
+  private async reloadAll(track = false) {
     const host = this.services.host;
+    const t = <T,>(p: Promise<T>) => (track ? bootTrack("목록 불러오는 중", p) : p);
     const [sessions, repos, groups, worktrees, layouts] = await Promise.all([
-      host.listSessions(),
-      host.listRepos(),
-      this.loadGroups(),
-      host.listWorktrees(),
-      host.getLayout(),
+      t(host.listSessions()),
+      t(host.listRepos()),
+      t(this.loadGroups()),
+      t(host.listWorktrees()),
+      t(host.getLayout()),
     ]);
     this.set({
       sessions: Object.fromEntries(sessions.map((s) => [s.id, s])),
@@ -1225,9 +1233,17 @@ export class AppModel {
     const font = { ...this.get().terminalFont, ...patch };
     if (patch.size !== undefined) font.size = clampFontSize(patch.size);
     saveTerminalFont(font);
-    if (patch.family !== undefined) await registerTerminalFonts(this.services.host, font.family);
+    if (patch.family !== undefined) {
+      await registerTerminalFonts(this.services.host, font.family);
+      void terminalFontsLoaded().then(() => this.refreshRenderers());
+    }
     this.set({ terminalFont: font });
   };
+
+  /** 글꼴 면(굵게 · 기울임)이 뒤늦게 들어왔다: 그림판을 새로 만들어 글자를 다시 그린다 */
+  private refreshRenderers() {
+    this.set((s) => ({ terminalFont: { ...s.terminalFont } }));
+  }
 
   /** 지금 터미널 글자 크기 (설정 + ⌘+ ⌘-) */
   terminalFontSize = (s: AppState = this.get()) => clampFontSize(s.terminalFont.size + s.zoom.terminal);
