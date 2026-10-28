@@ -96,6 +96,7 @@ fn event_name(host: Option<&str>) -> String {
     }
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
     Rect { position: LogicalPosition::new(x, y).into(), size: LogicalSize::new(w.max(1.0), h.max(1.0)).into() }
 }
@@ -114,7 +115,7 @@ fn webview(app: &AppHandle, host: &Option<String>, id: u64) -> CmdResult<tauri::
 pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, id: u64, url: String, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
     let tag = host_tag(&host)?;
     if let Some(v) = app.get_webview(&label(tag, id)) {
-        v.set_bounds(rect(x, y, w, h)).map_err(|e| e.to_string())?;
+        place(&v, x, y, w, h)?;
         return v.show().map_err(|e| e.to_string());
     }
     let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 올바르지 않아요: {url} ({e})"))?;
@@ -158,13 +159,79 @@ pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, 
             emit(&a4, &e4, BrowserEvent::NewWindow { id, url: u.to_string() });
             NewWindowResponse::Deny
         });
-    window.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
+    let v = window.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
+    if cfg!(target_os = "linux") {
+        place(&v, x, y, w, h)?;
+    }
     Ok(())
+}
+
+/// 웹뷰를 칸 자리(창 왼쪽 위 기준 논리 픽셀)로 옮긴다. Linux 는 Tauri 의 set_bounds 가 먹지 않아 GTK 로 직접 옮긴다 ([`gtk_layer`])
+fn place(v: &tauri::Webview, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
+    #[cfg(target_os = "linux")]
+    {
+        v.with_webview(move |pw| {
+            use gtk::prelude::*;
+            gtk_layer::place(pw.inner().upcast(), x, y, w, h);
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    v.set_bounds(rect(x, y, w, h)).map_err(|e| e.to_string())
+}
+
+/// Linux 브라우저 칸 자리 잡기.
+///
+/// Tauri(tauri-runtime-wry 2.12)는 Linux 에서 자식 웹뷰를 창의 세로 상자(GtkBox)에 넣는다. 세로 상자는 메인 화면과
+/// 브라우저 칸을 위아래로 나눠 쌓고, 자리를 정하는 set_bounds 는 GtkFixed 안에 있을 때만 먹어 아무 일도 하지 않는다.
+/// 그래서 처음 브라우저 칸을 열 때 메인 웹뷰를 GtkOverlay 의 바탕으로 옮기고, 브라우저 웹뷰는 그 위에 얹는다.
+/// 얹은 웹뷰는 왼쪽 위 정렬 + 여백으로 칸 자리에, 크기 요청으로 칸 크기에 맞춘다. 겹침 층은 얹은 웹뷰 자리만 차지해
+/// 그 밖의 마우스 입력은 메인 화면이 받는다. 모두 GTK 메인 스레드(`with_webview`)에서 돈다
+#[cfg(target_os = "linux")]
+mod gtk_layer {
+    use gtk::prelude::*;
+
+    /// 웹뷰가 얹힐 겹침 층. 아직 세로 상자에 있으면 겹침 층으로 옮긴다 (처음이면 층을 만든다)
+    fn overlay_for(webview: &gtk::Widget) -> Option<gtk::Overlay> {
+        let parent = webview.parent()?;
+        if let Ok(overlay) = parent.clone().downcast::<gtk::Overlay>() {
+            return Some(overlay);
+        }
+        let vbox = parent.downcast::<gtk::Box>().ok()?;
+        if let Some(overlay) = vbox.children().into_iter().find_map(|c| c.downcast::<gtk::Overlay>().ok()) {
+            vbox.remove(webview);
+            overlay.add_overlay(webview);
+            return Some(overlay);
+        }
+        // 세로 상자 안 다른 위젯이 메인 웹뷰다. 빼는 동안 이 함수의 참조가 살려 둔다
+        let main = vbox.children().into_iter().find(|c| c != webview)?;
+        let overlay = gtk::Overlay::new();
+        vbox.remove(&main);
+        vbox.remove(webview);
+        overlay.add(&main);
+        overlay.add_overlay(webview);
+        vbox.pack_start(&overlay, true, true, 0);
+        overlay.show();
+        main.show();
+        Some(overlay)
+    }
+
+    pub fn place(webview: gtk::Widget, x: f64, y: f64, w: f64, h: f64) {
+        if overlay_for(&webview).is_none() {
+            return;
+        }
+        webview.set_halign(gtk::Align::Start);
+        webview.set_valign(gtk::Align::Start);
+        webview.set_margin_start(x.round().max(0.0) as i32);
+        webview.set_margin_top(y.round().max(0.0) as i32);
+        webview.set_size_request(w.round().max(1.0) as i32, h.round().max(1.0) as i32);
+        webview.queue_resize();
+    }
 }
 
 #[tauri::command]
 pub async fn browser_bounds(app: AppHandle, host: Option<String>, id: u64, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
-    webview(&app, &host, id)?.set_bounds(rect(x, y, w, h)).map_err(|e| e.to_string())
+    place(&webview(&app, &host, id)?, x, y, w, h)
 }
 
 #[tauri::command]

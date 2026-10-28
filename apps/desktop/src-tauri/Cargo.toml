@@ -38,6 +38,10 @@ objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSErr
 objc2-user-notifications = "0.3"
 block2 = "0.6"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# 브라우저 칸을 GTK 겹침 층에 얹는다 (browser.rs gtk_layer). Tauri 가 쓰는 gtk 와 같은 버전
+gtk = "0.18"
+
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # Linux(D-Bus) · Windows(토스트) 알림 (notify.rs). macOS 에서는 쓰지 않는다 (위 mac-notification-sys 와 같은 문제)
 notify-rust = "4"
