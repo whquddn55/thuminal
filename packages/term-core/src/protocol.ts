@@ -271,6 +271,19 @@ export type WorkspaceId = string;
 export const FLOATING_WORKSPACE = "floating";
 export const OTHER_WORKSPACE = "other";
 
+/** 절대 경로인지: 유닉스 `/…`, Windows `C:\…` · `C:/…` · `\\서버\…`. 다른 OS 데몬의 경로도 가른다 */
+export function isAbsolutePath(p: string): boolean {
+  return /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(p);
+}
+
+/** 워크트리 workspace 인지 (워크트리 workspace 는 그 절대 경로다. floating · other 가 아니다) */
+export const isWorktreeWorkspace = (ws: string): boolean => isAbsolutePath(ws);
+
+/** 경로의 마지막 이름 (`/` 와 Windows `\` 를 모두 가른다) */
+export function baseName(p: string): string {
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+}
+
 export type PaneId = number;
 export type TabId = number;
 /** row: 좌우로 늘어놓는다, column: 위아래로 늘어놓는다 */

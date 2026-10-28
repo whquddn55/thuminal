@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use thuminal_layout::{LayoutError, Outcome, SpawnRequest, Spawner, Store, workspace_for_labels};
 use thuminal_protocol::{
     CreateSession, ErrorBody, ErrorCode, Event, FLOATING_LABEL, FLOATING_WORKSPACE, LayoutOp, PaneId, SessionId, SessionInfo,
-    SessionState, WORKTREE_LABEL, WorkspaceLayout,
+    SessionState, WORKTREE_LABEL, WorkspaceLayout, is_worktree_workspace,
 };
 use tracing::{info, warn};
 
@@ -42,7 +42,7 @@ fn error_body(e: LayoutError) -> ErrorBody {
 /// workspace 에 맞는 세션 꼬리표. 빈 값은 그 꼬리표를 지운다는 뜻이다 (`SetLabels` 와 같다)
 fn labels_for(workspace: &str) -> BTreeMap<String, String> {
     let (worktree, floating) = match workspace {
-        w if w.starts_with('/') => (w.to_string(), String::new()),
+        w if is_worktree_workspace(w) => (w.to_string(), String::new()),
         FLOATING_WORKSPACE => (String::new(), "1".to_string()),
         _ => (String::new(), String::new()),
     };
@@ -62,7 +62,7 @@ impl Spawner for SessionSpawner<'_> {
         let cwd = spawn
             .cwd
             .or_else(|| near.and_then(|s| self.manager.info(s).ok()).map(|i| i.cwd).filter(|c| Path::new(c).is_dir()))
-            .or_else(|| workspace.starts_with('/').then(|| workspace.clone()).filter(|w| Path::new(w).is_dir()));
+            .or_else(|| is_worktree_workspace(&workspace).then(|| workspace.clone()).filter(|w| Path::new(w).is_dir()));
         let labels = labels_for(&workspace).into_iter().filter(|(_, v)| !v.is_empty()).collect();
         let req = CreateSession { command: spawn.command, cwd, env: spawn.env, cols: SPAWN_COLS, rows: SPAWN_ROWS, labels };
         let info = self.manager.create_with_input(req, spawn.input).map_err(|e| LayoutError::Spawn(e.message))?;

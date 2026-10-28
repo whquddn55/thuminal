@@ -270,7 +270,7 @@ impl Manager {
             .or_else(thuminal_protocol::paths::user_home)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let title = req.command.first().map(|c| c.rsplit('/').next().unwrap_or(c).to_string()).unwrap_or_else(|| {
+        let title = req.command.first().map(|c| c.rsplit(['/', '\\']).next().unwrap_or(c).to_string()).unwrap_or_else(|| {
             std::env::var("SHELL").ok().and_then(|s| s.rsplit('/').next().map(str::to_string)).unwrap_or_else(|| "shell".into())
         });
         let now = now_ms();

@@ -22,9 +22,9 @@ export function matchFiles(files: string[], query: string, limit: number): strin
   return scored.slice(0, limit).map(([, f]) => f);
 }
 
-/** 경로의 마지막 이름 */
+/** 경로의 마지막 이름 (Windows `\` 도 가른다) */
 export function baseName(path: string): string {
-  return path.split("/").pop() ?? path;
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 /** 경로의 폴더 부분. 맨 위면 빈 글 */

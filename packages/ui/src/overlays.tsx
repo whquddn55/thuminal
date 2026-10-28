@@ -516,7 +516,7 @@ function ImportOrcaDialog({ onClose }: { onClose: () => void }) {
     if (s.floating) return "플로팅 터미널";
     const w = worktrees.find((x) => x.path === s.worktree);
     const o = scan?.worktrees.find((x) => x.path === s.worktree);
-    return w ? worktreeTitle(w) : o?.name || s.worktree?.split("/").pop() || s.cwd;
+    return w ? worktreeTitle(w) : o?.name || (s.worktree && baseName(s.worktree)) || s.cwd;
   };
   const toggle = (set: Set<string>, v: string, on: boolean) => {
     const next = new Set(set);

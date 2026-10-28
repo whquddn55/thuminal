@@ -35,6 +35,19 @@ impl std::fmt::Display for TabId {
 pub const FLOATING_WORKSPACE: &str = "floating";
 /// 워크트리 밖 세션
 pub const OTHER_WORKSPACE: &str = "other";
+
+/// 절대 경로인지: 유닉스 `/…`, Windows `C:\…` · `C:/…` · `\\서버\…`.
+/// 글로 가른다 (다른 OS 데몬에 붙은 앱도, 그 데몬의 경로를 같게 본다)
+pub fn is_absolute_path(p: &str) -> bool {
+    let b = p.as_bytes();
+    p.starts_with('/') || p.starts_with("\\\\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
+}
+
+/// 워크트리 workspace 인지 (워크트리 workspace 는 그 절대 경로다. `floating` · `other` 가 아니다)
+pub fn is_worktree_workspace(ws: &str) -> bool {
+    is_absolute_path(ws)
+}
+
 /// 이 꼬리표가 있는 세션은 플로팅 워크스페이스에 들어간다
 pub const FLOATING_LABEL: &str = "floating";
 /// 꼬리표 `layout=none` 이 있으면 데몬이 칸에 넣지 않는다 (내부용 세션)
@@ -372,5 +385,15 @@ mod tests {
         );
         let spec: LayoutSpec = serde_json::from_str(r#"{"type":"split","axis":"column","children":[{"type":"spawn"}]}"#).unwrap();
         assert_eq!(spec, LayoutSpec::Split { axis: Axis::Column, children: vec![LayoutSpec::Spawn { spawn: Spawn::default() }], sizes: None });
+    }
+
+    #[test]
+    fn worktree_workspace_is_absolute_path_on_any_os() {
+        for ws in ["/Users/a/repo", r"C:\Users\a\repo", "C:/Users/a/repo", r"\\server\share\repo"] {
+            assert!(is_worktree_workspace(ws), "{ws}");
+        }
+        for ws in [FLOATING_WORKSPACE, OTHER_WORKSPACE, "", "C:", "repo", "c-repo"] {
+            assert!(!is_worktree_workspace(ws), "{ws}");
+        }
     }
 }

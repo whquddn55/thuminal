@@ -26,7 +26,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import type { Renderer, SessionId, SessionInfo, WorkspaceId, WorktreeInfo } from "@thuminal/term-core";
+import { baseName, type Renderer, type SessionId, type SessionInfo, type WorkspaceId, type WorktreeInfo } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
 import { FramePane } from "./BrowserPane";
@@ -219,7 +219,7 @@ function wsTitle(ws: WorkspaceId, worktrees: WorktreeInfo[]): string {
   if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
   if (ws === OTHER_WORKSPACE) return "기타";
   const w = worktrees.find((x) => x.path === ws);
-  return w ? worktreeTitle(w) : ws.split("/").pop() || ws;
+  return w ? worktreeTitle(w) : baseName(ws);
 }
 
 function sessionLabel(s: SessionInfo | undefined): string {

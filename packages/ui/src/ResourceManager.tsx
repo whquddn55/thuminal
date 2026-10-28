@@ -16,7 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 
-import type { ProcessInfo, SessionInfo, SessionProcesses } from "@thuminal/term-core";
+import { baseName, type ProcessInfo, type SessionInfo, type SessionProcesses } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
 import { AGENTS } from "./agents";
@@ -168,7 +168,7 @@ function ResourceManager({ onClose }: { onClose: () => void }) {
       if (!r) byRepo.set(repoKey, (r = { key: repoKey, name: repo?.name ?? "기타", title: repo?.path ?? "워크트리 밖 · 플로팅 터미널", cpu: 0, rss: 0, worktrees: [] }));
       const wKey = wt?.path ?? wtPath ?? "@other";
       let w = r.worktrees.find((x) => x.key === wKey);
-      if (!w) r.worktrees.push((w = { key: wKey, name: wt ? worktreeTitle(wt) : wtPath ? (wtPath.split("/").pop() ?? wtPath) : "워크트리 밖", title: wtPath, cpu: 0, rss: 0, sessions: [] }));
+      if (!w) r.worktrees.push((w = { key: wKey, name: wt ? worktreeTitle(wt) : wtPath ? baseName(wtPath) : "워크트리 밖", title: wtPath, cpu: 0, rss: 0, sessions: [] }));
       const team = info?.labels[TEAM_NAME_LABEL];
       const name = `${team ? `${team} · ` : ""}${info?.title || `세션 ${sp.session}`}`;
       w.sessions.push({ key: String(sp.session), name, cpu: sp.cpu, rss: sp.rss, sp, info, agent: agentOf(info, sp.processes) });

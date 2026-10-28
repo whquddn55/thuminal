@@ -31,6 +31,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   type AgentInfo,
   DEFAULT_GROUP,
+  isWorktreeWorkspace,
   type RemoteHost,
   type RepoGroup,
   type RepoInfo,
@@ -786,7 +787,7 @@ function WorkspaceCard({
       data-drop-workspace={ws}
       data-card-active={active || undefined}
       tabIndex={0}
-      title={ws.startsWith("/") ? ws : undefined}
+      title={isWorktreeWorkspace(ws) ? ws : undefined}
       className={cn(
         "relative ml-1 flex cursor-pointer flex-col rounded-lg border border-transparent pt-1.25 pr-1.5 pb-1.5 pl-0.5 outline-none transition-[background-color,border-color] duration-200 select-none",
         !active && "thm-card-hover",
@@ -858,7 +859,7 @@ function WorkspaceCard({
           </div>
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{subtitle}</span>
-            {ws.startsWith("/") && <WorktreePorts worktree={ws} />}
+            {isWorktreeWorkspace(ws) && <WorktreePorts worktree={ws} />}
           </div>
           {agents.length > 0 && (
             <div className="-ml-2 flex w-[calc(100%+0.5rem)] flex-col gap-0.5">

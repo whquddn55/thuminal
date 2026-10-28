@@ -7,7 +7,7 @@
 import { FileIcon, FileTextIcon, GearSixIcon, GlobeIcon, MagnifyingGlassIcon, PlayIcon, PlusIcon, SquaresFourIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
-import type { WorkspaceId } from "@thuminal/term-core";
+import { isWorktreeWorkspace, type WorkspaceId } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
@@ -44,7 +44,7 @@ export function NewTabMenu({ ws }: { ws: WorkspaceId }) {
   const agents = useApp((s) => s.agents);
   const layout = useApp((s) => s.layouts[ws]);
   const sessions = useApp((s) => s.sessions);
-  const inWorktree = ws.startsWith("/");
+  const inWorktree = isWorktreeWorkspace(ws);
   const installed = AGENTS.filter((a) => agents.includes(a.cmd));
   // ⌘⌥T 가 띄우는 에이전트 (App.tsx 와 같다)
   const defaultAgent = agents[0] ?? "claude";

@@ -9,7 +9,7 @@ use thuminal_client::Client;
 use thuminal_daemon::{Daemon, DaemonConfig, DaemonError};
 use thuminal_engine_ghostty::GhosttyFactory;
 use thuminal_protocol::paths::Paths;
-use thuminal_protocol::{CreateSession, ScreenFormat, SessionId};
+use thuminal_protocol::{CreateSession, LayoutOp, ScreenFormat, SessionId, Spawn, WORKTREE_LABEL};
 use thuminal_pty_portable::PortablePty;
 
 fn config(home: &std::path::Path, claude_plugin: Option<std::path::PathBuf>) -> DaemonConfig {
@@ -80,4 +80,39 @@ async fn pipe_conpty_and_powershell_integration() {
     let screen = wait_screen(&c, s.id, "FAKE-CLAUDE").await;
     assert!(screen.contains("--plugin-dir"), "실행기가 플러그인 폴더를 붙여야 한다:\n{screen}");
     assert!(screen.contains("hello"), "{screen}");
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git").current_dir(dir).args(args).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// 워크트리 workspace 는 Windows 경로(`C:\…`)다. 그 워크트리에 세션과 새 탭이 들어가야 한다
+/// (예전에는 `/` 로 시작해야 워크트리로 봐서 Windows 에서 탭을 만들지 못했다)
+#[tokio::test(flavor = "multi_thread")]
+async fn worktree_tabs_with_windows_paths() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+    let data = root.path().join("data");
+    let d = Daemon::bind(config(&data, None)).unwrap();
+    tokio::spawn(d.run());
+    let c = Client::connect(&Paths::new(&data), "test").await.unwrap();
+    let r = c.add_repo(repo.to_string_lossy()).await.unwrap();
+    let wt = c.create_worktree(r.id, "side".into(), None, None).await.unwrap();
+    assert!(thuminal_protocol::is_worktree_workspace(&wt.path), "{}", wt.path);
+
+    let cmd = |s: &str| ["cmd", "/c", s].iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let labels = [(WORKTREE_LABEL.to_string(), wt.path.clone())].into();
+    c.create(CreateSession { command: cmd("ping -n 30 127.0.0.1 >nul"), cwd: Some(wt.path.clone()), labels, cols: 80, rows: 10, ..Default::default() })
+        .await
+        .unwrap();
+    let tabs = |l: Vec<thuminal_protocol::WorkspaceLayout>| l.first().map_or(0, |l| l.tabs.len());
+    assert_eq!(tabs(c.layouts(Some(wt.path.clone())).await.unwrap()), 1, "세션이 워크트리 탭에 들어가지 않았다");
+
+    let spawn = Spawn { command: cmd("ping -n 30 127.0.0.1 >nul"), ..Default::default() };
+    c.layout(LayoutOp::NewTab { workspace: wt.path.clone(), spawn, index: None, focus: true, title: None, doc: None }).await.unwrap();
+    assert_eq!(tabs(c.layouts(Some(wt.path.clone())).await.unwrap()), 2, "워크트리에 새 탭을 만들지 못했다");
 }

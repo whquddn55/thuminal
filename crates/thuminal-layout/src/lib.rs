@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thuminal_protocol::{
     FLOATING_LABEL, FLOATING_WORKSPACE, LAYOUT_LABEL, LayoutOp, LayoutSpec, OTHER_WORKSPACE, Pane, PaneContent, PaneId,
-    PaneNode, PaneRef, SessionId, Spawn, Tab, TabId, TabRef, WORKTREE_LABEL, WorkspaceLayout,
+    PaneNode, PaneRef, SessionId, Spawn, Tab, TabId, TabRef, WORKTREE_LABEL, WorkspaceLayout, is_worktree_workspace,
 };
 
 use crate::tree::MIN_SIZE;
@@ -84,7 +84,7 @@ pub struct Outcome {
 
 /// workspace 이름이 맞는지: 워크트리 절대 경로, `floating`, `other`
 pub fn check_workspace(ws: &str) -> Result<()> {
-    if ws.starts_with('/') || ws == FLOATING_WORKSPACE || ws == OTHER_WORKSPACE {
+    if is_worktree_workspace(ws) || ws == FLOATING_WORKSPACE || ws == OTHER_WORKSPACE {
         Ok(())
     } else {
         Err(invalid(format!("workspace 는 워크트리 절대 경로나 floating, other 중 하나여야 해요: {ws}")))
@@ -100,7 +100,7 @@ pub fn workspace_for_labels(labels: &BTreeMap<String, String>) -> Option<String>
         return Some(FLOATING_WORKSPACE.into());
     }
     match labels.get(WORKTREE_LABEL) {
-        Some(p) if p.starts_with('/') => Some(p.clone()),
+        Some(p) if is_worktree_workspace(p) => Some(p.clone()),
         _ => Some(OTHER_WORKSPACE.into()),
     }
 }

@@ -1,6 +1,8 @@
 import { SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo } from "react";
 
+import { isWorktreeWorkspace } from "@thuminal/term-core";
+
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
 import { hostAt, useDrag } from "./dnd";
@@ -95,7 +97,7 @@ function useShortcuts(root: AppModel) {
       if (k.shift && key === "f") return run(() => model.setPanel("search"));
       // ⌘⇧O : 지금 워크트리의 Markdown 파일 열기 (Orca 와 같다)
       if (k.shift && key === "o") {
-        if (s.active.startsWith("/")) run(() => model.setDialog({ kind: "open-markdown" }));
+        if (isWorktreeWorkspace(s.active)) run(() => model.setDialog({ kind: "open-markdown" }));
         return;
       }
       // 브라우저 칸이면 위에서 주소 칸으로 갔다. 그 밖에는 오른쪽 사이드바 (Orca 와 같다)

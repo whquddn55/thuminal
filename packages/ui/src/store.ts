@@ -13,9 +13,12 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import {
+  baseName,
   type DaemonEvent,
   FLOATING_WORKSPACE,
   type GitStatus,
+  isAbsolutePath,
+  isWorktreeWorkspace,
   type LayoutOp,
   OTHER_WORKSPACE,
   type PaneRef,
@@ -191,7 +194,7 @@ const DEFAULT_TEAM_VIEW: TeamView = { open: false, mate: null, keys: false };
 /** 늘 같은 객체를 돌려준다 (zustand 선택자로 쓴다) */
 export const teamView = (s: AppState, leader: SessionId): TeamView => s.teams[leader] ?? DEFAULT_TEAM_VIEW;
 
-export const worktreeTitle = (w: WorktreeInfo) => w.name || w.branch || w.path.split("/").pop() || w.path;
+export const worktreeTitle = (w: WorktreeInfo) => w.name || w.branch || baseName(w.path);
 
 const FLOATING_KEY = "thuminal.floating";
 const SIDEBAR_KEY = "thuminal.sidebarWidth";
@@ -245,7 +248,7 @@ export function placeKey(host: string, ws: WorkspaceId): string {
 /** `placeKey` 를 되돌린다. 원격 호스트 id 는 16진수라 로컬 경로(`/…`)·floating·other 와 겹치지 않는다 */
 export function parsePlace(key: string): { host: string; ws: WorkspaceId } {
   const m = /^([0-9a-zA-Z]+)\|(.*)$/s.exec(key);
-  return m && !key.startsWith("/") ? { host: m[1], ws: m[2] } : { host: "", ws: key };
+  return m && !isAbsolutePath(key) ? { host: m[1], ws: m[2] } : { host: "", ws: key };
 }
 
 /** 원격 호스트 연결 상태 이름 (사이드바 배지, 메인 면 띠) */
@@ -782,7 +785,7 @@ export class AppModel {
     const s = this.get().sessions[id];
     const ws = this.workspaceOf(id);
     const all = [s?.cwd, s?.agent?.cwd, ws && ws !== OTHER_WORKSPACE && ws !== FLOATING_WORKSPACE ? ws : null];
-    return [...new Set(all.filter((p): p is string => !!p && p.startsWith("/")))];
+    return [...new Set(all.filter((p): p is string => !!p && isAbsolutePath(p)))];
   }
 
   /** 링크를 연다. system: 기본 앱(⌘+클릭), app: thuminal 안(⌘⇧+클릭) */
@@ -950,7 +953,7 @@ export class AppModel {
     if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
     if (ws === OTHER_WORKSPACE) return `${prefix}워크트리 밖 터미널`;
     const w = this.get().worktrees.find((x) => x.path === ws);
-    return prefix + (w ? worktreeTitle(w) : (ws.split("/").pop() ?? ws));
+    return prefix + (w ? worktreeTitle(w) : baseName(ws));
   }
 
   /** 지금 그 칸을 보고 있는지: 앱이 앞에 있고, 그 호스트·워크스페이스·탭이 화면에 있다 */
@@ -1082,7 +1085,7 @@ export class AppModel {
 
   /** 새 탭. 워크트리면 그 폴더에서, 아니면 홈에서 */
   newTab = async (ws: WorkspaceId = this.currentWorkspace(), input?: string) => {
-    const spawn: Spawn = { input: input ?? null, cwd: ws.startsWith("/") ? ws : null };
+    const spawn: Spawn = { input: input ?? null, cwd: isWorktreeWorkspace(ws) ? ws : null };
     await this.op({ op: "new_tab", workspace: ws, spawn });
   };
 
@@ -1426,7 +1429,7 @@ export class AppModel {
       pick.repos.map((path) =>
         host.addRepo(path).then(
           () => repos++,
-          (e) => failed.push(`${path.split("/").pop()}: ${e}`),
+          (e) => failed.push(`${baseName(path)}: ${e}`),
         ),
       ),
     );

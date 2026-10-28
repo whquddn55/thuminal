@@ -369,15 +369,18 @@ fn clip(s: &str) -> String {
     }
 }
 
+/// 경로 구분 글자 (Windows 는 `\` 도 쓴다)
+const SEPARATORS: [char; 2] = ['/', '\\'];
+
 /// `path` 가 `root` 그 자체이거나 그 안인지
 fn under(path: &str, root: &str) -> bool {
-    let root = root.trim_end_matches('/');
-    path == root || path.strip_prefix(root).is_some_and(|rest| rest.starts_with('/'))
+    let root = root.trim_end_matches(SEPARATORS);
+    path == root || path.strip_prefix(root).is_some_and(|rest| rest.starts_with(SEPARATORS))
 }
 
 /// 명령줄에 `root` 경로가 낱말로 들어 있는지 (`/a/b` 가 `/a/bc` 에 걸리지 않게 뒤 글자를 본다)
 fn mentions(command: &str, root: &str) -> bool {
-    let root = root.trim_end_matches('/');
+    let root = root.trim_end_matches(SEPARATORS);
     if root.is_empty() {
         return false;
     }
@@ -385,7 +388,7 @@ fn mentions(command: &str, root: &str) -> bool {
         let before = command[..i].chars().next_back();
         let after = command[i + root.len()..].chars().next();
         let edge_before = before.is_none_or(|c| c.is_whitespace() || matches!(c, '=' | '"' | '\'' | ':'));
-        let edge_after = after.is_none_or(|c| c.is_whitespace() || matches!(c, '/' | '"' | '\'' | ':'));
+        let edge_after = after.is_none_or(|c| c.is_whitespace() || matches!(c, '/' | '\\' | '"' | '\'' | ':'));
         edge_before && edge_after
     })
 }
@@ -655,6 +658,9 @@ mod tests {
         assert!(under("/w/app", "/w/app"));
         assert!(under("/w/app/src", "/w/app/"));
         assert!(!under("/w/app-feature", "/w/app"));
+        assert!(under(r"C:\w\app\src", r"C:\w\app"));
+        assert!(!under(r"C:\w\app-feature", r"C:\w\app"));
+        assert!(mentions(r"node C:\w\app\server.js", r"C:\w\app"));
         assert!(mentions("node /w/app/server.js", "/w/app"));
         assert!(mentions("ruby --dir=/w/app", "/w/app"));
         assert!(!mentions("node /w/app-feature/server.js", "/w/app"));

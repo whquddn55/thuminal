@@ -18,7 +18,7 @@ import {
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import type { Pane, PaneNode, Renderer, SessionInfo, Tab, WorkspaceId } from "@thuminal/term-core";
+import { isWorktreeWorkspace, type Pane, type PaneNode, type Renderer, type SessionInfo, type Tab, type WorkspaceId } from "@thuminal/term-core";
 
 import { type PageState, pageKey, pageStore } from "./browser-state";
 import { BrowserPane } from "./BrowserPane";
@@ -248,7 +248,7 @@ export function EmptyWorkspace({ ws }: { ws: WorkspaceId }) {
   return (
     <div className="grid h-full place-content-center gap-3 text-center text-muted-foreground">
       <TerminalWindowIcon className="mx-auto size-8 opacity-50" />
-      <p>{ws.startsWith("/") ? "이 워크트리에 열린 터미널이 없어요." : "열린 터미널이 없어요."}</p>
+      <p>{isWorktreeWorkspace(ws) ? "이 워크트리에 열린 터미널이 없어요." : "열린 터미널이 없어요."}</p>
       <div className="flex justify-center gap-2">
         <Button size="sm" variant="outline" onClick={() => void model.newTab(ws)}>
           새 터미널 ({keyLabel("⌘T")})
