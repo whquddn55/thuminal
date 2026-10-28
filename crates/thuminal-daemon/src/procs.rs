@@ -290,7 +290,7 @@ mod native {
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, ThreadKind, UpdateKind};
 
     use super::{Proc, RawPort};
 
@@ -306,8 +306,10 @@ mod native {
         with_system(|sys| {
             let kind = ProcessRefreshKind::nothing().with_cpu().with_memory().with_cmd(UpdateKind::OnlyIfNotSet);
             sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+            // Linux 는 스레드도 프로세스처럼 돌려준다. 스레드는 프로세스와 메모리를 같이 쓰므로 세지 않는다
             sys.processes()
                 .values()
+                .filter(|p| p.thread_kind() != Some(ThreadKind::Userland))
                 .map(|p| {
                     let args = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
                     Proc {

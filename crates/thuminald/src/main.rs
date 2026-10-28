@@ -63,6 +63,12 @@ fn web_root() -> Option<PathBuf> {
 
 fn main() {
     let args = Args::parse();
+    // 새 터미널은 $SHELL 을 띄운다. 계정의 로그인 셸(passwd)로 맞춘다. 아직 스레드가 없을 때 바꾼다
+    #[cfg(unix)]
+    if let Some(shell) = thuminal_daemon::sys::login_shell() {
+        // SAFETY: 런타임 · 로그 스레드를 만들기 전이라 환경을 읽는 다른 스레드가 없다
+        unsafe { std::env::set_var("SHELL", shell) };
+    }
     let paths = args.home.map(Paths::new).unwrap_or_else(Paths::default_home);
 
     // JSON 한 줄 로그. `event` 필드로 기능 사용을 셀 수 있다

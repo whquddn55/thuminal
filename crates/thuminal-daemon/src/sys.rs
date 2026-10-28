@@ -18,6 +18,23 @@ pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     }
 }
 
+/// 사용자 계정에 정해 둔 로그인 셸 (passwd). 데스크톱 세션이 물려준 `$SHELL` 이 계정 설정과 다를 수 있어
+/// (Linux 에서 `chsh` 뒤 다시 로그인하지 않았거나 원격 데스크톱 세션) 계정 설정을 먼저 본다
+#[cfg(unix)]
+pub fn login_shell() -> Option<String> {
+    // SAFETY: getpwuid_r 에 넉넉한 버퍼를 주고, 돌려받은 pw_shell 은 그 버퍼 안을 가리킨다
+    unsafe {
+        let mut pw: libc::passwd = std::mem::zeroed();
+        let mut out: *mut libc::passwd = std::ptr::null_mut();
+        let mut buf = vec![0 as libc::c_char; 16 * 1024];
+        if libc::getpwuid_r(libc::getuid(), &mut pw, buf.as_mut_ptr(), buf.len(), &mut out) != 0 || out.is_null() || pw.pw_shell.is_null() {
+            return None;
+        }
+        let shell = std::ffi::CStr::from_ptr(pw.pw_shell).to_string_lossy().into_owned();
+        (!shell.is_empty() && Path::new(&shell).is_file()).then_some(shell)
+    }
+}
+
 /// 그 pid 의 프로세스가 살아 있는지
 pub fn alive(pid: u32) -> bool {
     #[cfg(unix)]

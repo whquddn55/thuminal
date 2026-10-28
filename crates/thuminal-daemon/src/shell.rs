@@ -367,11 +367,16 @@ fi
                 command[0] = launcher;
             }
         }
-        if !command.is_empty() {
+        // `term new -- zsh` 처럼 셸 이름 하나만 주면 그 셸에도 셸 통합을 넣는다
+        let explicit = match command.as_slice() {
+            [one] if matches!(one.rsplit('/').next(), Some("zsh" | "bash")) => Some(one.clone()),
+            _ => None,
+        };
+        if !command.is_empty() && explicit.is_none() {
             return;
         }
         #[cfg(windows)]
-        {
+        if explicit.is_none() {
             let profile = self.dir.join("pwsh/profile.ps1").to_string_lossy().into_owned();
             *command = vec![
                 powershell(),
@@ -382,8 +387,9 @@ fi
                 "-Command".into(),
                 format!(". {}", ps_quote(&profile)),
             ];
+            return;
         }
-        let shell = std::env::var("SHELL").unwrap_or_default();
+        let shell = explicit.unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
         match shell.rsplit('/').next() {
             Some("zsh") => {
                 if let Ok(orig) = std::env::var("ZDOTDIR") {

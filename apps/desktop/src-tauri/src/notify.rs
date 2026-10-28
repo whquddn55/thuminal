@@ -110,7 +110,8 @@ mod desktop {
         {
             // 알림 몸통을 누르면 "default" 동작이 온다
             n.action("default", "열기");
-            n.icon("thuminal");
+            // deb 가 설치하는 아이콘 이름은 실행 파일 이름(thuminal-desktop)이다
+            n.icon("thuminal-desktop");
             if sound {
                 n.sound_name("message-new-instant");
             }

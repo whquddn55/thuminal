@@ -32,6 +32,9 @@ pub fn home() -> PathBuf {
     }
 }
 
+/// 이보다 긴 소켓 경로는 데이터 폴더 밖에 둔다 (`Paths::socket`)
+const SOCKET_PATH_MAX: usize = 100;
+
 #[derive(Debug, Clone)]
 pub struct Paths {
     pub home: PathBuf,
@@ -47,8 +50,21 @@ impl Paths {
     }
 
     /// 주 버전이 이름에 들어간다. 새 주 버전 앱은 새 데몬을 띄우고, 옛 데몬은 그대로 둔다.
+    /// 유닉스 소켓 경로는 104바이트(macOS) · 108바이트(Linux)를 넘지 못한다. 데이터 폴더 경로가 길면
+    /// `$XDG_RUNTIME_DIR`(없으면 임시 폴더)에 데이터 폴더 경로로 이름을 지은 소켓을 둔다
     pub fn socket(&self) -> PathBuf {
-        self.home.join(format!("daemon-v{PROTOCOL_MAJOR}.sock"))
+        let name = format!("daemon-v{PROTOCOL_MAJOR}.sock");
+        let inside = self.home.join(&name);
+        if cfg!(windows) || inside.as_os_str().len() < SOCKET_PATH_MAX {
+            return inside;
+        }
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in self.home.to_string_lossy().bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        dir.join(format!("thuminal-{h:016x}-v{PROTOCOL_MAJOR}.sock"))
     }
 
     pub fn lock(&self) -> PathBuf {
@@ -57,5 +73,24 @@ impl Paths {
 
     pub fn logs(&self) -> PathBuf {
         self.home.join("logs")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_home_moves_socket_out() {
+        let short = Paths::new("/tmp/thm");
+        assert_eq!(short.socket(), PathBuf::from("/tmp/thm").join(format!("daemon-v{PROTOCOL_MAJOR}.sock")));
+        let long = Paths::new(format!("/tmp/{}", "a".repeat(120)));
+        let sock = long.socket();
+        if cfg!(unix) {
+            assert!(sock.as_os_str().len() < SOCKET_PATH_MAX + 20, "{}", sock.display());
+            assert!(!sock.starts_with(&long.home));
+            assert_eq!(sock, long.socket(), "같은 데이터 폴더면 같은 자리여야 한다");
+            assert_ne!(sock, Paths::new(format!("/tmp/{}", "b".repeat(120))).socket());
+        }
     }
 }

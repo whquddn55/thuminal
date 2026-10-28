@@ -358,6 +358,8 @@ impl Teams {
                 match a.rest.last().map(String::as_str) {
                     Some("extended-keys") => ok(if a.has('v') { "on\n" } else { "extended-keys on\n" }),
                     Some("prefix") => ok(if a.has('v') { "C-b\n" } else { "prefix C-b\n" }),
+                    // claude 는 꺼져 있으면 "add 'set -g focus-events on'" 을 띄운다. thuminal 터미널은 포커스 신호를 보낸다
+                    Some("focus-events") => ok(if a.has('v') { "on\n" } else { "focus-events on\n" }),
                     _ => ok(""),
                 }
             }
