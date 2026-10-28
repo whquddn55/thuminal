@@ -18,7 +18,7 @@ import {
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import { isWorktreeWorkspace, type Pane, type PaneNode, type Renderer, type SessionInfo, type Tab, type WorkspaceId } from "@thuminal/term-core";
+import { baseName, isWorktreeWorkspace, type Pane, type PaneNode, type Renderer, type SessionInfo, type Tab, type WorkspaceId } from "@thuminal/term-core";
 
 import { type PageState, pageKey, pageStore } from "./browser-state";
 import { BrowserPane } from "./BrowserPane";
@@ -93,7 +93,7 @@ function paneTitle(p: Pane, sessions: Record<number, SessionInfo>, pages: Record
       return url || "새 탭";
     }
   }
-  if (p.type === "doc") return p.doc.file?.split("/").pop() ?? "문서";
+  if (p.type === "doc") return p.doc.file ? baseName(p.doc.file) : "문서";
   return sessions[p.session]?.title ?? `세션 ${p.session}`;
 }
 

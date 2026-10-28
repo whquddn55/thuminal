@@ -593,10 +593,20 @@ impl Workspace {
         Ok(self.vcs.line_counts(&self.known_worktree(worktree)?)?)
     }
 
+    /// 파일 칸이 읽고 쓰는 파일. 상대 경로는 워크트리 안만 된다.
+    /// 절대 경로는 워크트리 밖 파일도 그대로 연다 (터미널 링크를 앱 안에서 열 때, 예: `~/.claude/plans/x.md`).
+    /// 막지 않는 까닭: 이 요청을 보낼 수 있는 쪽(앱 · CLI · 토큰을 가진 원격 기기)은 이미 터미널로 어떤 파일이든 읽고 쓴다
+    fn file_path(&self, worktree: &str, file: &str) -> Result<PathBuf, WorkspaceError> {
+        if Path::new(file).is_absolute() {
+            return dunce::canonicalize(file).map_err(|_| WorkspaceError::Invalid(format!("파일을 찾지 못했어요: {file}")));
+        }
+        let w = self.known_worktree(worktree)?;
+        inside(&w, file)
+    }
+
     pub fn read_file(&self, worktree: &str, file: &str) -> Result<FileContent, WorkspaceError> {
         use std::io::Read;
-        let w = self.known_worktree(worktree)?;
-        let p = inside(&w, file)?;
+        let p = self.file_path(worktree, file)?;
         let size = std::fs::metadata(&p)?.len();
         let mut buf = Vec::new();
         std::fs::File::open(&p)?.take(MAX_READ).read_to_end(&mut buf)?;
@@ -608,8 +618,7 @@ impl Workspace {
     /// 파일 바이트 `offset` 부터 `len` 만큼 (`MAX_READ_BYTES` 까지). (바이트, 전체 크기, 바뀐 때)
     pub fn read_file_bytes(&self, worktree: &str, file: &str, offset: u64, len: u64) -> Result<(Vec<u8>, u64, Option<u64>), WorkspaceError> {
         use std::io::{Read, Seek};
-        let w = self.known_worktree(worktree)?;
-        let p = inside(&w, file)?;
+        let p = self.file_path(worktree, file)?;
         let mut f = std::fs::File::open(&p)?;
         let size = f.metadata()?.len();
         let mut buf = Vec::new();
@@ -623,8 +632,7 @@ impl Workspace {
     /// 글자 파일을 통째로 쓴다. `expect_modified` 가 지금 파일의 바뀐 때와 다르면 쓰지 않는다.
     /// 있는 파일만 고친다 (새 파일을 만들지 않는다). 쓴 뒤의 크기 · 바뀐 때를 돌려준다
     pub fn write_file(&self, worktree: &str, file: &str, text: &str, expect_modified: Option<u64>) -> Result<FileContent, WorkspaceError> {
-        let w = self.known_worktree(worktree)?;
-        let p = inside(&w, file)?;
+        let p = self.file_path(worktree, file)?;
         let meta = std::fs::metadata(&p).map_err(|_| WorkspaceError::Invalid(format!("파일을 찾지 못했어요: {file}")))?;
         if !meta.is_file() {
             return Err(WorkspaceError::Invalid(format!("파일이 아니에요: {file}")));
@@ -910,6 +918,21 @@ mod tests {
         assert!(ws.write_file(&w, "../out.md", "x", None).is_err(), "워크트리 밖은 쓰지 않는다");
         let leftovers = std::fs::read_dir(&w).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains("thuminal-tmp")).count();
         assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn opens_absolute_files_outside_worktrees() {
+        let (d, ws, w) = with_worktree();
+        // 워크트리 밖 파일은 절대 경로로만 연다 (터미널 링크를 앱 안에서 열 때). 상대 경로로 밖에 나가는 것은 그대로 막는다
+        let plan = dunce::canonicalize(d.path()).unwrap().join("plan.md");
+        std::fs::write(&plan, "계획\n").unwrap();
+        let abs = plan.to_string_lossy().into_owned();
+        assert_eq!(ws.read_file(&w, &abs).unwrap().text.as_deref(), Some("계획\n"));
+        assert_eq!(ws.read_file("other", &abs).unwrap().text.as_deref(), Some("계획\n"), "워크트리가 아닌 workspace 에서도 연다");
+        ws.write_file("other", &abs, "고친 계획\n", None).unwrap();
+        assert_eq!(std::fs::read_to_string(&plan).unwrap(), "고친 계획\n");
+        assert!(ws.read_file(&w, "../plan.md").is_err());
+        assert!(ws.read_file("other", "plan.md").is_err(), "상대 경로는 워크트리가 있어야 한다");
     }
 
     #[test]

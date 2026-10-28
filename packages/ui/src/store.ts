@@ -21,6 +21,7 @@ import {
   isWorktreeWorkspace,
   type LayoutOp,
   OTHER_WORKSPACE,
+  OUTSIDE_FILES_PROTOCOL_MINOR,
   type PaneRef,
   type RemoteHost,
   type RemoteHostState,
@@ -798,26 +799,34 @@ export class AppModel {
       else window.open(link.url, "_blank", "noopener");
       return;
     }
-    // 원격 경로는 이 컴퓨터 앱·Finder·file:// 로 열 수 없다. 워크트리 안 파일만 파일 칸으로 연다 (내려받아 열기는 다음 단계)
+    // 원격 경로는 이 컴퓨터 앱·Finder·file:// 로 열 수 없다. 파일은 그 컴퓨터 데몬이 읽어 파일 칸으로 연다
     const remote = !!host.isRemote;
     if (mode === "system" && host.openPath && !remote) return void host.openPath(link.path).catch(fail);
     // thuminal 안: 폴더는 Finder, HTML 은 브라우저 칸, 워크트리 안 파일은 파일 칸 (줄까지)
     if (link.isDir) return remote ? this.notice("원격 컴퓨터 폴더는 아직 열 수 없어요") : void host.reveal(link.path).catch(fail);
     if (/\.html?$/i.test(link.path) && host.browser && !remote) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
+    const line: Record<string, string> = link.line ? { line: String(link.line) } : {};
     const wt = this.get()
-      .worktrees.filter((w) => link.path.startsWith(`${w.path}/`))
+      .worktrees.filter((w) => link.path.startsWith(`${w.path}/`) || link.path.startsWith(`${w.path}\\`))
       .sort((a, b) => b.path.length - a.path.length)[0];
+    // 워크트리 밖 파일(예: ~/.claude/plans/x.md)은 절대 경로 그대로 지금 워크스페이스의 파일 칸에 연다. 옛 데몬은 읽지 못해 기본 앱으로
     if (!wt) {
-      if (remote) return this.notice("원격 컴퓨터의 워크트리 밖 파일은 아직 열 수 없어요");
-      // 파일 칸은 워크트리 안 파일만 연다. 밖이면 기본 앱으로
-      if (host.openPath) {
-        this.notice("워크트리 밖 파일이라 기본 앱으로 열었어요");
-        return void host.openPath(link.path).catch(fail);
-      }
-      return this.notice("워크트리 밖 파일은 열 수 없어요");
+      const doc = { kind: "file", file: link.path, ...line };
+      void host.daemon().then(
+        (d) => {
+          if ((d.protocol?.[1] ?? 0) >= OUTSIDE_FILES_PROTOCOL_MINOR) return this.openDoc(doc);
+          if (host.openPath && !remote) {
+            this.notice("데몬이 이전 버전이라 워크트리 밖 파일은 기본 앱으로 열었어요");
+            return void host.openPath(link.path).catch(fail);
+          }
+          this.notice("워크트리 밖 파일을 열려면 그 컴퓨터의 thuminal 을 업데이트해 주세요");
+        },
+        fail,
+      );
+      return;
     }
     if (this.get().active !== wt.path) this.select(wt.path);
-    this.openDoc({ kind: "file", file: link.path.slice(wt.path.length + 1), ...(link.line ? { line: String(link.line) } : {}) });
+    this.openDoc({ kind: "file", file: link.path.slice(wt.path.length + 1), ...line });
   };
 
   // ---- 워크스페이스 ----

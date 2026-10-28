@@ -188,6 +188,9 @@ export const BROWSER_PROXY_PROTOCOL_MINOR = 6;
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 프로세스 · 포트 읽기(`list_processes`) · 멈추기(`stop_process`)가 된다 */
 export const PROCESSES_PROTOCOL_MINOR = 6;
 
+/** 데몬 프로토콜 부 판이 이 값 이상이어야 파일 칸이 워크트리 밖 파일을 절대 경로로 읽고 쓴다 */
+export const OUTSIDE_FILES_PROTOCOL_MINOR = 9;
+
 // ---- 리소스 관리자 (세션 프로세스와 LISTEN 포트, `list_processes`) ----
 
 /** 프로세스 하나. cpu 는 ps 의 %CPU (코어 하나가 100), rss 는 바이트 */
