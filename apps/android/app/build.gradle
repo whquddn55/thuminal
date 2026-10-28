@@ -2,6 +2,14 @@ plugins {
     id "com.android.application"
 }
 
+// 버전은 데스크톱 앱(tauri.conf.json)과 같다. versionCode 는 1.2.3 → 10203 (설치된 것보다 커야 덮어 깐다)
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file("../desktop/src-tauri/tauri.conf.json")).version
+def (major, minor, patch) = appVersion.tokenize(".").collect { it.replaceAll(/\D.*/, "").toInteger() }
+
+// 서명 키: THUMINAL_ANDROID_KEYSTORE 가 있으면 그 키(CI 는 GitHub secret), 없으면 이 컴퓨터의 디버그 키.
+// 이미 깔린 앱과 키가 다르면 덮어 깔지 못하므로 CI 에는 처음 앱을 만든 컴퓨터의 디버그 키를 넣어 두었다
+def keystore = System.getenv("THUMINAL_ANDROID_KEYSTORE")
+
 android {
     namespace "dev.thuminal.app"
     compileSdk 35
@@ -10,15 +18,26 @@ android {
         applicationId "dev.thuminal.app"
         minSdk 30
         targetSdk 35
-        versionCode 1
-        versionName "0.1.0"
+        versionCode major * 10000 + minor * 100 + patch
+        versionName appVersion
+    }
+
+    signingConfigs {
+        if (keystore) {
+            shared {
+                storeFile file(keystore)
+                storePassword System.getenv("THUMINAL_ANDROID_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias System.getenv("THUMINAL_ANDROID_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword System.getenv("THUMINAL_ANDROID_KEY_PASSWORD") ?: "android"
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            // 직접 내려받아 까는 앱이라 디버그 키로 서명한다 (스토어에 올리지 않는다)
-            signingConfig signingConfigs.debug
+            // 직접 내려받아 까는 앱이라 스토어 키 없이 서명한다
+            signingConfig keystore ? signingConfigs.shared : signingConfigs.debug
         }
     }
 

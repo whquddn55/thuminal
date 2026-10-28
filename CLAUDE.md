@@ -24,7 +24,7 @@ scripts/build-android.sh             # 안드로이드 앱 → apps/web/public/d
 
 - CLI 를 개발 데몬에 대고 돌릴 때: `THUMINAL_HOME=~/scratch/thuminal/main/dev-home target/debug/thuminal pane ls --all`. `THUMINAL_HOME` 이 없으면 기본 폴더(`~/Library/Application Support/thuminal`)의 다른 데몬을 본다.
 - 데몬 코드를 바꾼 뒤: `cargo build -p thuminald -p thuminal-cli && scripts/prepare-sidecars.sh debug` 하고 데몬에 `SIGTERM`(예: `pkill -TERM -f "thuminald --home …dev-home"`). 앱이 새 데몬을 띄우고, 세션은 화면 저장본으로 되살아나며 claude 는 `--resume` 으로 이어진다. `thuminal daemon stop` 은 세션 기록을 지우므로 되살아나지 않는다.
-- 업데이트 서명 키는 `~/.tauri/thuminal.key`(암호는 macOS 키체인 `thuminal-updater-key`), CI 는 GitHub secret `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 를 쓴다. 키를 잃으면 이미 설치된 앱이 다음 버전을 받지 못한다.
+- 업데이트 서명 키는 `~/.tauri/thuminal.key`(암호는 macOS 키체인 `thuminal-updater-key`), CI 는 GitHub secret `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 를 쓴다. 키를 잃으면 이미 설치된 앱이 다음 버전을 받지 못한다. 안드로이드 앱은 처음 만든 Mac 의 디버그 키(`~/.android/debug.keystore`)로 서명하고, CI 는 같은 키를 secret `ANDROID_KEYSTORE_BASE64` 로 받는다 (키가 다르면 폰에 덮어 깔지 못한다).
 - 시험은 사용자의 dev-home 세션에 입력을 보내지 말고 따로 띄운 데몬(`target/debug/thuminald --home <임시 폴더>`)에서 한다.
 
 ## 큰 그림

@@ -1,6 +1,7 @@
 # v 로 시작하는 태그를 올리면 세 OS 설치본을 만들어 초안 Release 에 올린다 (scripts/release.sh 로 버전을 올리고 태그를 단다).
 # macOS: .app · .dmg (서명 · 공증 없음), Linux: .deb · .AppImage, Windows: NSIS 설치 파일.
 # 업데이트용 파일(.app.tar.gz · .AppImage · NSIS 와 .sig)과 latest.json 도 함께 올린다. Linux 자동 업데이트는 AppImage 만 된다
+# 안드로이드 앱(thuminal.apk)은 먼저 만들어 세 설치본의 원격 접속 웹 화면(/download/thuminal.apk)에 넣고 Release 에도 올린다
 name: Release
 
 on:
@@ -12,8 +13,31 @@ permissions:
   contents: write
 
 jobs:
+  android:
+    name: 안드로이드 앱
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      # 이미 깔린 앱을 덮어 깔 수 있게 처음 앱을 만든 컴퓨터의 서명 키로 서명한다 (apps/android/app/build.gradle)
+      - name: APK 만들기
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/thuminal.keystore"
+          THUMINAL_ANDROID_KEYSTORE="$RUNNER_TEMP/thuminal.keystore" scripts/build-android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: apps/web/public/download/thuminal.apk
+          if-no-files-found: error
+
   bundle:
     name: 설치본 (${{ matrix.os }})
+    needs: android
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +70,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 번들에 들어갈 데몬 · CLI 와 원격 접속 웹 화면
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: apps/web/public/download
+      # 번들에 들어갈 데몬 · CLI 와 원격 접속 웹 화면 (안드로이드 앱이 dist/download 로 들어간다)
       - run: scripts/prepare-sidecars.sh release
       - run: pnpm -C apps/web build
       - uses: tauri-apps/tauri-action@v0
@@ -66,3 +94,8 @@ jobs:
           # 태그 없이 손으로 돌리면 Release 대신 워크플로 결과물로 올린다
           uploadWorkflowArtifacts: true
           args: ${{ matrix.args }}
+      - name: 안드로이드 앱을 Release 에 올리기
+        if: runner.os == 'Linux' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" apps/web/public/download/thuminal.apk --clobber
