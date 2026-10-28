@@ -93,7 +93,7 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - **서버는 데몬 안에 있다** (`daemon/src/remote.rs`). 앱을 꺼도 받는다. HTTP 하나가 웹 화면 파일(`apps/web` 빌드 결과, 앱 번들은 `Resources/web`)과 웹소켓 `/ws` 를 같이 낸다. 기본 포트 6780.
 - **웹소켓 메시지 하나 = 프레임 하나**에서 길이 머리를 뗀 것(`[종류 u8][내용]`)이다. 데몬 안에서 파이프로 이어 유닉스 소켓 연결과 똑같이 처리하므로(`Server::serve_stream`) 원격 전용 프로토콜이 없다. 웹 껍데기(`apps/web/src/web-host.ts`)가 같은 요청을 TS 로 보낸다.
 - **받는 주소**: 기본은 Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)와 127.0.0.1 만. Tailscale(WireGuard)이 길을 암호화하므로 TLS 를 두지 않는다 (Orca 는 같은 망에서도 쓰려고 웹소켓 안에 따로 암호화를 넣었다). "같은 Wi‑Fi 에서도 받기"를 켜면 0.0.0.0 에서 받고, 그때는 같은 망에서 내용이 보인다. Tailscale 이 나중에 켜지거나 주소가 바뀌면 15초 안에 맞춘다.
-- **기기 등록**: 기기마다 토큰(24바이트)을 만들어 `remote.json`(0600)에 둔다. 주소는 `http://<Tailscale 주소>:6780/#token=…` 이고 설정 창이 QR 로 보인다. 웹 화면은 토큰을 그 브라우저 localStorage 에 옮기고 주소에서 지운다. 웹소켓·`/api/*` 는 토큰이 맞아야 열고, 화면 파일은 토큰 없이 낸다. 기기를 지우면 붙어 있던 연결을 바로 끊는다. 원격 연결은 원격 설정 요청(`set_remote`, `pair_remote`, `remove_remote_device`)을 받지 않는다.
+- **접속 토큰**: 컴퓨터마다 토큰(24바이트) 하나를 `remote.json`(0600)에 둔다. 주소는 `http://<Tailscale 주소>:6780/#token=…` 이고 설정 창이 늘 QR 과 함께 보인다. [토큰 바꾸기](`rotate_remote_token`)는 새 토큰을 만들고 붙어 있던 원격 연결을 모두 끊는다. 예전에 기기마다 만든 토큰(`devices`)도 토큰을 바꾸기 전까지는 받는다. 웹 화면은 토큰을 그 브라우저 localStorage 에 옮기고 주소에서 지운다. 웹소켓·`/api/*` 는 토큰이 맞아야 열고, 화면 파일은 토큰 없이 낸다. 예전 기기 토큰을 지우면 그 연결을 바로 끊는다. 원격 연결은 원격 설정 요청(`set_remote`, `pair_remote`, `rotate_remote_token`, `remove_remote_device`)을 받지 않는다.
 - **브라우저 칸 대리**: 웹 · 폰 · 다른 PC 앱은 데스크톱의 브라우저 칸 웹뷰를 볼 수 없으므로, 칸 주소가 데몬 컴퓨터의 http `localhost` 개발 서버면 데몬이 대신 받아 넘긴다 (`daemon/src/browser_proxy.rs`, 요청 `browser_proxy`). 대상마다 원격 접속 포트 다음의 빈 포트를 같은 받는 주소에 열고(경로를 붙이지 않아 페이지의 절대 경로가 그대로 맞는다), `Host` · `Origin` 을 원래 주소로 바꿔 넘기며 웹소켓(HMR)도 잇는다. 처음 열 때 주소의 `thuminal_proxy=<기기 토큰>` 을 같은 이름의 쿠키로 바꿔 두고, 쿠키가 맞아야 넘긴다. 칸 안에 띄우도록 응답의 `X-Frame-Options` · CSP `frame-ancestors` 를 뺀다. 웹 · 폰은 칸 자리에 iframe 으로 띄우고(`BrowserPane` `FramePane`), 다른 PC 앱은 웹뷰가 대리 주소를 열고 알려 온 주소를 원래 주소로 되돌려 남긴다 (`tauri-host.ts`). 공개 https 주소는 대리 없이 그대로 연다.
 - **파일 내용**: `/api/file?worktree=…&file=…` 이 워크트리 안 파일을 낸다 (웹 화면의 그림 · 영상 · 소리). `Range` 를 받으면 그 구간만 206 으로 내고, 경로 검사는 데몬 요청 `read_file_bytes` 와 같다.
 - **글꼴**: 폰에는 Nerd Font 가 없어 프롬프트 기호가 깨지므로 `/api/fonts`·`/api/font/<n>` 이 데스크톱에 설치된 글꼴 파일을 낸다.
@@ -126,7 +126,7 @@ sessions/<번호>.vt  되살릴 화면 저장본
 layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 안에 쓴다. daemon stop 이면 지운다)
 terminal-colors.json 터미널 기본색 (앱 테마)
 agent-settings.json  에이전트를 띄울 때 붙일 옵션 (설정 창 · 에이전트)
-remote.json         원격 접속 설정과 등록한 기기 토큰 (0600)
+remote.json         원격 접속 설정과 접속 토큰 (0600)
 hosts.json          데스크톱 앱이 붙는 원격 호스트 id·이름·주소·토큰 (0600, 앱이 쓴다)
 shell/              셸 통합 파일, claude 실행기(claude-launch), 에이전트 팀용 가짜 tmux(teams-bin/tmux)
 ```
@@ -145,7 +145,7 @@ shell/              셸 통합 파일, claude 실행기(claude-launch), 에이�
 - `browser open <주소>`: 앱 안 브라우저 탭을 연다 (스킴이 없으면 http:// 를 붙인다). `--beside p7` 이나 `--right` 류를 주면 그 칸 옆을 나눠 연다. 새 칸 번호를 찍는다
 - `--in <대상>`: 워크트리 경로나 브랜치 이름, `floating`, `other`, `.`(이 셸의 workspace, 기본)
 - `ps [-a] [--json]`: 세션마다 셸 pid · CPU · 메모리 · 연 포트(`-a` 면 그 밑 프로세스까지), 데몬 자신, LISTEN 포트와 붙인 곳(세션 · 워크트리 · 근거). 요청 `list_processes` 하나와 제목을 찍을 세션 목록 하나
-- `remote status|on|off|pair <이름>|rm <id>`: 원격 접속 켜기·끄기, 기기 등록 (주소를 찍는다)
+- `remote status|on|off|url|rotate|rm <id>`: 원격 접속 켜기·끄기, 접속 주소 보기(`pair` 도 같다), 토큰 바꾸기, 예전 기기 토큰 지우기
 - `repo …`, `wt …`: 저장소 등록, 워크트리 만들기·지우기·상태. `wt rm --force` 는 워크트리만, `--delete-branch` 는 합친 브랜치만 지우고, 합치지 않은 브랜치는 `--force-branch` 를 줘야 지운다. `wt new --name` · `wt set --name/--pin/--unpin` 은 사이드바 이름·고정을 바꾼다 (`update_worktree`)
 
 ## 화면 (`packages/ui`)

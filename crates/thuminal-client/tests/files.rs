@@ -90,7 +90,7 @@ async fn reads_bytes_and_serves_ranges() {
     c.request(Request::SetRemote { enabled: Some(true), port: Some(port), lan: None }).await.unwrap();
     c.request(Request::PairRemote { name: "시험".into() }).await.unwrap();
     let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join("remote.json")).unwrap()).unwrap();
-    let token = stored["devices"][0]["token"].as_str().unwrap().to_string();
+    let token = stored["token"].as_str().unwrap().to_string();
     let get = |q: String, range: Option<&str>| {
         let range = range.map(|r| format!("Range: {r}\r\n")).unwrap_or_default();
         async move {

@@ -138,7 +138,7 @@ impl Server {
                     // git·파일처럼 오래 걸리는 요청은 따로 돌린다. 기다리는 동안에도 같은 연결의 키 입력·붙기·크기 요청이
                     // 바로 처리되게 한다 (응답은 id 로 짝을 맞추므로 순서가 바뀌어도 된다).
                     // 세션·배치 요청은 순서가 중요해(붙기 → 떼기 등) 받은 차례대로 처리한다
-                    if remote.is_some() && matches!(request, Request::SetRemote { .. } | Request::PairRemote { .. } | Request::RemoveRemoteDevice { .. }) {
+                    if remote.is_some() && matches!(request, Request::SetRemote { .. } | Request::PairRemote { .. } | Request::RotateRemoteToken | Request::RemoveRemoteDevice { .. }) {
                         let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, "원격 연결에서는 원격 접속 설정을 바꿀 수 없어요".into()));
                         continue;
                     }
@@ -285,6 +285,7 @@ impl Server {
                 let (device, urls) = self.remote.pair(&name).await;
                 Ok(Response::RemotePaired { device, urls })
             }
+            Request::RotateRemoteToken => Ok(Response::Remote { remote: self.remote.rotate_token() }),
             Request::RemoveRemoteDevice { id } => self
                 .remote
                 .remove_device(&id)
@@ -615,6 +616,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::SetRemote { .. } => "set_remote",
         Request::PairRemote { .. } => "pair_remote",
         Request::RemoveRemoteDevice { .. } => "remove_remote_device",
+        Request::RotateRemoteToken => "rotate_remote_token",
         Request::StopClaudeSession { .. } => "stop_claude_session",
         Request::BrowserProxy { .. } => "browser_proxy",
         Request::GetAgentSettings => "get_agent_settings",

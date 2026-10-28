@@ -130,10 +130,19 @@ function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => voi
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem onSelect={() => location.reload()}>새로 고침</DropdownMenuItem>
-        {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>다른 데스크톱으로</DropdownMenuItem>}
+        {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>컴퓨터 목록</DropdownMenuItem>}
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onSelect={() => confirm("이 기기의 접속 정보를 지울까요? 다시 쓰려면 데스크톱에서 등록해야 해요.") && onForget()}>
-          접속 정보 지우기
+        <DropdownMenuItem
+          className="text-destructive"
+          onSelect={() =>
+            confirm(
+              appBridge()
+                ? "이 컴퓨터를 목록에서 지울까요? 다시 쓰려면 그 컴퓨터 설정 → 원격 접속의 접속 주소로 다시 넣어야 해요."
+                : "이 브라우저의 접속 정보를 지울까요? 다시 쓰려면 데스크톱 설정 → 원격 접속의 접속 주소로 다시 열어야 해요.",
+            ) && onForget()
+          }
+        >
+          {appBridge() ? "목록에서 지우기" : "접속 정보 지우기"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -238,7 +247,8 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
     .filter((x) => x.ws !== null)
     .sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status) || (b.s.agent?.updated_at ?? 0) - (a.s.agent?.updated_at ?? 0));
 
-  const extra = [FLOATING_WORKSPACE, OTHER_WORKSPACE].filter((ws) => terminalsOf(layouts[ws]).length > 0);
+  // 플로팅 · 워크트리 밖: 탭이 하나라도 있으면 보인다 (브라우저 탭만 있어도)
+  const extra = [FLOATING_WORKSPACE, OTHER_WORKSPACE].filter((ws) => (layouts[ws]?.tabs.length ?? 0) > 0);
 
   return (
     <>
@@ -293,7 +303,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
               <Row key={ws} onClick={() => go({ kind: "ws", ws })}>
                 <TerminalWindowIcon className="size-4 text-muted-foreground" />
                 <div className="min-w-0 flex-1 truncate text-[14px]">{wsTitle(ws, worktrees)}</div>
-                <span className="text-[11px] text-muted-foreground">{terminalsOf(layouts[ws]).length}</span>
+                <span className="text-[11px] text-muted-foreground">{terminalsOf(layouts[ws]).length + browsersOf(layouts[ws]).length}</span>
                 <CaretRightIcon className="size-4 text-muted-foreground" />
               </Row>
             ))}
@@ -754,7 +764,7 @@ export function PairScreen({ onToken }: { onToken: (token: string) => void }) {
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background p-6 text-foreground">
       <h1 className="text-xl font-semibold">thuminal</h1>
       <p className="max-w-sm text-center text-[14px] leading-6 text-muted-foreground">
-        이 기기는 아직 등록하지 않았어요. 데스크톱 thuminal의 설정 → 원격 접속에서 [기기 등록]을 누르고, 나온 QR을 찍거나 주소를 붙여 넣어 주세요.
+        아직 연결할 컴퓨터를 넣지 않았어요. 데스크톱 thuminal의 설정 → 원격 접속에 있는 접속 주소의 QR을 찍거나 주소를 붙여 넣어 주세요.
       </p>
       <input
         className="h-11 w-full max-w-sm rounded-lg border bg-card px-3 text-[14px] outline-none focus:border-ring"

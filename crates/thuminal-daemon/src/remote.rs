@@ -3,7 +3,9 @@
 //! HTTP 서버 하나가 웹 화면 파일과 웹소켓(`/ws`)을 같이 낸다. 웹소켓 메시지 하나는 프레임 하나(길이 머리를 뗀 종류 + 내용)다.
 //! 데몬 안에서 파이프로 이어 유닉스 소켓 연결과 똑같이 처리한다 ([`Server::serve_stream`]).
 //!
-//! - 기기마다 토큰을 준다 (`remote.json`, 0600). 웹소켓과 `/api/*` 는 토큰이 맞아야 연다. 화면 파일은 토큰 없이 낸다.
+//! - 토큰은 컴퓨터마다 하나다 (`remote.json` 의 `token`, 0600). 접속 주소(`…/#token=`)는 설정에서 언제든 다시 본다.
+//!   [토큰 바꾸기]를 하면 새 토큰이 되고 붙어 있던 연결은 모두 끊긴다. 예전(기기마다 토큰을 주던 때)에 등록한 기기 토큰도
+//!   토큰을 바꾸기 전까지는 받는다. 웹소켓과 `/api/*` 는 토큰이 맞아야 연다. 화면 파일은 토큰 없이 낸다.
 //! - 기본은 Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)와 127.0.0.1 에서만 받는다. Tailscale 이 길을 암호화하므로
 //!   따로 TLS 를 두지 않는다. LAN 을 허용하면 모든 주소(0.0.0.0)에서 받는데, 그때는 같은 망에서 내용이 그대로 보인다.
 //! - Tailscale 이 나중에 켜지거나 주소가 바뀌어도 15초마다 다시 보고 받는 주소를 맞춘다.
@@ -34,6 +36,9 @@ use crate::session::now_ms;
 
 pub const DEFAULT_PORT: u16 = 6780;
 
+/// 공용 토큰으로 붙은 연결의 기기 id (예전 기기 토큰은 그 기기 id 를 쓴다)
+const SHARED: &str = "shared";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Stored {
     #[serde(default)]
@@ -42,6 +47,13 @@ struct Stored {
     port: u16,
     #[serde(default)]
     lan: bool,
+    /// 이 컴퓨터의 접속 토큰. 비어 있으면 데몬이 뜰 때 만든다
+    #[serde(default)]
+    token: String,
+    /// 공용 토큰으로 마지막으로 붙은 때 (ms)
+    #[serde(default)]
+    last_seen: u64,
+    /// 예전에 기기마다 만든 토큰. 토큰을 바꿀 때 함께 지운다
     #[serde(default)]
     devices: Vec<StoredDevice>,
 }
@@ -52,7 +64,7 @@ fn default_port() -> u16 {
 
 impl Default for Stored {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_PORT, lan: false, devices: Vec::new() }
+        Self { enabled: false, port: DEFAULT_PORT, lan: false, token: String::new(), last_seen: 0, devices: Vec::new() }
     }
 }
 
@@ -93,9 +105,13 @@ pub struct Remote {
 impl Remote {
     pub fn load(home: &Path, web_root: Option<PathBuf>) -> Arc<Self> {
         let file = home.join("remote.json");
-        let state = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let mut state: Stored = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let fresh = state.token.is_empty();
+        if fresh {
+            state.token = random_hex(24);
+        }
         let (reconcile_tx, rx) = mpsc::unbounded_channel();
-        Arc::new(Self {
+        let me = Arc::new(Self {
             file,
             web_root,
             state: Mutex::new(state),
@@ -107,7 +123,20 @@ impl Remote {
             reconcile_rx: Mutex::new(Some(rx)),
             fonts: Mutex::new(None),
             proxies: Default::default(),
-        })
+        });
+        if fresh {
+            me.save(&me.state.lock().unwrap());
+        }
+        me
+    }
+
+    /// 폰 · 다른 컴퓨터가 열 접속 주소들 (Tailscale 주소, LAN 을 허용하면 그 주소도)
+    fn share_urls(st: &Stored) -> Vec<String> {
+        let mut hosts: Vec<IpAddr> = tailnet_addrs();
+        if st.lan {
+            hosts.extend(lan_addrs());
+        }
+        hosts.iter().map(|h| format!("{}/#token={}", base_url(*h, st.port), st.token)).collect()
     }
 
     fn save(&self, st: &Stored) {
@@ -133,6 +162,9 @@ impl Remote {
             error: self.error.lock().unwrap().clone(),
             web: self.web_root.as_ref().is_some_and(|r| r.join("index.html").is_file()),
             apk: self.web_root.as_ref().is_some_and(|r| r.join("download/thuminal.apk").is_file()),
+            urls: Self::share_urls(&st),
+            connected: live.get(SHARED).map_or(0, |c| c.len() as u32),
+            last_seen: st.last_seen,
             devices: st
                 .devices
                 .iter()
@@ -173,31 +205,33 @@ impl Remote {
         Ok(self.status())
     }
 
-    /// 새 기기를 등록하고 주소들을 돌려준다. 꺼져 있으면 켠다
-    pub async fn pair(&self, name: &str) -> (RemoteDevice, Vec<String>) {
-        let device = StoredDevice {
-            id: random_hex(8),
-            name: if name.trim().is_empty() { "기기".into() } else { name.trim().chars().take(60).collect() },
-            token: random_hex(24),
-            created_at: now_ms(),
-            last_seen: 0,
-        };
-        let (port, lan) = {
+    /// 접속 주소들을 돌려준다. 꺼져 있으면 켠다 (토큰은 하나라 기기를 새로 만들지 않는다. 옛 앱 · CLI 의 [기기 등록] 자리)
+    pub async fn pair(&self, _name: &str) -> (RemoteDevice, Vec<String>) {
+        {
             let mut st = self.state.lock().unwrap();
-            st.enabled = true;
-            st.devices.push(device.clone());
-            self.save(&st);
-            (st.port, st.lan)
-        };
-        self.reconcile().await;
-        info!(event = "remote_paired", device = %device.id);
-        let mut hosts: Vec<IpAddr> = tailnet_addrs();
-        if lan {
-            hosts.extend(lan_addrs());
+            if !st.enabled {
+                st.enabled = true;
+                self.save(&st);
+            }
         }
-        let urls = hosts.iter().map(|h| format!("{}/#token={}", base_url(*h, port), device.token)).collect();
-        let info = RemoteDevice { id: device.id, name: device.name, created_at: device.created_at, last_seen: 0, connected: 0 };
-        (info, urls)
+        self.reconcile().await;
+        let st = self.state.lock().unwrap().clone();
+        let info = RemoteDevice { id: SHARED.into(), name: "이 컴퓨터 접속 주소".into(), created_at: 0, last_seen: st.last_seen, connected: 0 };
+        (info, Self::share_urls(&st))
+    }
+
+    /// 토큰을 새로 만든다. 예전 기기 토큰도 지우고, 붙어 있던 연결은 모두 끊는다
+    pub fn rotate_token(&self) -> RemoteStatus {
+        {
+            let mut st = self.state.lock().unwrap();
+            st.token = random_hex(24);
+            st.last_seen = 0;
+            st.devices.clear();
+            self.save(&st);
+        }
+        self.kick_all();
+        info!(event = "remote_token_rotated");
+        self.status()
     }
 
     pub fn remove_device(&self, id: &str) -> Result<RemoteStatus, String> {
@@ -231,6 +265,9 @@ impl Remote {
 
     pub(crate) fn device_for(&self, token: &str) -> Option<String> {
         let st = self.state.lock().unwrap();
+        if !st.token.is_empty() && same(st.token.as_bytes(), token.as_bytes()) {
+            return Some(SHARED.into());
+        }
         st.devices.iter().find(|d| same(d.token.as_bytes(), token.as_bytes())).map(|d| d.id.clone())
     }
 
@@ -256,7 +293,11 @@ impl Remote {
 
     fn touch(&self, device: &str) {
         let mut st = self.state.lock().unwrap();
-        if let Some(d) = st.devices.iter_mut().find(|d| d.id == device) {
+        if device == SHARED {
+            st.last_seen = now_ms();
+            let snapshot = st.clone();
+            self.save(&snapshot);
+        } else if let Some(d) = st.devices.iter_mut().find(|d| d.id == device) {
             d.last_seen = now_ms();
             let snapshot = st.clone();
             self.save(&snapshot);

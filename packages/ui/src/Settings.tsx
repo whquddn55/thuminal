@@ -316,8 +316,6 @@ function CopyButton({ text }: { text: string }) {
 function RemoteSection({ remote }: { remote: RemoteApi }) {
   const model = useModel();
   const [st, setSt] = useState<RemoteStatus | null>(null);
-  const [name, setName] = useState("내 폰");
-  const [paired, setPaired] = useState<{ name: string; urls: string[] } | null>(null);
   const [port, setPort] = useState("");
   useEffect(() => {
     let alive = true;
@@ -335,15 +333,8 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
   }, [st]);
   if (!st) return null;
   const change = (c: { enabled?: boolean; port?: number; lan?: boolean }) => void remote.set(c).then(setSt, model.fail);
-  const pair = async () => {
-    try {
-      const r = await remote.pair(name);
-      setPaired({ name: r.device.name, urls: r.urls });
-      setSt(await remote.status());
-    } catch (e) {
-      model.fail(e);
-    }
-  };
+  // 예전 데몬(부 버전 8 전)은 상태에 주소가 없다 (앱과 데몬은 함께 업데이트된다)
+  const urls = st.urls ?? [];
   const host = st.tailnet.find((a) => !a.includes(":")) ?? st.tailnet[0];
   const apkUrl = host && st.apk && st.enabled ? `http://${host.includes(":") ? `[${host}]` : host}:${st.port}/download/thuminal.apk` : null;
   const qr = (text: string) => <div className="size-40 shrink-0 rounded bg-white p-1.5 [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: renderSVG(text, { pixelSize: 4 }) }} />;
@@ -351,7 +342,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
   return (
     <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
       <Toggle checked={st.enabled} onChange={(v) => change({ enabled: v })} title="원격 접속 켜기">
-        같은 Tailscale 망의 폰이나 다른 컴퓨터 브라우저에서 이 컴퓨터의 터미널과 에이전트를 보고 칠 수 있어요. 앱을 꺼도 데몬이 계속 수신 대기해요. 등록한 기기만 연결할 수 있어요.
+        같은 Tailscale 망의 폰이나 다른 컴퓨터 브라우저에서 이 컴퓨터의 터미널과 에이전트를 보고 칠 수 있어요. 앱을 꺼도 데몬이 계속 수신 대기해요. 아래 접속 주소(토큰)를 아는 기기만 연결할 수 있어요.
       </Toggle>
       <div className="flex flex-col gap-1 rounded-md border px-3 py-2 text-xs">
         {st.listening.length ? (
@@ -385,36 +376,44 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
       </div>
 
       <div className="flex flex-col gap-2 rounded-md border p-3">
-        <div className="text-sm font-medium">기기 등록</div>
+        <div className="text-sm font-medium">접속 주소</div>
         <p className="text-xs text-muted-foreground">
-          기기마다 토큰이 든 주소를 만들어요. 폰 카메라로 QR을 찍으면 브라우저로 열리고, thuminal 안드로이드 앱에서는 [QR 찍기]로 찍어요.
+          폰 카메라로 QR을 찍으면 브라우저로 열리고, thuminal 안드로이드 앱에서는 [QR 찍기]로 찍어요. 다른 컴퓨터의 thuminal에서는 설정 → 원격 컴퓨터에 이 주소를 붙여 넣어요. 주소에 든 토큰은 이 컴퓨터에 하나라 언제든 여기서 다시 볼 수 있어요.
         </p>
-        <div className="flex items-center gap-2">
-          <input className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="기기 이름" />
-          <button className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90" onClick={() => void pair()}>
-            기기 등록
-          </button>
-        </div>
-        {paired && (
+        {!st.enabled && <div className="text-xs text-agent-attention">원격 접속이 꺼져 있어요. 켜야 이 주소로 연결할 수 있어요.</div>}
+        {urls.length ? (
           <div className="flex gap-3 pt-1">
-            {paired.urls[0] ? qr(paired.urls[0]) : null}
+            {qr(urls[0])}
             <div className="flex min-w-0 flex-1 flex-col gap-1 text-xs">
-              <div>
-                <b>{paired.name}</b> 기기를 등록했어요. 이 주소는 지금만 보여요.
-              </div>
-              {paired.urls.length ? (
-                paired.urls.map((u) => (
-                  <div key={u} className="flex items-center gap-1">
-                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] select-all">{u}</code>
-                    <CopyButton text={u} />
-                  </div>
-                ))
-              ) : (
-                <div className="text-agent-attention">폰이 닿을 주소가 없어요. Tailscale을 켜거나 같은 Wi‑Fi 수신 대기를 켜 주세요.</div>
-              )}
+              {urls.map((u) => (
+                <div key={u} className="flex items-center gap-1">
+                  <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] select-all">{u}</code>
+                  <CopyButton text={u} />
+                </div>
+              ))}
+              <div className="text-muted-foreground">{st.connected ? `지금 연결 ${st.connected}` : st.last_seen ? `마지막 연결 ${ago(st.last_seen)}` : "아직 연결한 기기가 없어요"}</div>
             </div>
           </div>
+        ) : (
+          <div className="text-xs text-agent-attention">폰이 닿을 주소가 없어요. Tailscale을 켜거나 같은 Wi‑Fi 수신 대기를 켜 주세요.</div>
         )}
+        <div className="flex items-center gap-2 border-t pt-2 text-xs">
+          <span className="min-w-0 flex-1 text-muted-foreground">토큰을 바꾸면 지금 주소로 연결된 폰 · 컴퓨터가 모두 끊기고, 새 주소로 다시 연결해야 해요.</span>
+          <button
+            className="shrink-0 rounded-md border px-2.5 py-1 text-destructive hover:bg-destructive/10"
+            onClick={() =>
+              model.setDialog({
+                kind: "confirm",
+                title: "토큰을 바꿀까요?",
+                body: "지금 주소로 연결된 폰 · 다른 컴퓨터가 모두 끊겨요. 다시 쓰려면 새 주소(QR)로 다시 연결해야 해요. 예전에 기기마다 만든 토큰도 함께 지워져요.",
+                action: "토큰 바꾸기",
+                run: () => void remote.rotate().then(setSt, model.fail),
+              })
+            }
+          >
+            토큰 바꾸기
+          </button>
+        </div>
         {apkUrl && (
           <div className="flex items-center gap-3 border-t pt-2">
             {qr(apkUrl)}
@@ -429,23 +428,25 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
         )}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <div className="text-sm font-medium">등록한 기기</div>
-        {st.devices.length === 0 && <div className="text-xs text-muted-foreground">없어요</div>}
-        {st.devices.map((d) => (
-          <div key={d.id} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
-            <span className={cn("size-2 rounded-full", d.connected ? "bg-agent-done" : "bg-muted-foreground/40")} />
-            <span className="min-w-0 flex-1 truncate">{d.name}</span>
-            <span className="text-muted-foreground">{d.connected ? `연결 ${d.connected}` : ago(d.last_seen)}</span>
-            <button
-              className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
-              onClick={() => confirm(`${d.name} 기기를 지울까요? 연결돼 있으면 바로 끊겨요.`) && void remote.removeDevice(d.id).then(setSt, model.fail)}
-            >
-              지우기
-            </button>
-          </div>
-        ))}
-      </div>
+      {st.devices.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="text-sm font-medium">예전 기기 토큰</div>
+          <p className="text-xs text-muted-foreground">토큰을 하나로 바꾸기 전에 기기마다 만든 토큰이에요. 계속 연결할 수 있고, [토큰 바꾸기]를 누르면 함께 지워져요.</p>
+          {st.devices.map((d) => (
+            <div key={d.id} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
+              <span className={cn("size-2 rounded-full", d.connected ? "bg-agent-done" : "bg-muted-foreground/40")} />
+              <span className="min-w-0 flex-1 truncate">{d.name}</span>
+              <span className="text-muted-foreground">{d.connected ? `연결 ${d.connected}` : ago(d.last_seen)}</span>
+              <button
+                className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
+                onClick={() => confirm(`${d.name} 기기 토큰을 지울까요? 연결돼 있으면 바로 끊겨요.`) && void remote.removeDevice(d.id).then(setSt, model.fail)}
+              >
+                지우기
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -486,8 +487,8 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
       <div className="flex flex-col gap-2 rounded-md border p-3">
         <div className="text-sm font-medium">원격 컴퓨터 등록</div>
         <p className="text-xs text-muted-foreground">
-          원격 컴퓨터의 thuminal 설정 → 원격 접속에서 [기기 등록]을 누르거나 <code className="rounded bg-muted px-1 font-mono">thuminal remote pair 이름</code>{" "}
-          으로 주소를 만들어 여기에 붙여 넣어 주세요. 연결은 Tailscale이 암호화하므로 Tailscale 주소(100.x.y.z)만 등록할 수 있어요.
+          원격 컴퓨터의 thuminal 설정 → 원격 접속의 접속 주소나 <code className="rounded bg-muted px-1 font-mono">thuminal remote url</code>이 찍는 주소를 여기에
+          붙여 넣어 주세요. 연결은 Tailscale이 암호화하므로 Tailscale 주소(100.x.y.z)만 등록할 수 있어요.
         </p>
         <input
           className="h-8 min-w-0 rounded border bg-background px-2 font-mono text-xs"
@@ -553,7 +554,7 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
               <button
                 className="rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
                 onClick={() =>
-                  confirm(`${h.name} 컴퓨터를 지울까요? 그 컴퓨터에 남은 이 기기 등록은 그 컴퓨터의 설정 → 원격 접속에서 지워 주세요.`) &&
+                  confirm(`${h.name} 컴퓨터를 지울까요? 그 컴퓨터에서 연결을 완전히 막으려면 그 컴퓨터의 설정 → 원격 접속에서 [토큰 바꾸기]를 눌러 주세요.`) &&
                   void hosts.remove(h.id).catch(model.fail)
                 }
               >

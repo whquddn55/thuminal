@@ -1,6 +1,6 @@
 // 웹 화면 시작: 데몬 원격 접속에 붙는 어댑터를 골라 끼운다.
 //
-// 처음 여는 주소에는 `#token=…` 이 붙어 있다 (데스크톱 설정 → 원격 접속에서 기기를 등록하면 준다).
+// 처음 여는 주소에는 `#token=…` 이 붙어 있다 (데스크톱 설정 → 원격 접속의 접속 주소).
 // 토큰은 이 브라우저에 남기고 주소에서 지운다. 화면이 좁으면(폰) 모바일 화면을, 넓으면 데스크톱과 같은 화면을 띄운다.
 
 import { createRoot } from "react-dom/client";
@@ -45,7 +45,7 @@ async function boot() {
   const services: Services = { host, engines, renderer: webglRenderer, scrollback: 10_000 };
   const forget = () => {
     localStorage.removeItem(TOKEN_KEY);
-    // 안드로이드 앱이면 앱에 남긴 주소도 지우고 처음 화면으로 간다
+    // 안드로이드 앱이면 앱의 컴퓨터 목록에서도 지우고 목록으로 간다
     const app = appBridge();
     if (app) app.forget();
     else location.reload();

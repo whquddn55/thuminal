@@ -97,7 +97,7 @@ async fn proxies_local_dev_server_for_paired_devices() {
     c.request(Request::SetRemote { enabled: Some(true), port: Some(remote_port), lan: None }).await.unwrap();
     c.request(Request::PairRemote { name: "시험".into() }).await.unwrap();
     let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join("remote.json")).unwrap()).unwrap();
-    let token = stored["devices"][0]["token"].as_str().unwrap().to_string();
+    let token = stored["token"].as_str().unwrap().to_string();
 
     let Response::BrowserProxy { port } = c.request(ask(format!("http://localhost:{dev}/app?x=1"))).await.unwrap() else { panic!() };
     let p = port.expect("대리 포트");

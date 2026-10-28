@@ -125,8 +125,11 @@ export interface RemoteApi {
   status(): Promise<RemoteStatus>;
   /** 준 것만 바꾼다 */
   set(change: { enabled?: boolean; port?: number; lan?: boolean }): Promise<RemoteStatus>;
-  /** 기기를 등록하고 그 기기가 열 주소들(토큰이 든)을 돌려준다. 꺼져 있으면 켠다 */
+  /** 접속 주소들(토큰이 든)을 돌려준다. 꺼져 있으면 켠다 */
   pair(name: string): Promise<{ device: RemoteDevice; urls: string[] }>;
+  /** 접속 토큰을 새로 만든다. 예전 기기 토큰도 지우고 붙어 있던 원격 연결을 모두 끊는다 */
+  rotate(): Promise<RemoteStatus>;
+  /** 예전에 등록한 기기 토큰 하나를 지운다 */
   removeDevice(id: string): Promise<RemoteStatus>;
 }
 

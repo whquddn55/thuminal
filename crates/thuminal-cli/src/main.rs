@@ -82,7 +82,7 @@ enum AgentCmd {
 
 #[derive(Subcommand)]
 enum RemoteCmd {
-    /// 켜져 있는지, 받는 주소, 등록한 기기
+    /// 켜져 있는지, 받는 주소, 접속 주소
     Status,
     /// 켠다 (Tailscale 주소와 127.0.0.1 에서 받는다)
     On {
@@ -94,12 +94,16 @@ enum RemoteCmd {
     },
     /// 끈다 (붙어 있던 기기는 끊긴다)
     Off,
-    /// 기기를 등록하고 그 기기가 열 주소를 찍는다
+    /// 폰 · 다른 컴퓨터가 열 접속 주소를 찍는다 (꺼져 있으면 켠다). 토큰은 컴퓨터마다 하나다
+    #[command(alias = "url")]
     Pair {
-        #[arg(default_value = "기기")]
+        /// 예전 판과 맞추려고 받기만 한다
+        #[arg(default_value = "기기", hide = true)]
         name: String,
     },
-    /// 등록한 기기를 지운다
+    /// 접속 토큰을 새로 만든다. 예전 주소로 붙은 기기는 모두 끊기고 새 주소로 다시 붙어야 한다
+    Rotate,
+    /// 예전에 기기마다 만든 토큰을 지운다
     Rm { id: String },
 }
 
@@ -474,6 +478,7 @@ async fn remote(c: &Client, cmd: RemoteCmd) -> Res<()> {
         RemoteCmd::On { port, lan } => Request::SetRemote { enabled: Some(true), port, lan: Some(lan) },
         RemoteCmd::Off => Request::SetRemote { enabled: Some(false), port: None, lan: None },
         RemoteCmd::Pair { name } => Request::PairRemote { name },
+        RemoteCmd::Rotate => Request::RotateRemoteToken,
         RemoteCmd::Rm { id } => Request::RemoveRemoteDevice { id },
     };
     match c.request(req).await? {
@@ -491,12 +496,16 @@ async fn remote(c: &Client, cmd: RemoteCmd) -> Res<()> {
             if !r.web {
                 println!("  웹 화면 파일이 없다 (pnpm -C apps/web build)");
             }
+            for u in &r.urls {
+                println!("  접속 주소 {u}");
+            }
+            println!("  접속 주소로 연결 {}", r.connected);
             for d in &r.devices {
-                println!("  기기 {} {} · 연결 {}", d.id, d.name, d.connected);
+                println!("  예전 기기 토큰 {} {} · 연결 {}", d.id, d.name, d.connected);
             }
         }
-        Response::RemotePaired { device, urls } => {
-            println!("기기 {} ({}) 를 등록했다. 폰에서 이 주소를 연다:", device.name, device.id);
+        Response::RemotePaired { urls, .. } => {
+            println!("폰 · 다른 컴퓨터에서 이 주소를 연다 (토큰을 바꾸기 전까지 늘 같다):");
             for u in urls {
                 println!("  {u}");
             }

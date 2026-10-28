@@ -43,7 +43,7 @@ async fn remote_daemon(dir: &std::path::Path) -> (Client, String, String) {
     c.request(Request::SetRemote { enabled: Some(true), port: Some(port), lan: None }).await.unwrap();
     c.request(Request::PairRemote { name: "다른 맥".into() }).await.unwrap();
     let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("remote.json")).unwrap()).unwrap();
-    let token = stored["devices"][0]["token"].as_str().unwrap().to_string();
+    let token = stored["token"].as_str().unwrap().to_string();
     (c, format!("http://127.0.0.1:{port}"), token)
 }
 
@@ -117,9 +117,8 @@ async fn link_reconnects_and_stops_on_bad_token() {
     assert_eq!(s.generation, 2);
     assert!(link.client().unwrap().list().await.is_ok());
 
-    // 기기를 지우면 끊기고, 토큰이 틀려 멈춘다
-    let Response::Remote { remote } = local.request(Request::GetRemote).await.unwrap() else { panic!() };
-    local.request(Request::RemoveRemoteDevice { id: remote.devices[0].id.clone() }).await.unwrap();
+    // 토큰을 바꾸면 끊기고, 토큰이 틀려 멈춘다
+    local.request(Request::RotateRemoteToken).await.unwrap();
     wait_state(&mut st, LinkState::Unauthorized, 2).await;
     assert!(link.client().is_none());
 }

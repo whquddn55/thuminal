@@ -579,8 +579,11 @@ pub enum Request {
         #[serde(default)]
         lan: Option<bool>,
     },
-    /// 새 기기를 등록하고 그 기기용 접속 주소(토큰이 든)를 만든다. 원격 접속이 꺼져 있으면 켠다
+    /// 접속 주소(토큰이 든)를 돌려준다. 원격 접속이 꺼져 있으면 켠다. 토큰은 컴퓨터마다 하나라 `name` 은 쓰지 않는다
+    /// (부 버전 8 전에는 기기마다 토큰을 새로 만들었다)
     PairRemote { name: String },
+    /// 접속 토큰을 새로 만든다. 예전 기기 토큰도 지우고 붙어 있던 원격 연결을 모두 끊는다. 부 버전 8 부터
+    RotateRemoteToken,
     /// 등록한 기기를 지운다. 붙어 있던 연결은 바로 끊는다
     RemoveRemoteDevice { id: String },
     /// 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로). 에이전트가 없으면 빈 목록
@@ -795,6 +798,16 @@ pub struct RemoteStatus {
     pub web: bool,
     /// 안드로이드 앱 파일을 내려받을 수 있는지 (`/download/thuminal.apk`)
     pub apk: bool,
+    /// 이 컴퓨터의 접속 주소들 (`http://100.x.y.z:6780/#token=…`). 설정에서 언제든 다시 보인다
+    #[serde(default)]
+    pub urls: Vec<String>,
+    /// 접속 주소(공용 토큰)로 지금 붙어 있는 연결 수
+    #[serde(default)]
+    pub connected: u32,
+    /// 접속 주소로 마지막으로 붙은 때 (ms). 붙은 적이 없으면 0
+    #[serde(default)]
+    pub last_seen: u64,
+    /// 예전(기기마다 토큰을 주던 때)에 등록한 기기. 토큰을 바꾸면 지워진다
     pub devices: Vec<RemoteDevice>,
 }
 

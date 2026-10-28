@@ -40,6 +40,12 @@ fn request(id: u64, request: Request) -> Message {
 #[tokio::test(flavor = "multi_thread")]
 async fn websocket_speaks_daemon_protocol() {
     let dir = tempfile::Builder::new().prefix("thm").tempdir_in("/tmp").unwrap();
+    // 예전(기기마다 토큰)에 등록한 기기가 하나 있다
+    std::fs::write(
+        dir.path().join("remote.json"),
+        r#"{"enabled":false,"port":6780,"lan":false,"devices":[{"id":"old1","name":"예전 폰","token":"0123456789abcdef","created_at":1}]}"#,
+    )
+    .unwrap();
     let daemon = Daemon::bind(config(dir.path())).unwrap();
     tokio::spawn(daemon.run());
     let c = Client::connect(&Paths::new(dir.path()), "test").await.unwrap();
@@ -48,14 +54,19 @@ async fn websocket_speaks_daemon_protocol() {
     let r = c.request(Request::SetRemote { enabled: Some(true), port: Some(port), lan: None }).await.unwrap();
     let Response::Remote { remote } = r else { panic!("{r:?}") };
     assert!(remote.listening.contains(&format!("127.0.0.1:{port}")), "{remote:?}");
-    let Response::RemotePaired { device, urls } = c.request(Request::PairRemote { name: "시험".into() }).await.unwrap() else { panic!() };
-    assert_eq!(device.name, "시험");
-    // Tailscale 이 없는 기계에서는 주소가 비어 있을 수 있다. 토큰은 데몬 파일에서 읽는다
+    let Response::RemotePaired { urls, .. } = c.request(Request::PairRemote { name: "시험".into() }).await.unwrap() else { panic!() };
+    // 토큰은 컴퓨터마다 하나라 다시 물어도 같은 주소다. Tailscale 이 없는 기계에서는 주소가 비어 있을 수 있어 토큰은 파일에서 읽는다
+    let Response::RemotePaired { urls: again, .. } = c.request(Request::PairRemote { name: "또".into() }).await.unwrap() else { panic!() };
+    assert_eq!(urls, again);
     let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join("remote.json")).unwrap()).unwrap();
-    let token = stored["devices"][0]["token"].as_str().unwrap().to_string();
+    let token = stored["token"].as_str().unwrap().to_string();
+    assert_eq!(token.len(), 48);
+    assert_eq!(stored["devices"].as_array().unwrap().len(), 1, "기기를 새로 만들지 않는다");
     for u in &urls {
         assert!(u.ends_with(&format!("#token={token}")), "{u}");
     }
+    // 예전 기기 토큰도 토큰을 바꾸기 전까지는 받는다
+    let (mut old_ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws?token=0123456789abcdef")).await.unwrap();
 
     // 토큰이 틀리면 열지 않는다
     assert!(tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws?token=nope")).await.is_err());
@@ -85,18 +96,27 @@ async fn websocket_speaks_daemon_protocol() {
     }
     assert!(out.contains("ping-remote"), "{out:?}");
 
-    // 기기를 지우면 붙어 있던 연결이 끊긴다
-    c.request(Request::RemoveRemoteDevice { id: device.id }).await.unwrap();
-    let closed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match ws.next().await {
-                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
-                _ => {}
+    // 원격 연결은 토큰도 바꾸지 못한다
+    ws.send(request(5, Request::RotateRemoteToken)).await.unwrap();
+    assert!(recv_error(&mut ws, 5).await.contains("원격"));
+
+    // 토큰을 바꾸면 공용 · 예전 토큰으로 붙어 있던 연결이 모두 끊기고, 예전 토큰은 더는 받지 않는다
+    let Response::Remote { remote } = c.request(Request::RotateRemoteToken).await.unwrap() else { panic!() };
+    assert!(remote.devices.is_empty());
+    for w in [&mut ws, &mut old_ws] {
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match w.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
+                    _ => {}
+                }
             }
-        }
-    })
-    .await;
-    assert!(closed.is_ok(), "기기를 지워도 연결이 남았다");
+        })
+        .await;
+        assert!(closed.is_ok(), "토큰을 바꿔도 연결이 남았다");
+    }
+    assert!(tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws?token={token}")).await.is_err());
+    assert!(tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws?token=0123456789abcdef")).await.is_err());
 }
 
 type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;

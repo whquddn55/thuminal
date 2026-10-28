@@ -369,6 +369,13 @@ export interface RemoteStatus {
   web: boolean;
   /** 안드로이드 앱을 내려받을 수 있는지 (`/download/thuminal.apk`) */
   apk: boolean;
+  /** 이 컴퓨터의 접속 주소들 (`http://100.x.y.z:6780/#token=…`, 데몬 부 버전 8 부터). 토큰은 컴퓨터마다 하나다 */
+  urls?: string[];
+  /** 접속 주소로 지금 붙어 있는 연결 수 */
+  connected?: number;
+  /** 접속 주소로 마지막으로 붙은 때 (ms) */
+  last_seen?: number;
+  /** 예전(기기마다 토큰을 주던 때)에 등록한 기기. 토큰을 바꾸면 지워진다 */
   devices: RemoteDevice[];
 }
 

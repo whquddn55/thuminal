@@ -128,6 +128,7 @@ export class TauriHostApi implements HostApi {
         status: () => this.req<RemoteStatus>({ type: "get_remote" }, (r) => r.remote),
         set: (c) => this.req<RemoteStatus>({ type: "set_remote", enabled: c.enabled ?? null, port: c.port ?? null, lan: c.lan ?? null }, (r) => r.remote),
         pair: (name) => this.req({ type: "pair_remote", name }, (r) => ({ device: r.device as RemoteDevice, urls: r.urls as string[] })),
+        rotate: () => this.req<RemoteStatus>({ type: "rotate_remote_token" }, (r) => r.remote),
         removeDevice: (id) => this.req<RemoteStatus>({ type: "remove_remote_device", id }, (r) => r.remote),
       };
     }
