@@ -1,4 +1,4 @@
-// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 터미널 글꼴, 에이전트 띄우는 옵션, 알림, 원격 접속,
+// 설정 창: 다크/라이트, 다크용·라이트용 터미널 테마, 화면 색을 터미널 테마에서 뽑을지, 터미널 글꼴, 단축키, 에이전트 띄우는 옵션, 알림, 원격 접속,
 // 원격 컴퓨터(다른 컴퓨터 데몬 등록).
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
@@ -15,6 +15,21 @@ import { Label } from "./components/ui/label";
 import { Switch } from "./components/ui/switch";
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel } from "./platform";
+import {
+  clearShortcut,
+  comboOf,
+  isCustomized,
+  keysOf,
+  ownerOf,
+  resetAllShortcuts,
+  resetShortcut,
+  SHORTCUT_ACTIONS,
+  type ShortcutGroup,
+  setRecordingShortcut,
+  setShortcut,
+  shortcutLabel,
+  useShortcutOverrides,
+} from "./shortcuts";
 import { type SettingsSection, useApp, useModel } from "./store";
 import { DEFAULT_TERMINAL_FONT, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack } from "./terminal-font";
 import { currentTheme } from "./theme";
@@ -194,7 +209,7 @@ function FontSection() {
           <Code>MesloLGLDZ Nerd Font Mono</Code>로 채워요.
         </p>
         <p>
-          터미널에서 <Code>{keyLabel("⌘+")}</Code> <Code>{keyLabel("⌘-")}</Code>로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄여요. <Code>{keyLabel("⌘0")}</Code>을 누르면 원래대로 돌아와요.
+          터미널에서 <Code>{shortcutLabel("zoomIn")}</Code> <Code>{shortcutLabel("zoomOut")}</Code>로 모든 터미널 글자 크기를, 터미널 밖에서는 앱 화면 전체를 키우고 줄여요. <Code>{shortcutLabel("zoomReset")}</Code>을 누르면 원래대로 돌아와요.
           {zoom.terminal !== 0 && ` 지금 터미널: ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
           {zoom.ui !== 1 && ` 지금 화면 배율: ${Math.round(zoom.ui * 100)}%.`}
         </p>
@@ -257,6 +272,87 @@ function AgentSection() {
       <p className="text-xs text-muted-foreground">
         바꾸면 다음에 실행하는 claude부터 적용돼요. 이미 열린 셸에서 치는 <Code>claude</Code>도 마찬가지예요. 지금 돌고 있는 claude는 다시 실행해야 해요.
       </p>
+    </div>
+  );
+}
+
+const SHORTCUT_GROUPS: ShortcutGroup[] = ["화면", "탭 · 칸", "글자 크기"];
+
+/** 단축키 (이 앱에 남는다). [변경] 을 누르고 새 키를 누르면 바뀐다. 같은 키를 쓰던 동작에서는 그 키가 빠진다 */
+function ShortcutsSection() {
+  useShortcutOverrides();
+  const [recording, setRecording] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!recording) return;
+    setRecordingShortcut(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") return setRecording(null);
+      const c = comboOf(e);
+      if (!c) return;
+      // 수정키 없이 누르는 키는 글자 입력과 겹친다
+      if (!/[⌃⌥⌘]/.test(c.mods)) return setMessage(IS_MAC ? "⌘ ⌃ ⌥ 중 하나와 같이 눌러 주세요." : "Ctrl이나 Alt와 같이 눌러 주세요.");
+      const action = SHORTCUT_ACTIONS.find((a) => a.id === recording);
+      if (!action) return setRecording(null);
+      if (action.digits && !c.digit) return setMessage("이 동작은 수정키와 1~9 중 하나를 같이 눌러 주세요.");
+      const key = action.digits ? `${c.mods}1~9` : c.combo;
+      const owner = ownerOf(key, action.id);
+      setShortcut(action.id, key);
+      setMessage(owner ? `${keyLabel(key)} 키를 "${owner.label}"에서 빼서 "${action.label}"에 넣었어요.` : null);
+      setRecording(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      setRecordingShortcut(false);
+    };
+  }, [recording]);
+  const btn = "rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground";
+  return (
+    <div className="flex min-h-0 flex-col gap-3 text-xs">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1 text-muted-foreground">{message ?? `브라우저 칸에 포커스가 있으면 ${IS_MAC ? "⌘" : "Ctrl"} 조합만 앱으로 와요.`}</span>
+        <button className={btn} onClick={() => (resetAllShortcuts(), setMessage(null))}>
+          모두 기본값으로
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+        {SHORTCUT_GROUPS.map((g) => (
+          <div key={g} className="flex flex-col">
+            <div className="pb-1 font-medium">{g}</div>
+            {SHORTCUT_ACTIONS.filter((a) => a.group === g).map((a) => {
+              const keys = keysOf(a.id);
+              return (
+                <div key={a.id} className="flex h-8 items-center gap-2 border-b last:border-b-0">
+                  <span className="min-w-0 flex-1 truncate">{a.label}</span>
+                  {recording === a.id ? (
+                    <span className="text-agent-attention">새 키를 눌러 주세요 (Esc 취소)</span>
+                  ) : keys.length ? (
+                    keys.map((k) => (
+                      <kbd key={k} className="rounded border bg-muted px-1.5 py-0.5 font-mono text-2xs">
+                        {keyLabel(k)}
+                      </kbd>
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground">없음</span>
+                  )}
+                  <button className={btn} onClick={() => (setMessage(null), setRecording(recording === a.id ? null : a.id))}>
+                    변경
+                  </button>
+                  <button className={cn(btn, !keys.length && "invisible")} onClick={() => clearShortcut(a.id)}>
+                    지우기
+                  </button>
+                  <button className={cn(btn, !isCustomized(a.id) && "invisible")} onClick={() => resetShortcut(a.id)}>
+                    기본값
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -600,6 +696,8 @@ export function SettingsDialog() {
               ? "테마를 누르면 바로 바뀌어요. 터미널 안에서 도는 프로그램도 새 색으로 답을 받아요."
               : section === "font"
                 ? "터미널 글꼴이에요. 바꾸면 바로 모든 터미널에 적용되고 이 앱에 남아요."
+                : section === "keys"
+                ? "앱 단축키예요. 바꾸면 바로 적용되고 이 앱에 남아요."
                 : section === "agent"
                 ? "에이전트를 실행할 때 붙일 옵션이에요. 누르면 바로 저장돼요."
                 : section === "remote"
@@ -615,6 +713,7 @@ export function SettingsDialog() {
             options={[
               ["theme", "테마"],
               ["font", "글꼴"],
+              ["keys", "단축키"],
               ["agent", "에이전트"],
               ["notify", "알림"],
               ...(remote ? ([["remote", "원격 접속"]] as ["remote", string][]) : []),
@@ -629,6 +728,8 @@ export function SettingsDialog() {
           <HostsSection hosts={hosts} />
         ) : section === "font" ? (
           <FontSection />
+        ) : section === "keys" ? (
+          <ShortcutsSection />
         ) : section === "agent" ? (
           <AgentSection />
         ) : section === "notify" ? (

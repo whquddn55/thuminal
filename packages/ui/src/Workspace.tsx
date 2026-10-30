@@ -38,6 +38,7 @@ import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { SizeTakenOverlay } from "./size-overlay";
 import { SessionPorts } from "./ports-ui";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
+import { shortcutLabel } from "./shortcuts";
 
 type Surface = "main" | "floating";
 
@@ -201,11 +202,11 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
             <ContextMenuContent className="w-56">
               <ContextMenuItem onSelect={() => void model.split("right", { by: "id", value: t.focused })}>
                 오른쪽에 나누기
-                <ContextMenuShortcut>{keyLabel("⌘D")}</ContextMenuShortcut>
+                <ContextMenuShortcut>{shortcutLabel("splitRight")}</ContextMenuShortcut>
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => void model.split("down", { by: "id", value: t.focused })}>
                 아래에 나누기
-                <ContextMenuShortcut>{keyLabel("⌘⇧D")}</ContextMenuShortcut>
+                <ContextMenuShortcut>{shortcutLabel("splitDown")}</ContextMenuShortcut>
               </ContextMenuItem>
               {model.services.host.browser && (
                 <ContextMenuItem onSelect={() => void model.splitBrowser("right", { by: "id", value: t.focused })}>오른쪽에 브라우저 열기</ContextMenuItem>
@@ -224,7 +225,7 @@ export function TabBar({ ws, className, windowDrag, children }: { ws: WorkspaceI
               <ContextMenuSeparator />
               <ContextMenuItem variant="destructive" onSelect={() => model.closeTab(t.id)}>
                 탭 닫기
-                <ContextMenuShortcut>{panes.length > 1 ? "" : keyLabel("⌘W")}</ContextMenuShortcut>
+                <ContextMenuShortcut>{panes.length > 1 ? "" : shortcutLabel("closeCurrent")}</ContextMenuShortcut>
               </ContextMenuItem>
               <ContextMenuItem variant="destructive" disabled={tabs.length < 2} onSelect={() => model.closeOtherTabs(t.id)}>
                 다른 탭 닫기
@@ -251,14 +252,14 @@ export function EmptyWorkspace({ ws }: { ws: WorkspaceId }) {
       <p>{isWorktreeWorkspace(ws) ? "이 워크트리에 열린 터미널이 없어요." : "열린 터미널이 없어요."}</p>
       <div className="flex justify-center gap-2">
         <Button size="sm" variant="outline" onClick={() => void model.newTab(ws)}>
-          새 터미널 ({keyLabel("⌘T")})
+          새 터미널 ({shortcutLabel("newTab")})
         </Button>
         <Button size="sm" variant="outline" onClick={() => void model.newTab(ws, "claude")}>
           claude 실행
         </Button>
       </div>
       <p className="text-2xs">
-        {keyLabel("⌘D")} 오른쪽에 나누기 · {keyLabel("⌘⇧D")} 아래에 나누기 · {keyLabel("⌘⌥A")} {floating ? "플로팅 닫기" : "플로팅"}
+        {shortcutLabel("splitRight")} 오른쪽에 나누기 · {shortcutLabel("splitDown")} 아래에 나누기 · {shortcutLabel("floating")} {floating ? "플로팅 닫기" : "플로팅"}
       </p>
     </div>
   );
@@ -428,16 +429,16 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             </button>
           )}
           <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-            <PaneButton title={`오른쪽에 나누기 (${keyLabel("⌘D")})`} onClick={() => void model.split("right", id)}>
+            <PaneButton title={`오른쪽에 나누기 (${shortcutLabel("splitRight")})`} onClick={() => void model.split("right", id)}>
               <SquareSplitHorizontalIcon />
             </PaneButton>
-            <PaneButton title={`아래에 나누기 (${keyLabel("⌘⇧D")})`} onClick={() => void model.split("down", id)}>
+            <PaneButton title={`아래에 나누기 (${shortcutLabel("splitDown")})`} onClick={() => void model.split("down", id)}>
               <SquareSplitVerticalIcon />
             </PaneButton>
-            <PaneButton title={`펼치기 (${keyLabel("⌘⇧Enter")})`} onClick={() => void model.op({ op: "zoom", target: id })}>
+            <PaneButton title={`펼치기 (${shortcutLabel("zoomPane")})`} onClick={() => void model.op({ op: "zoom", target: id })}>
               {tab.zoomed === pane.id ? <ArrowsInSimpleIcon /> : <ArrowsOutSimpleIcon />}
             </PaneButton>
-            <PaneButton title={`칸 닫기 (${keyLabel("⌘W")})`} onClick={() => model.closePane(pane.id)}>
+            <PaneButton title={`칸 닫기 (${shortcutLabel("closeCurrent")})`} onClick={() => model.closePane(pane.id)}>
               <XIcon />
             </PaneButton>
           </span>
@@ -509,11 +510,11 @@ export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; pan
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void model.split("right", id)}>
           오른쪽에 나누기
-          <ContextMenuShortcut>{keyLabel("⌘D")}</ContextMenuShortcut>
+          <ContextMenuShortcut>{shortcutLabel("splitRight")}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void model.split("down", id)}>
           아래에 나누기
-          <ContextMenuShortcut>{keyLabel("⌘⇧D")}</ContextMenuShortcut>
+          <ContextMenuShortcut>{shortcutLabel("splitDown")}</ContextMenuShortcut>
         </ContextMenuItem>
         {model.services.host.browser && (
           <>
@@ -523,7 +524,7 @@ export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; pan
         )}
         <ContextMenuItem disabled={panesOf(tab.root).length < 2} onSelect={() => void model.op({ op: "zoom", target: id })}>
           {tab.zoomed === paneId ? "펼친 칸 접기" : "칸 펼치기"}
-          <ContextMenuShortcut>{keyLabel("⌘⇧↩")}</ContextMenuShortcut>
+          <ContextMenuShortcut>{shortcutLabel("zoomPane")}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => c().sendText("\x0c")}>화면 지우기 (Ctrl+L)</ContextMenuItem>
@@ -536,7 +537,7 @@ export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; pan
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onSelect={() => model.closePane(paneId)}>
           칸 닫기
-          <ContextMenuShortcut>{keyLabel("⌘W")}</ContextMenuShortcut>
+          <ContextMenuShortcut>{shortcutLabel("closeCurrent")}</ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

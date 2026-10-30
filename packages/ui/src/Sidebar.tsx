@@ -75,6 +75,7 @@ import { RepoMark } from "./repo-icon";
 import { SessionPorts, WorktreePorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
 import { type AppState, FLOATING_WORKSPACE, HOST_STATE_LABEL, ModelContext, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
+import { shortcutLabel } from "./shortcuts";
 
 function copy(text: string) {
   void navigator.clipboard.writeText(text).catch(() => undefined);
@@ -208,7 +209,7 @@ export function Sidebar() {
               <MagnifyingGlassIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>워크트리로 가기 ({keyLabel("⌘J")})</TooltipContent>
+          <TooltipContent>워크트리로 가기 ({shortcutLabel("jump")})</TooltipContent>
         </Tooltip>
       </div>
       <div className="flex h-7 shrink-0 items-center gap-1 pr-2 pl-3">
@@ -317,7 +318,7 @@ export function Sidebar() {
               <GearSixIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>설정 ({keyLabel("⌘,")})</TooltipContent>
+          <TooltipContent>설정 ({shortcutLabel("settings")})</TooltipContent>
         </Tooltip>
         <ResourceButton />
         {update && (
@@ -579,7 +580,7 @@ function Group({
             </DropdownMenu>
           )}
           {onNew && (
-            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" title={`새 워크트리 (${keyLabel("⌘⇧N")})`} onClick={onNew}>
+            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" title={`새 워크트리 (${shortcutLabel("newWorktree")})`} onClick={onNew}>
               <PlusIcon className="size-3.5" />
             </Button>
           )}

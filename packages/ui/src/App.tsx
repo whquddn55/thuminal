@@ -9,7 +9,7 @@ import { hostAt, useDrag } from "./dnd";
 import { panesOf } from "./layout";
 import { FloatingPanel, FloatingTrigger } from "./FloatingPanel";
 import { cn } from "./lib/utils";
-import { appMods, keyLabel } from "./platform";
+import { actionFor, comboOf, recordingShortcut, shortcutLabel } from "./shortcuts";
 import { Dialogs } from "./overlays";
 import { RightPanel } from "./RightPanel";
 import type { Services } from "./services";
@@ -34,92 +34,138 @@ export function App({ services }: { services: Services }) {
   );
 }
 
-const ARROWS: Record<string, "left" | "right" | "up" | "down"> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
-
 /**
- * 앱 단축키. 터미널 입력보다 먼저 받는다 (Cmd 조합은 터미널로 가지 않는다).
+ * 앱 단축키. 터미널 입력보다 먼저 받는다 (걸린 키는 터미널로 가지 않는다).
+ * 키는 사용자가 설정창에서 바꿀 수 있다 (`shortcuts.ts`). 기본값은 Orca 와 같다.
  * `model` 은 root 다. 칸·탭을 다루는 것은 키보드가 가 있는 호스트 모델(`focusedModel`)로, 창 전체 일은 root 로 보낸다
  */
 function useShortcuts(root: AppModel) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Windows · Linux 키는 macOS 단축키 자리로 읽는다 (platform.ts)
-      const k = appMods(e);
+      if (recordingShortcut) return;
       const model = root.focusedModel();
-      const run = (f: () => void) => {
-        e.preventDefault();
-        e.stopPropagation();
-        f();
-      };
-      // 단축키는 Orca 와 같다. thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 칸 크기는 ⌃⌘⇧방향키
-      // ⌃` 와 ⌘⌥A : 플로팅 워크스페이스 (⌘⌥⇧A 는 최대화한 채로)
-      if (k.ctrl && !k.meta && (e.code === "Backquote" || e.key === "`")) return run(() => void root.toggleFloating());
-      if (k.meta && k.alt && e.code === "KeyA") return run(() => void root.toggleFloating(k.shift));
-      // ⌃1~9 : 지금 워크스페이스의 탭
-      if (k.ctrl && !k.meta && !k.alt && /^Digit[1-9]$/.test(e.code)) return run(() => model.selectTabIndex(Number(e.code.slice(5)) - 1));
-      if (!k.meta) return;
-      // ⌘+ ⌘- ⌘0 : 터미널에 포커스가 있으면 터미널 글자 크기, 아니면 앱 화면 배율 (웹은 브라우저 확대에 맡긴다)
-      if (!k.alt && !k.ctrl && (e.code === "Equal" || e.code === "Minus" || e.code === "Digit0")) {
-        const dir = e.code === "Minus" ? -1 : e.code === "Digit0" ? 0 : 1;
-        if (document.activeElement?.classList.contains("thm-input")) return run(() => root.zoomTerminal(dir));
-        if (root.zoomUi(dir)) {
+      const s = model.get();
+      // 브라우저 칸이 포커스면 Orca 와 같이 ⌘[ ] 뒤로·앞으로, ⌘R 새로 고침, ⌘L 주소 칸 (바꿀 수 없다)
+      const combo = comboOf(e)?.combo;
+      if (!s.dialog && model.currentBrowser() !== null) {
+        const cmd = combo === "⌘[" ? "back" : combo === "⌘]" ? "forward" : combo === "⌘R" ? "reload" : combo === "⌘L" ? "address" : null;
+        if (cmd) {
           e.preventDefault();
           e.stopPropagation();
+          return model.browserCommand(cmd);
         }
-        return;
       }
-      const s = model.get();
-      if (s.dialog) return;
-      const key = e.key.toLowerCase();
-      const arrow = ARROWS[e.key];
-      if (arrow && k.ctrl && k.shift) {
-        const axis = arrow === "left" || arrow === "right" ? "row" : "column";
-        return run(() => model.resizeBy(arrow === "right" || arrow === "down" ? 0.05 : -0.05, axis));
-      }
-      if (arrow && k.ctrl) return run(() => model.focusDir(arrow));
-      // ⌘⌥← → : 워크트리 방문 기록 뒤로·앞으로
-      if (arrow && k.alt && (arrow === "left" || arrow === "right")) return run(() => root.goHistory(arrow === "left" ? -1 : 1));
-      // 브라우저 칸이 포커스면 Orca 와 같이 ⌘[ ] 뒤로·앞으로, ⌘R 새로 고침, ⌘L 주소 칸
-      if (!k.shift && !k.alt && !k.ctrl && model.currentBrowser() !== null) {
-        const cmd = e.key === "[" ? "back" : e.key === "]" ? "forward" : key === "r" ? "reload" : key === "l" ? "address" : null;
-        if (cmd) return run(() => model.browserCommand(cmd));
-      }
-      if (k.shift && key === "b") return run(() => void model.newBrowserTab());
-      if (key === "j") return run(() => root.setDialog({ kind: "jump" }));
-      if (key === ",") return run(() => root.setDialog({ kind: "settings" }));
-      if (k.shift && key === "n") {
-        const repo = s.worktrees.find((w) => w.path === s.active)?.repo ?? s.repos[0]?.id;
-        if (repo) run(() => model.setDialog({ kind: "new-worktree", repo }));
-        return;
-      }
-      if (k.shift && key === "e") return run(() => model.setPanel("files"));
-      if (k.shift && key === "g") return run(() => model.setPanel("changes"));
-      if (k.shift && key === "f") return run(() => model.setPanel("search"));
-      // ⌘⇧O : 지금 워크트리의 Markdown 파일 열기 (Orca 와 같다)
-      if (k.shift && key === "o") {
-        if (isWorktreeWorkspace(s.active)) run(() => model.setDialog({ kind: "open-markdown" }));
-        return;
-      }
-      // 브라우저 칸이면 위에서 주소 칸으로 갔다. 그 밖에는 오른쪽 사이드바 (Orca 와 같다)
-      if (key === "l" && !k.shift && !k.alt) return run(() => model.toggleRight());
-      if (k.shift && key === "enter") return run(() => model.zoom());
-      if (key === "d") return run(() => void model.split(k.shift ? "down" : "right"));
-      if (key === "t" && !k.shift) return run(() => void model.newTab());
-      if (key === "w" && !k.shift) return run(() => void model.closeCurrent());
-      // ⌘⇧[ ] 이전·다음 탭, ⌘[ ] 이전·다음 칸 (⇧ 가 눌리면 key 가 { } 로 오기도 한다)
-      if (k.shift && (e.code === "BracketLeft" || e.code === "BracketRight")) return run(() => model.selectNearTab(e.code === "BracketRight" ? 1 : -1));
-      if (e.key === "[" || e.key === "]") return run(() => model.focusCycle(e.key === "]" ? 1 : -1));
-      if (k.shift && (e.key === "ArrowUp" || e.key === "ArrowDown") && !k.alt && !k.ctrl) return run(() => root.selectNearWorktree(e.key === "ArrowDown" ? 1 : -1));
-      if (key === "b" && !k.shift) return run(() => root.toggleSidebar());
-      if (k.alt && key === "=") return run(() => model.equalize());
-      // ⌘⌥T : 새 에이전트 탭 (찾은 에이전트 중 첫째, 보통 claude)
-      if (k.alt && e.code === "KeyT") return run(() => void model.newTab(undefined, s.agents[0] ?? "claude"));
-      // ⌘1~9 : 사이드바 순서로 n 번째 워크트리 (원격 컴퓨터 것도)
-      if (/^Digit[1-9]$/.test(e.code) && !k.shift && !k.alt) return run(() => root.selectWorktreeIndex(Number(e.code.slice(5)) - 1));
+      const hit = actionFor(e);
+      if (!hit || (s.dialog && !hit.action.inDialog)) return;
+      // false 를 돌려준 동작은 키를 그대로 흘려보낸다
+      if (runAction(root, model, hit.action.id, hit.digit) === false) return;
+      e.preventDefault();
+      e.stopPropagation();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [root]);
+}
+
+/** 단축키 동작을 한다. 할 수 없으면 false */
+function runAction(root: AppModel, model: AppModel, id: string, digit: number): boolean | void {
+  const s = model.get();
+  // ⌘+ ⌘- ⌘0 : 터미널에 포커스가 있으면 터미널 글자 크기, 아니면 앱 화면 배율 (웹은 브라우저 확대에 맡긴다)
+  const zoom = (dir: 1 | -1 | 0) => {
+    if (document.activeElement?.classList.contains("thm-input")) return root.zoomTerminal(dir);
+    return root.zoomUi(dir);
+  };
+  switch (id) {
+    case "worktreeN":
+      // 사이드바 순서로 n 번째 워크트리 (원격 컴퓨터 것도)
+      return root.selectWorktreeIndex(digit - 1);
+    case "prevWorktree":
+      return root.selectNearWorktree(-1);
+    case "nextWorktree":
+      return root.selectNearWorktree(1);
+    case "historyBack":
+      return root.goHistory(-1);
+    case "historyForward":
+      return root.goHistory(1);
+    case "jump":
+      return root.setDialog({ kind: "jump" });
+    case "newWorktree": {
+      const repo = s.worktrees.find((w) => w.path === s.active)?.repo ?? s.repos[0]?.id;
+      if (!repo) return false;
+      return model.setDialog({ kind: "new-worktree", repo });
+    }
+    case "toggleSidebar":
+      return root.toggleSidebar();
+    case "toggleRight":
+      return model.toggleRight();
+    case "filesPanel":
+      return model.setPanel("files");
+    case "changesPanel":
+      return model.setPanel("changes");
+    case "searchPanel":
+      return model.setPanel("search");
+    case "openMarkdown":
+      // 지금 워크트리의 Markdown 파일 열기 (Orca 와 같다)
+      if (!isWorktreeWorkspace(s.active)) return false;
+      return model.setDialog({ kind: "open-markdown" });
+    case "floating":
+      return void root.toggleFloating();
+    case "floatingMax":
+      return void root.toggleFloating(true);
+    case "settings":
+      return root.setDialog({ kind: "settings" });
+    case "tabN":
+      // 지금 워크스페이스의 n 번째 탭
+      return model.selectTabIndex(digit - 1);
+    case "prevTab":
+      return model.selectNearTab(-1);
+    case "nextTab":
+      return model.selectNearTab(1);
+    case "newTab":
+      return void model.newTab();
+    case "newAgentTab":
+      // 찾은 에이전트 중 첫째 (보통 claude)
+      return void model.newTab(undefined, s.agents[0] ?? "claude");
+    case "newBrowserTab":
+      return void model.newBrowserTab();
+    case "closeCurrent":
+      return void model.closeCurrent();
+    case "splitRight":
+      return void model.split("right");
+    case "splitDown":
+      return void model.split("down");
+    case "zoomPane":
+      return model.zoom();
+    case "equalize":
+      return model.equalize();
+    case "prevPane":
+      return model.focusCycle(-1);
+    case "nextPane":
+      return model.focusCycle(1);
+    case "focusLeft":
+      return model.focusDir("left");
+    case "focusRight":
+      return model.focusDir("right");
+    case "focusUp":
+      return model.focusDir("up");
+    case "focusDown":
+      return model.focusDir("down");
+    case "resizeLeft":
+      return model.resizeBy(-0.05, "row");
+    case "resizeRight":
+      return model.resizeBy(0.05, "row");
+    case "resizeUp":
+      return model.resizeBy(-0.05, "column");
+    case "resizeDown":
+      return model.resizeBy(0.05, "column");
+    case "zoomIn":
+      return zoom(1);
+    case "zoomOut":
+      return zoom(-1);
+    case "zoomReset":
+      return zoom(0);
+  }
+  return false;
 }
 
 /** 운영체제에서 파일을 터미널 칸에 끌어 놓으면 경로를 셸에 맞게 감싸 붙여 넣는다. 원격 칸은 아직 막는다 (올리기는 다음 단계) */
@@ -209,7 +255,7 @@ function MainArea() {
         <div className="flex h-10 shrink-0 items-center border-b pr-2 pl-2" data-tauri-drag-region>
           <TabBar ws={active} windowDrag className="h-full flex-1">
             {inWorktree && (
-              <PanelButton on={!!panel} label={`오른쪽 사이드바: 파일, 변경, 검색 (${keyLabel("⌘L")})`} onClick={() => model.toggleRight()}>
+              <PanelButton on={!!panel} label={`오른쪽 사이드바: 파일, 변경, 검색 (${shortcutLabel("toggleRight")})`} onClick={() => model.toggleRight()}>
                 {changes > 0 && <span className="text-[10px] tabular-nums">{changes}</span>}
                 <SidebarSimpleIcon className="-scale-x-100" />
               </PanelButton>

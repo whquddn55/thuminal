@@ -27,6 +27,7 @@ import { baseName as base, dirName as dirOf, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
 import { keyLabel, primaryMod } from "./platform";
 import { type Panel, useApp, useModel } from "./store";
+import { shortcutLabel } from "./shortcuts";
 
 const LETTER: Record<ChangeKind, string> = {
   added: "A",
@@ -53,10 +54,10 @@ const TONE: Record<ChangeKind, string> = {
 
 const HEAD = "flex items-center justify-between px-3 pt-2.5 pb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground";
 
-const TABS: { id: NonNullable<Panel>; label: string; key: string; icon: React.ReactNode }[] = [
-  { id: "files", label: "파일", key: keyLabel("⌘⇧E"), icon: <FilesIcon /> },
-  { id: "changes", label: "변경", key: keyLabel("⌘⇧G"), icon: <GitDiffIcon /> },
-  { id: "search", label: "검색", key: keyLabel("⌘⇧F"), icon: <MagnifyingGlassIcon /> },
+const TABS: { id: NonNullable<Panel>; label: string; shortcut: string; icon: React.ReactNode }[] = [
+  { id: "files", label: "파일", shortcut: "filesPanel", icon: <FilesIcon /> },
+  { id: "changes", label: "변경", shortcut: "changesPanel", icon: <GitDiffIcon /> },
+  { id: "search", label: "검색", shortcut: "searchPanel", icon: <MagnifyingGlassIcon /> },
 ];
 
 export function RightPanel() {
@@ -73,7 +74,7 @@ export function RightPanel() {
         {TABS.map((t) => (
           <button
             key={t.id}
-            title={`${t.label} (${t.key})`}
+            title={`${t.label} (${shortcutLabel(t.shortcut)})`}
             className={cn(
               "flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground [&>svg]:size-3.5",
               panel === t.id && "bg-sidebar-accent text-foreground",
@@ -87,7 +88,7 @@ export function RightPanel() {
         ))}
         <button
           className="ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          title={`오른쪽 사이드바 닫기 (${keyLabel("⌘L")})`}
+          title={`오른쪽 사이드바 닫기 (${shortcutLabel("toggleRight")})`}
           onClick={() => model.toggleRight()}
         >
           <XIcon className="size-3.5" />
