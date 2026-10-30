@@ -1,6 +1,7 @@
-// 브라우저 칸: 주소 줄 + 진짜 웹뷰가 얹힐 자리.
+// 브라우저 칸: 주소 줄 + 진짜 웹뷰가 보일 자리.
 //
-// 웹뷰는 껍데기(Tauri)가 창 위에 얹는 네이티브 뷰라 HTML 보다 위에 그려진다. 그래서
+// 웹뷰는 껍데기(Tauri)가 띄우는 네이티브 뷰다. macOS · Linux 는 메인 웹뷰 밑에 깔려(`browser.under`) 이 칸 자리로
+// 비쳐 보이므로 위에 무엇이 그려져도 그대로 둔다 (browser-layer.tsx). Windows 는 HTML 보다 위에 그려져서
 // 메뉴·창이 열려 있거나, 끄는 중이거나, 플로팅 패널이 이 칸을 덮으면 웹뷰를 잠깐 숨긴다.
 // 칸이 화면에서 빠지면(탭을 바꾸면) 숨기기만 하고, 칸이 배치에서 없어지면 모델이 닫는다.
 
@@ -63,7 +64,8 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
   const dragging = useDrag((d) => d.source !== null);
   const floatingOpen = useApp((s) => s.floating.open);
   const [covered, setCovered] = useState(false);
-  const hidden = overlay || dragging || covered;
+  const under = !!browser?.under;
+  const hidden = !under && (overlay || dragging || covered);
   const shown = page?.url || url;
 
   // 웹뷰를 열고, 칸 자리가 바뀔 때마다 따라간다. 칸이 화면에서 빠지면 숨긴다
@@ -82,8 +84,8 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
         const key = `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}`;
         if (opened && key !== last && b.width > 0) void browser.setBounds(paneId, b).catch(() => undefined);
         last = key;
-        // 메인 면의 칸은 플로팅 패널에 덮이면 숨긴다 (네이티브 웹뷰가 패널 위로 올라오므로)
-        const fp = !inFloating && floatingOpen ? document.querySelector("[data-floating-panel]") : null;
+        // 웹뷰가 위에 얹히면 메인 면의 칸은 플로팅 패널에 덮일 때 숨긴다 (네이티브 웹뷰가 패널 위로 올라오므로)
+        const fp = !under && !inFloating && floatingOpen ? document.querySelector("[data-floating-panel]") : null;
         setCovered(fp ? intersects(fp.getBoundingClientRect(), host.current.getBoundingClientRect()) : false);
       }
       raf = requestAnimationFrame(tick);
@@ -102,7 +104,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
     };
     // url 은 처음 열 때만 쓴다. 그 뒤 이동은 웹뷰가 한다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browser, paneId, inFloating, floatingOpen, model]);
+  }, [browser, paneId, inFloating, floatingOpen, under, model]);
 
   useEffect(() => {
     if (!browser) return;
@@ -172,7 +174,12 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
           <ArrowSquareOutIcon />
         </button>
       </div>
-      <div ref={host} className="relative min-h-0 flex-1 bg-white" data-browser-host={hidden ? undefined : paneId}>
+      <div
+        ref={host}
+        className={cn("relative min-h-0 flex-1", !under && "bg-white")}
+        data-browser-host={hidden ? undefined : paneId}
+        data-browser-of={model.hostKey}
+      >
         {hidden && (
           <div className="absolute inset-0 grid place-content-center bg-muted text-xs text-muted-foreground">
             {page?.title || shown}

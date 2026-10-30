@@ -152,6 +152,11 @@ export class TauriHostApi implements HostApi {
     return { x: r.x * z, y: r.y * z, w: r.width * z, h: r.height * z };
   };
 
+  private readonly rect = (r: { x: number; y: number; width: number; height: number }): [number, number, number, number] => {
+    const { x, y, w, h } = this.at(r);
+    return [x, y, w, h];
+  };
+
   readonly git: GitApi = {
     status: (worktree) => this.req<GitStatus>({ type: "git_status", worktree }, (r) => r.status),
     diff: (worktree, file, staged) => this.req<string>({ type: "git_diff", worktree, file, staged }, (r) => r.text),
@@ -215,6 +220,9 @@ export class TauriHostApi implements HostApi {
   }
 
   readonly browser: BrowserHost = {
+    // macOS · Linux 는 웹뷰를 메인 웹뷰 밑에 깐다 (src-tauri browser.rs). Windows 는 아직 위에 얹는다
+    under: !/Windows/.test(navigator.userAgent),
+    layer: (items) => invoke("browser_layer", { items: items.map((i) => ({ host: i.host, id: i.id, rects: i.rects.map((r) => this.rect(r)) })) }),
     open: async (id, url, at) => this.call("browser_open", { id, url: await this.viewUrl(url), ...this.at(at) }),
     setBounds: (id, at) => this.call("browser_bounds", { id, ...this.at(at) }),
     setVisible: (id, visible) => this.call("browser_visible", { id, visible }),

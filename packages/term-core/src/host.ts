@@ -50,11 +50,23 @@ export type BrowserEvent =
   /** 페이지가 새 창을 열려 했다 */
   | { type: "new_window"; id: number; url: string };
 
+/** 메인 웹뷰 밑에 깐 브라우저 칸 하나와, 메인 웹뷰가 마우스를 그 칸으로 넘길 사각형들 */
+export interface BrowserLayerItem {
+  /** 칸이 든 원격 호스트 id (로컬이면 null) */
+  host: string | null;
+  id: number;
+  rects: Bounds[];
+}
+
 /**
- * 브라우저 칸. 칸 자리(사각형)는 화면이 잡고, 껍데기는 그 자리에 진짜 웹뷰를 얹는다.
- * 웹뷰는 화면(HTML) 위에 그려지므로 메뉴·창이 겹치는 동안에는 화면이 숨겨 달라고 한다. id 는 칸 번호
+ * 브라우저 칸. 칸 자리(사각형)는 화면이 잡고, 껍데기는 그 자리에 진짜 웹뷰를 띄운다. id 는 칸 번호.
+ * under 면 웹뷰가 화면(HTML) 밑에 깔린다: 화면은 칸 자리만 뚫어 두고, 마우스를 넘길 자리를 layer 로 알린다.
+ * 아니면 웹뷰가 화면 위에 얹히므로 메뉴·창이 겹치는 동안에는 화면이 숨겨 달라고 한다
  */
 export interface BrowserHost {
+  readonly under?: boolean;
+  /** 창 하나의 것이다. 모든 호스트의 칸을 아래에서 위 차례로 한 번에 보낸다 (under 일 때만) */
+  layer?(items: BrowserLayerItem[]): Promise<void>;
   open(id: number, url: string, at: Bounds): Promise<void>;
   setBounds(id: number, at: Bounds): Promise<void>;
   setVisible(id: number, visible: boolean): Promise<void>;

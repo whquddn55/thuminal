@@ -47,6 +47,7 @@ export function FloatingPanel() {
   const saved = useApp((s) => s.floating.rect);
   const maximized = useApp((s) => s.floating.maximized);
   const focused = useApp((s) => s.focusArea === "floating");
+  const under = !!model.services.host.browser?.under;
   const [live, setLive] = useState<FloatingRect | null>(null);
   const [, redraw] = useState(0);
 
@@ -114,8 +115,11 @@ export function FloatingPanel() {
       )}
       style={style}
       data-floating-panel
+      data-browser-cover
       onPointerDownCapture={() => !focused && model.setFocusArea("floating")}
     >
+      {/* 브라우저 칸 웹뷰를 밑에 깔면 패널 바탕은 이 판이 칠하고 칸 자리만 비운다 (browser-layer.tsx) */}
+      {under && <div data-floating-base className="pointer-events-none absolute inset-0 -z-10 bg-background" />}
       <div
         className="flex h-9 shrink-0 cursor-default items-center gap-1 border-b bg-sidebar pr-1.5 pl-2"
         onPointerDown={(e) => drag(e, "move")}
@@ -201,9 +205,11 @@ export function FloatingTrigger() {
     return () => window.removeEventListener("resize", on);
   }, []);
   const pos = live ?? resolveTrigger(anchored);
-  // 브라우저 칸의 웹뷰는 HTML 위에 그려져 버튼을 가린다. 웹뷰와 겹치는 동안에는 버튼을 숨긴다 (⌘⌥A 는 된다)
+  // 브라우저 칸 웹뷰가 HTML 위에 그려지는 껍데기(Windows)는 버튼을 가린다. 웹뷰와 겹치는 동안에는 버튼을 숨긴다 (⌘⌥A 는 된다)
+  const under = !!model.services.host.browser?.under;
   const [underWebview, setUnderWebview] = useState(false);
   useEffect(() => {
+    if (under) return;
     const t = window.setInterval(() => {
       const r = { left: pos.left, top: pos.top, right: pos.left + TRIGGER, bottom: pos.top + TRIGGER };
       const hit = [...document.querySelectorAll("[data-browser-host]")].some((el) => {
@@ -213,7 +219,7 @@ export function FloatingTrigger() {
       setUnderWebview(hit);
     }, 300);
     return () => window.clearInterval(t);
-  }, [pos.left, pos.top]);
+  }, [pos.left, pos.top, under]);
   if (underWebview && !live) return null;
 
   return (
@@ -227,6 +233,7 @@ export function FloatingTrigger() {
             open && "ring-2 ring-ring/50",
           )}
           style={pos}
+          data-browser-cover
           aria-label={open ? "플로팅 워크스페이스 접기" : "플로팅 워크스페이스 열기"}
           aria-pressed={open}
           onPointerDown={(e) => {
