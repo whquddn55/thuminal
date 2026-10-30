@@ -71,7 +71,8 @@ pub enum WorkspaceError {
     UnknownRepo(String),
     #[error(transparent)]
     Vcs(#[from] VcsError),
-    #[error("목록 파일을 쓰지 못했어요: {0}")]
+    /// 목록 파일 저장 · 파일 읽기 쓰기 같은 파일 시스템 오류 모두
+    #[error("파일을 읽거나 쓰지 못했어요: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(String),
@@ -601,7 +602,12 @@ impl Workspace {
             return dunce::canonicalize(file).map_err(|_| WorkspaceError::Invalid(format!("파일을 찾지 못했어요: {file}")));
         }
         let w = self.known_worktree(worktree)?;
-        inside(&w, file)
+        // `inside` 는 없는 경로도 돌려준다 (지운 파일의 diff). 파일 칸은 있는 파일만 연다
+        let p = inside(&w, file)?;
+        if !p.exists() {
+            return Err(WorkspaceError::Invalid(format!("파일을 찾지 못했어요: {file}")));
+        }
+        Ok(p)
     }
 
     pub fn read_file(&self, worktree: &str, file: &str) -> Result<FileContent, WorkspaceError> {
@@ -933,6 +939,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&plan).unwrap(), "고친 계획\n");
         assert!(ws.read_file(&w, "../plan.md").is_err());
         assert!(ws.read_file("other", "plan.md").is_err(), "상대 경로는 워크트리가 있어야 한다");
+        let missing = ws.read_file(&w, "Users/x/plan.md").unwrap_err().to_string();
+        assert_eq!(missing, "파일을 찾지 못했어요: Users/x/plan.md", "없는 파일은 목록 파일 오류로 답하지 않는다");
     }
 
     #[test]
