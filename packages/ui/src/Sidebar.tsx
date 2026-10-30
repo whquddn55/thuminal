@@ -147,18 +147,16 @@ export function StatusIndicator({ status, className }: { status: Status; classNa
         <span className="thm-spinner block size-2 rounded-full border-2 border-agent-working border-t-transparent" />
       ) : s === "attention" ? (
         <ChatCircleDotsIcon weight="fill" className="size-3 text-agent-attention" />
-      ) : s === "error" ? (
+      ) : s === "error" || s === "failed" ? (
         <WarningCircleIcon weight="fill" className="size-3 text-agent-failed" />
-      ) : s === "ready" ? (
-        <span className="block size-2 rounded-full border-[1.5px] border-muted-foreground/70" />
       ) : (
         <span
           className={cn(
-            "block rounded-full",
-            s === "failed" ? "size-1.5 bg-muted-foreground" : "size-2",
-            (s === "done" || s === "active") && "bg-agent-done",
+            "block size-2.5 rounded-full",
+            s === "done" && "border border-agent-working bg-agent-done",
+            s === "interrupted" && "border border-agent-failed bg-muted-foreground/60",
+            (s === "ready" || s === "active") && "bg-white",
             s === "inactive" && "bg-neutral-500/40",
-            s === "interrupted" && "bg-muted-foreground/60",
           )}
         />
       )}
