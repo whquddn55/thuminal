@@ -304,6 +304,11 @@ export interface HostApi {
   /** 운영체제 알림을 띄운다. 누르면 onNotificationClick 으로 그 세션을 알린다. 지원하지 않는 껍데기는 두지 않는다 */
   notify?(n: { title: string; subtitle?: string; body: string; session: number; sound: boolean }): Promise<void>;
   onNotificationClick?(cb: (session: number) => void): () => void;
+  /**
+   * Finder · 파일 탐색기에서 "다음으로 열기 → thuminal" 로 연 파일 (이 컴퓨터 절대 경로).
+   * 구독하기 전에 받은 것(파일로 앱이 켜졌을 때)도 구독하자마자 넘긴다. 데스크톱 껍데기의 로컬 HostApi 만
+   */
+  onOpenFiles?(cb: (paths: string[]) => void): () => void;
   /** 원격 접속 설정 (데스크톱 껍데기만) */
   readonly remote?: RemoteApi;
   /** 원격 호스트 관리 (데스크톱 껍데기의 로컬 HostApi 만) */

@@ -477,6 +477,15 @@ export class AppModel {
       }
     }
     if (this.isRoot) bootFinish();
+    // 워크트리 목록을 읽은 뒤에 받는다 (파일로 앱이 켜졌으면 구독하자마자 그 파일이 온다)
+    if (this.isRoot) {
+      const offOpen = host.onOpenFiles?.((paths) => void this.openOsFiles(paths));
+      const off = this.unsubscribe;
+      this.unsubscribe = () => {
+        off?.();
+        offOpen?.();
+      };
+    }
     if (this.isRoot && host.updates) {
       // 새 앱 버전: 시작하고 조금 뒤 한 번, 그 뒤로 6시간마다
       this.timers.push(window.setTimeout(() => void this.checkUpdate(), 5000));
@@ -806,9 +815,7 @@ export class AppModel {
     if (link.isDir) return remote ? this.notice("원격 컴퓨터 폴더는 아직 열 수 없어요") : void host.reveal(link.path).catch(fail);
     if (/\.html?$/i.test(link.path) && host.browser && !remote) return void this.newBrowserTab(this.workspaceOf(id) ?? undefined, `file://${encodeURI(link.path)}`);
     const line: Record<string, string> = link.line ? { line: String(link.line) } : {};
-    const wt = this.get()
-      .worktrees.filter((w) => link.path.startsWith(`${w.path}/`) || link.path.startsWith(`${w.path}\\`))
-      .sort((a, b) => b.path.length - a.path.length)[0];
+    const wt = this.worktreeOf(link.path);
     // 워크트리 밖 파일(예: ~/.claude/plans/x.md)은 절대 경로 그대로 지금 워크스페이스의 파일 칸에 연다. 옛 데몬은 읽지 못해 기본 앱으로
     if (!wt) {
       const doc = { kind: "file", file: link.path, ...line };
@@ -827,6 +834,34 @@ export class AppModel {
     }
     if (this.get().active !== wt.path) this.select(wt.path);
     this.openDoc({ kind: "file", file: link.path.slice(wt.path.length + 1), ...line });
+  };
+
+  /** 절대 경로가 든 워크트리 (가장 깊은 것). Windows 경로(`\\`)도 본다 */
+  private worktreeOf(path: string): WorktreeInfo | undefined {
+    return this.get()
+      .worktrees.filter((w) => path.startsWith(`${w.path}/`) || path.startsWith(`${w.path}\\`))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+  }
+
+  /**
+   * Finder · 파일 탐색기에서 thuminal 로 연 파일 (root 만). 워크트리 안이면 그 워크트리 탭의 파일 칸,
+   * 밖이면 "워크트리 밖" 탭의 파일 칸에 절대 경로로 연다. 여러 개면 마지막 파일이 있는 곳이 보인다
+   */
+  openOsFiles = async (paths: string[]) => {
+    const host = this.services.host;
+    const d = await host.daemon().catch(() => null);
+    const outside = (d?.protocol?.[1] ?? 0) >= OUTSIDE_FILES_PROTOCOL_MINOR;
+    for (const path of paths) {
+      const wt = this.worktreeOf(path);
+      if (!wt && !outside) {
+        this.notice("데몬이 이전 버전이라 워크트리 밖 파일은 열 수 없어요. 데몬을 다시 시작해 주세요");
+        continue;
+      }
+      // 플로팅 패널이 열려 있으면 닫는다 (파일 칸은 메인 면에 열린다)
+      if (this.get().floating.open) this.set((s) => ({ floating: { ...s.floating, open: false } }));
+      this.select(wt?.path ?? OTHER_WORKSPACE);
+      this.openDoc({ kind: "file", file: wt ? path.slice(wt.path.length + 1) : path });
+    }
   };
 
   // ---- 워크스페이스 ----
