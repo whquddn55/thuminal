@@ -66,6 +66,8 @@ struct State {
     order: Vec<String>,
     /// 만드는 중인 칸과 그동안 바뀐 보이기. 만드는 중에 닫히면 빠진다
     pending: HashMap<String, bool>,
+    /// 마지막 browser_layer 의 칸마다 사각형. 만드는 중인 칸 것도 들고 있다가 들일 때 넣는다
+    rects: HashMap<String, Vec<[f64; 4]>>,
 }
 
 thread_local! {
@@ -227,7 +229,8 @@ fn adopt(app: AppHandle, label: String, id: u64, event: String, url: String, bou
         let script = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |_, _| first.Navigate(&HSTRING::from(url.as_str()))));
         webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(BRIDGE), &script).map_err(err)?;
         STATE.with_borrow_mut(|s| {
-            let mut v = View { controller, comp, webview, visual, bounds, visible, rects: Vec::new(), pressed: 0, hover: false };
+            let rects = s.rects.get(&label).cloned().unwrap_or_default();
+            let mut v = View { controller, comp, webview, visual, bounds, visible, rects, pressed: 0, hover: false };
             let c = s.comp.as_ref().expect("있다");
             place(c, &mut v, bounds);
             // 부모 창 밑에 WebView2 가 만든 창이 메인 웹뷰를 가리지 않게 메인 웹뷰 그릇을 맨 위로 올린다
@@ -450,10 +453,9 @@ pub async fn layer(app: AppHandle, items: Vec<(String, Vec<[f64; 4]>)>) -> CmdRe
         STATE.with_borrow_mut(|s| {
             let order: Vec<String> = items.iter().map(|(l, _)| l.clone()).collect();
             let moved = order != s.order;
-            for (label, rects) in items {
-                if let Some(v) = s.views.get_mut(&label) {
-                    v.rects = rects;
-                }
+            s.rects = items.into_iter().collect();
+            for (label, v) in s.views.iter_mut() {
+                v.rects = s.rects.get(label).cloned().unwrap_or_default();
             }
             if moved {
                 s.order = order;
