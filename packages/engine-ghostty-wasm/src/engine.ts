@@ -565,7 +565,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
     if (!ptr || !len) return null;
     const text = new TextDecoder().decode(w.u8().slice(ptr, ptr + len));
     w.ex.ghostty_free(0, ptr, len);
-    return text;
+    return composeHangul(text);
   }
 
   private encodeKey(k: KeyInput): Uint8Array | null {
@@ -758,6 +758,17 @@ export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
       }
     },
   };
+}
+
+/** 첫소리 하나와 그 뒤 가운뎃소리 · 끝소리 자모 */
+const JAMO_SYLLABLE = /[\u1100-\u115F\uA960-\uA97C][\u1160-\u11FF\uD7B0-\uD7FF]+/g;
+
+/**
+ * 글 안의 자모로 나뉜 한글만 완성형으로 묶는다 (복사할 때). 글 전체를 NFC 로 바꾸면 CJK 호환 한자 같은 다른 글자도
+ * 바뀌므로 자모 묶음에만 쓴다
+ */
+export function composeHangul(text: string): string {
+  return text.replace(JAMO_SYLLABLE, (m) => m.normalize("NFC"));
 }
 
 /** 한글 첫소리 자모 (옛 한글 첫소리 확장 포함) */

@@ -5,6 +5,7 @@ import { CellFlags, type CellSink, type TerminalEngine } from "@thuminal/term-co
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { ghosttyWasmEngine } from "../src";
+import { composeHangul } from "../src/engine";
 
 const wasmPath = fileURLToPath(new URL("../src/assets/ghostty-vt.wasm", import.meta.url));
 const factory = ghosttyWasmEngine({ wasm: async () => readFileSync(wasmPath) });
@@ -72,6 +73,11 @@ describe("ghostty-vt.wasm 엔진", () => {
     expect(g.cells.get("1,0")!.cp).toBe("한".codePointAt(0));
     expect(g.cells.get("3,0")!.cp).toBe("글".codePointAt(0));
     e.dispose();
+  });
+
+  it("자모로 나뉜 한글은 완성형으로 복사한다 (다른 글자는 그대로)", () => {
+    expect(composeHangul("@한글.md".normalize("NFD"))).toBe("@한글.md");
+    expect(composeHangul("e\u0301 \uF900 ᄒ")).toBe("e\u0301 \uF900 ᄒ");
   });
 
   it("키를 터미널 모드에 맞게 바꾼다", () => {
