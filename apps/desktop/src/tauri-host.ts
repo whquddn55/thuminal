@@ -487,6 +487,26 @@ export class TauriHostApi implements HostApi {
     };
   }
 
+  onOpenFiles(cb: (paths: string[]) => void): () => void {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    // 이벤트에는 경로가 없다. 받을 때마다 쌓인 것을 가져가므로 구독 전에 쌓인 것과 겹쳐 두 번 열리지 않는다
+    const take = () =>
+      void invoke<string[]>("take_opened_files").then(
+        (paths) => !cancelled && paths.length > 0 && cb(paths),
+        () => undefined,
+      );
+    void listen("thuminal://open-files", take).then((un) => {
+      if (cancelled) return un();
+      stop = un;
+      take();
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }
+
   setBadge(count: number): Promise<void> {
     return invoke("set_badge", { count });
   }

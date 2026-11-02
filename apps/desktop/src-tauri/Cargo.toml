@@ -43,6 +43,8 @@ block2 = "0.6"
 gtk = "0.18"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
+# 켜진 앱에 "다음으로 열기" 로 연 파일을 넘긴다 (open_files.rs). macOS 는 RunEvent::Opened 로 받는다
+tauri-plugin-single-instance = "2"
 # Linux(D-Bus) · Windows(토스트) 알림 (notify.rs). macOS 에서는 쓰지 않는다 (위 mac-notification-sys 와 같은 문제)
 notify-rust = "4"
 

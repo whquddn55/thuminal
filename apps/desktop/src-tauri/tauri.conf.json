@@ -49,7 +49,77 @@
       "../../../plugins/claude-code/thuminal/": "claude-plugin/",
       "../../web/dist/": "web/"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown"
+        ],
+        "name": "Markdown",
+        "contentTypes": [
+          "net.daringfireball.markdown"
+        ],
+        "mimeType": "text/markdown",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "json"
+        ],
+        "name": "JSON",
+        "contentTypes": [
+          "public.json"
+        ],
+        "mimeType": "application/json",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "txt"
+        ],
+        "name": "Plain Text",
+        "mimeType": "text/plain",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "yaml",
+          "yml"
+        ],
+        "name": "YAML",
+        "contentTypes": [
+          "public.yaml"
+        ],
+        "mimeType": "application/yaml",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "toml"
+        ],
+        "name": "TOML",
+        "mimeType": "application/toml",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "log"
+        ],
+        "name": "Log",
+        "contentTypes": [
+          "com.apple.log"
+        ],
+        "mimeType": "text/x-log",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ]
   },
   "plugins": {
     "opener": {

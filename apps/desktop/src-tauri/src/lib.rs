@@ -10,6 +10,7 @@ mod browser;
 mod hosts;
 mod media;
 mod notify;
+mod open_files;
 mod update;
 
 use std::collections::HashMap;
@@ -589,7 +590,25 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Windows · Linux: 앱이 켜져 있는데 파일을 thuminal 로 열면 새 프로세스가 뜬다. 그 인자를 켜진 앱에 넘기고 새 것은 끝낸다
+    // (단일 인스턴스 플러그인은 맨 먼저 단다). macOS 는 켜진 앱에 `RunEvent::Opened` 가 온다
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        let paths = open_files::from_args(args, std::path::Path::new(&cwd));
+        if paths.is_empty() {
+            // 그냥 한 번 더 실행했으면 켜진 창을 앞으로
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+        open_files::push(app, paths);
+    }));
+    builder
+        // 화면이 가져갈 때까지 쌓아 두는 경로. macOS 는 setup 전에 `Opened` 가 올 수 있어 빌더에서 단다
+        .manage(open_files::Pending::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -599,6 +618,11 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppState::default());
+            // Windows · Linux: 파일을 thuminal 로 열어 앱이 켜졌으면 그 경로가 실행 인자로 온다
+            #[cfg(not(target_os = "macos"))]
+            if let Ok(cwd) = std::env::current_dir() {
+                open_files::push(app.handle(), open_files::from_args(std::env::args(), &cwd));
+            }
             #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;
             notify::init(app.handle());
@@ -666,6 +690,7 @@ pub fn run() {
             hosts_reconnect,
             notify::notify,
             notify::set_badge,
+            open_files::take_opened_files,
             update::update_check,
             update::update_install,
             browser::browser_open,
@@ -678,6 +703,13 @@ pub fn run() {
             browser::browser_devtools,
             browser::browser_close
         ])
-        .run(tauri::generate_context!())
-        .expect("thuminal 앱을 띄우지 못했다");
+        .build(tauri::generate_context!())
+        .expect("thuminal 앱을 띄우지 못했다")
+        .run(|_app, _event| {
+            // macOS: Finder 에서 파일을 thuminal 로 열었다 (꺼진 앱이 파일로 켜질 때도 이것으로 온다)
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                open_files::push(_app, urls.iter().filter_map(|u| u.to_file_path().ok()).collect());
+            }
+        });
 }

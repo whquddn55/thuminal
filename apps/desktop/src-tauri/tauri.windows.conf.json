@@ -1,6 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["nsis"]
+    "targets": ["nsis"],
+    "fileAssociations": null,
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/file-associations.nsh"
+      }
+    }
   }
 }
