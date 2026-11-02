@@ -536,7 +536,8 @@ impl Server {
                 WorkspaceError::UnknownRepo(_) => ErrorCode::NotFound,
                 WorkspaceError::Invalid(_) => ErrorCode::InvalidRequest,
                 WorkspaceError::Conflict(_) => ErrorCode::Conflict,
-                _ => ErrorCode::Vcs,
+                WorkspaceError::Io(_) => ErrorCode::Internal,
+                WorkspaceError::Vcs(_) => ErrorCode::Vcs,
             },
             message: e.to_string(),
         })?;

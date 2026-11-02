@@ -9,7 +9,7 @@ import "katex/dist/katex.min.css";
 import "./markdown.css";
 
 import { ImageIcon } from "@phosphor-icons/react";
-import type { HostApi } from "@thuminal/term-core";
+import { type HostApi, isWorktreeWorkspace } from "@thuminal/term-core";
 import type { Element, ElementContent } from "hast";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -41,7 +41,7 @@ const schema = {
 export interface MarkdownPreviewProps {
   host: HostApi;
   worktree: string;
-  /** 이 문서의 워크트리 기준 경로 (상대 링크·이미지를 이 폴더 기준으로 푼다) */
+  /** 이 문서의 워크트리 기준 경로, 워크트리 밖 문서면 절대 경로 (상대 링크·이미지를 이 폴더 기준으로 푼다) */
   file: string;
   text: string;
   /** 앵커로 옮겨 갈 때 스크롤하는 틀 */
@@ -69,8 +69,10 @@ function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openU
   };
 
   // 링크 처리는 늘 마지막 props 를 본다. components 가 바뀌면 react-markdown 이 칸을 새로 만들어 mermaid 를 다시 그리므로 묶지 않는다
-  const latest = useRef({ file, openFile, openUrl, notice, goAnchor });
-  latest.current = { file, openFile, openUrl, notice, goAnchor };
+  // 워크트리 workspace 면 그 경로로 `../` 가 밖으로 나가는 링크를 절대 경로로 푼다
+  const wtRoot = isWorktreeWorkspace(worktree) ? worktree : undefined;
+  const latest = useRef({ file, root: wtRoot, openFile, openUrl, notice, goAnchor });
+  latest.current = { file, root: wtRoot, openFile, openUrl, notice, goAnchor };
 
   const components = useMemo<Components>(
     () => ({
@@ -79,7 +81,7 @@ function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openU
           {children}
         </a>
       ),
-      img: ({ src, alt, title }) => <MdImage host={host} worktree={worktree} docFile={file} src={typeof src === "string" ? src : undefined} alt={alt} title={title} />,
+      img: ({ src, alt, title }) => <MdImage host={host} worktree={worktree} docFile={file} root={wtRoot} src={typeof src === "string" ? src : undefined} alt={alt} title={title} />,
       pre: ({ node, children, ...rest }) => {
         const code = node?.children.find((c): c is Element => c.type === "element" && c.tagName === "code");
         const cls = code?.properties.className;
@@ -87,7 +89,7 @@ function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openU
         return <pre {...rest}>{children}</pre>;
       },
     }),
-    [host, worktree, file],
+    [host, worktree, file, wtRoot],
   );
 
   return (
@@ -109,6 +111,7 @@ export default memo(MarkdownPreview);
 
 interface LinkHandlers {
   file: string;
+  root: string | undefined;
   openFile: MarkdownPreviewProps["openFile"];
   openUrl: MarkdownPreviewProps["openUrl"];
   notice: MarkdownPreviewProps["notice"];
@@ -118,7 +121,7 @@ interface LinkHandlers {
 /** 미리보기 안 링크를 누르면: 앵커는 문서 안에서, 주소는 기본 브라우저(⌘⇧ 면 앱 안 브라우저), 파일은 파일 칸으로 */
 function onLink(h: LinkHandlers, href: string | undefined, e: React.MouseEvent) {
   e.preventDefault();
-  const t = resolveLink(href, h.file);
+  const t = resolveLink(href, h.file, h.root);
   switch (t.type) {
     case "anchor":
       h.goAnchor(t.id);
@@ -156,11 +159,11 @@ function useDarkScheme(): boolean {
 // ---- 이미지 ----
 
 /**
- * 원격 이미지는 그대로. 워크트리 안 이미지는 새 데몬이면 파일 주소(`files.mediaUrl`)로 그린다.
+ * 원격 이미지는 그대로. 파일 이미지(워크트리 밖은 절대 경로)는 새 데몬이면 파일 주소(`files.mediaUrl`)로 그린다.
  * 옛 데몬은 파일 읽기가 글자만 주므로 SVG 만 그리고, 나머지는 대체 글로 보인다
  */
-function MdImage({ host, worktree, docFile, src, alt, title }: { host: HostApi; worktree: string; docFile: string; src?: string; alt?: string; title?: string }) {
-  const r = resolveImage(src, docFile);
+function MdImage({ host, worktree, docFile, root, src, alt, title }: { host: HostApi; worktree: string; docFile: string; root?: string; src?: string; alt?: string; title?: string }) {
+  const r = resolveImage(src, docFile, root);
   const local = r.type === "file" ? r.file : null;
   const supported = useFilesSupported(host);
   const [svg, setSvg] = useState<string | null>(null);
