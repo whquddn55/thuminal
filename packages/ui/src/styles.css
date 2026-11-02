@@ -122,6 +122,11 @@
   [contenteditable] {
     user-select: text;
   }
+  /* 브라우저 칸 웹뷰를 메인 웹뷰 밑에 깔면 칸을 감싼 요소는 바탕을 칠하지 않는다. 바탕은 층마다 바탕판이 칠하고 칸 자리만 비운다 (browser-layer.tsx) */
+  html[data-browser-under],
+  html[data-browser-under] :has([data-browser-host]) {
+    background-color: transparent !important;
+  }
 }
 
 /* ---- 사이드바 카드 (Orca 와 같은 칠하기: 활성은 전경색을 옅게 덮고 1px 테두리) ---- */

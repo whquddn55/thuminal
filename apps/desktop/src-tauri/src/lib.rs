@@ -701,7 +701,8 @@ pub fn run() {
             browser::browser_reload,
             browser::browser_focus,
             browser::browser_devtools,
-            browser::browser_close
+            browser::browser_close,
+            browser::browser_layer
         ])
         .build(tauri::generate_context!())
         .expect("thuminal 앱을 띄우지 못했다")

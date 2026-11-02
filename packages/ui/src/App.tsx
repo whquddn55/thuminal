@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { isWorktreeWorkspace } from "@thuminal/term-core";
 
+import { BrowserBase, useBrowserLayer } from "./browser-layer";
 import { Button } from "./components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
 import { hostAt, useDrag } from "./dnd";
@@ -196,6 +197,8 @@ function Shell() {
   const model = useModel();
   useShortcuts(model);
   useFileDrop(model);
+  useBrowserLayer(model.services.host.browser);
+  const under = !!model.services.host.browser?.under;
   const floating = useApp((s) => s.floating.open);
   const error = useApp((s) => s.error);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
@@ -205,19 +208,23 @@ function Shell() {
   useApp((s) => s.remoteHosts);
   const main = model.hostModel(activeHost) ?? model;
 
+  // 메인 층과 그 위에 뜨는 것(플로팅 패널, 버튼, 알림)을 나눠 둔다. 브라우저 칸을 밑에 깔면 메인 층만 플로팅 패널 칸 자리를 잘라 낸다 (browser-layer.tsx)
   return (
-    <div className="flex h-full">
-      {sidebarOpen && <Sidebar />}
-      <ModelContext.Provider value={main}>
-        <MainArea />
-      </ModelContext.Provider>
+    <>
+      <div className="relative isolate flex h-full" data-browser-level="main">
+        {under && <BrowserBase />}
+        {sidebarOpen && <Sidebar />}
+        <ModelContext.Provider value={main}>
+          <MainArea />
+        </ModelContext.Provider>
+      </div>
       {floating && <FloatingPanel />}
       <FloatingTrigger />
       <Dialogs />
       <SettingsDialog />
       <DragGhost />
       {notice && !error && (
-        <div className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
+        <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
           <span className="min-w-0 break-words">{notice}</span>
           <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={model.clearError}>
             <XIcon className="size-3.5" />
@@ -225,7 +232,7 @@ function Shell() {
         </div>
       )}
       {error && (
-        <div className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/40 bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
+        <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/40 bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
           {/* 오류 글은 골라 복사할 수 있다 (경로가 든 오류를 claude 에게 그대로 넘기게) */}
           <span className="min-w-0 cursor-text break-words text-destructive select-text">{error}</span>
           <CopyButton text={error} />
@@ -234,7 +241,7 @@ function Shell() {
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
