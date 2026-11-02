@@ -92,7 +92,10 @@ try {
   Start-Sleep 10
   (Shot "1-start").Dispose()
 
-  & (Join-Path $Bin "thuminal.exe") browser open "http://127.0.0.1:8765/probe.html" 2>&1 | Write-Host
+  # 파이프로 받으면 CLI 가 띄운 데몬이 파이프를 물려받아 끝나지 않으므로 출력은 파일로 받는다
+  $cli = Start-Process (Join-Path $Bin "thuminal.exe") -ArgumentList "browser", "open", "http://127.0.0.1:8765/probe.html" -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Out "cli.out.log") -RedirectStandardError (Join-Path $Out "cli.err.log")
+  if (-not $cli.WaitForExit(30000)) { Write-Host "CLI 가 30초 안에 끝나지 않았다" }
+  Get-Content (Join-Path $Out "cli.out.log"), (Join-Path $Out "cli.err.log") -ErrorAction SilentlyContinue | Write-Host
   Check "페이지가 열린다" (WaitFor "load" 30)
   Start-Sleep 4
   $bmp = Shot "2-browser"

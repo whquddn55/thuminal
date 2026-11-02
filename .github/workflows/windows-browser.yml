@@ -48,6 +48,7 @@ jobs:
       # 화면을 넣은 디버그 앱 (tauri build 가 화면을 빌드해 넣는다. 설치본은 만들지 않는다)
       - run: pnpm -C apps/desktop tauri build --debug --no-bundle
       - name: 시험
+        timeout-minutes: 10
         shell: powershell
         run: .github/windows-browser/probe.ps1 -Out "$env:RUNNER_TEMP\windows-browser" -Bin target\debug
       - uses: actions/upload-artifact@v4
