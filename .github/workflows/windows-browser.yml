@@ -1,5 +1,5 @@
 # Windows 브라우저 칸 시험: WebView2 Visual 호스팅으로 메인 웹뷰 밑에 깐 칸이 보이고 입력을 받는지 실제 앱을 실행해 확인한다.
-# 화면 사진 · 페이지 기록은 결과물(windows-browser)로 올린다 (.github/windows-browser/probe.ps1)
+# 화면 사진 · 페이지 기록은 결과물(windows-browser)로 올린다 (.github/windows-browser/probe.ps1). 시험은 System.Drawing 을 그대로 쓰는 Windows PowerShell 5.1 로 돌린다 (probe.ps1 은 그래서 UTF-8 BOM 으로 둔다)
 name: Windows 브라우저 칸
 
 on:
@@ -48,7 +48,7 @@ jobs:
       # 화면을 넣은 디버그 앱 (tauri build 가 화면을 빌드해 넣는다. 설치본은 만들지 않는다)
       - run: pnpm -C apps/desktop tauri build --debug --no-bundle
       - name: 시험
-        shell: pwsh
+        shell: powershell
         run: .github/windows-browser/probe.ps1 -Out "$env:RUNNER_TEMP\windows-browser" -Bin target\debug
       - uses: actions/upload-artifact@v4
         if: always()
