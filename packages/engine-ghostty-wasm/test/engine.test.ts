@@ -75,6 +75,21 @@ describe("ghostty-vt.wasm 엔진", () => {
     e.dispose();
   });
 
+  it("스크롤해도 바뀌지 않는 줄 번호로 고른다 (끌면서 스크롤)", () => {
+    const e = factory.create({ cols: 20, rows: 5, scrollback: 100 });
+    e.feed(enc(Array.from({ length: 30 }, (_, i) => `line${i}`).join("\r\n")));
+    const bottom = e.viewportTop();
+    expect(bottom).toBe(25);
+    e.scroll(-10);
+    expect(e.viewportTop()).toBe(15);
+    // 화면 맨 위 줄(line15)에서 고르기 시작해 아래로 스크롤한 뒤 화면 둘째 줄(line27)까지 끈다
+    const from = { x: 0, y: e.viewportTop() };
+    e.scroll(10);
+    e.select(from, { x: 5, y: e.viewportTop() + 2 }, true);
+    expect(e.selectionText()?.split("\n")).toEqual(Array.from({ length: 13 }, (_, i) => `line${15 + i}`));
+    e.dispose();
+  });
+
   it("자모로 나뉜 한글은 완성형으로 복사한다 (다른 글자는 그대로)", () => {
     expect(composeHangul("@한글.md".normalize("NFD"))).toBe("@한글.md");
     expect(composeHangul("e\u0301 \uF900 ᄒ")).toBe("e\u0301 \uF900 ᄒ");

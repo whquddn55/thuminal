@@ -58,6 +58,8 @@ const ROW_DIRTY = 1;
 const ROW_CELLS = 3;
 const ROW_SELECTION = 4;
 const POINT_VIEWPORT = 1;
+const POINT_SCREEN = 2;
+const TERM_DATA_SCROLLBAR = 9;
 const SCROLL_BOTTOM = 1;
 const SCROLL_DELTA = 2;
 const FORMAT_PLAIN = 0;
@@ -420,22 +422,30 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.w.ex.ghostty_terminal_scroll_viewport(this.term, p);
   }
 
-  /** 화면 칸 좌표를 grid ref 로 바꿔 out 에 쓴다 */
-  private gridRef(at: CellPoint, out: number): boolean {
+  viewportTop(): number {
+    const { w } = this;
+    const p = w.tmp + T_STRUCT;
+    // GhosttyTerminalScrollbar: total, offset, len (u64)
+    if (w.ex.ghostty_terminal_get(this.term, TERM_DATA_SCROLLBAR, p) !== SUCCESS) return 0;
+    return Number(w.dv().getBigUint64(p + 8, true));
+  }
+
+  /** 화면 칸 좌표(`screen` 이면 스크롤백 맨 위부터 센 줄)를 grid ref 로 바꿔 out 에 쓴다 */
+  private gridRef(at: CellPoint, out: number, screen = false): boolean {
     const { w } = this;
     const p = w.tmp + T_STRUCT;
     const dv = w.dv();
-    dv.setUint32(p, POINT_VIEWPORT, true);
+    dv.setUint32(p, screen ? POINT_SCREEN : POINT_VIEWPORT, true);
     dv.setUint16(p + 8, Math.max(0, Math.min(this.cols - 1, at.x)), true);
-    dv.setUint32(p + 12, Math.max(0, Math.min(this.rows - 1, at.y)), true);
+    dv.setUint32(p + 12, Math.max(0, screen ? at.y : Math.min(this.rows - 1, at.y)), true);
     dv.setUint32(out, 12, true);
     return w.ex.ghostty_terminal_grid_ref(this.term, p, out) === SUCCESS;
   }
 
-  select(from: CellPoint, to: CellPoint): void {
+  select(from: CellPoint, to: CellPoint, screen = false): void {
     const { w } = this;
     const sel = w.tmp + T_SEL;
-    if (!this.gridRef(from, w.tmp + T_REF_A) || !this.gridRef(to, w.tmp + T_REF_B)) return;
+    if (!this.gridRef(from, w.tmp + T_REF_A, screen) || !this.gridRef(to, w.tmp + T_REF_B, screen)) return;
     const u = w.u8();
     u.copyWithin(sel + 4, w.tmp + T_REF_A, w.tmp + T_REF_A + 12);
     u.copyWithin(sel + 16, w.tmp + T_REF_B, w.tmp + T_REF_B + 12);
