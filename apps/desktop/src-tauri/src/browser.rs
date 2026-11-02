@@ -76,7 +76,11 @@ const BRIDGE: &str = r#"
 (() => {
   if (window.top !== window || window.__thuminalBridge) return;
   window.__thuminalBridge = true;
-  const send = (path, q) => { try { location.href = 'thuminal-key://' + path + '?' + new URLSearchParams(q); } catch (_) {} };
+  // Windows(WebView2)는 등록되지 않은 스킴으로 가는 이동을 알리지 않아 같은 주소를 메시지로 보낸다
+  const send = (path, q) => {
+    const u = 'thuminal-key://' + path + '?' + new URLSearchParams(q);
+    try { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(u); else location.href = u; } catch (_) {}
+  };
   // 앱 단축키 수정키는 macOS 는 ⌘, Windows · Linux 는 Ctrl 이다
   const mac = /Mac/.test(navigator.platform);
   const pageKeys = new Set(mac ? ['c', 'v', 'x', 'a', 'z', 'f', 'q', 'h', 'm', 'g'] : ['c', 'v', 'x', 'a', 'z', 'y', 'f']);

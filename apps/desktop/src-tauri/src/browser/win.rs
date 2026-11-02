@@ -272,6 +272,26 @@ unsafe fn attach(app: &AppHandle, webview: &ICoreWebView2, comp: &ICoreWebView2C
             })),
             &mut token,
         )?;
+        // Windows 는 브리지가 같은 주소를 chrome.webview.postMessage 로 보낸다 (WebView2 는 등록되지 않은
+        // 스킴으로 가는 이동을 NavigationStarting 없이 버린다)
+        let s = send.clone();
+        webview.add_WebMessageReceived(
+            &WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut p = PWSTR::null();
+                if args.TryGetWebMessageAsString(&mut p).is_err() {
+                    return Ok(());
+                }
+                if let Ok(u) = take_pwstr(p).parse::<tauri::Url>()
+                    && u.scheme() == "thuminal-key"
+                    && let Some(ev) = bridge_event(id, &u)
+                {
+                    s(ev);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
         let s = send.clone();
         webview.add_ContentLoading(
             &ContentLoadingEventHandler::create(Box::new(move |w, _| {
