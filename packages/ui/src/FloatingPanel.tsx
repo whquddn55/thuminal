@@ -47,7 +47,7 @@ export function FloatingPanel() {
   const saved = useApp((s) => s.floating.rect);
   const maximized = useApp((s) => s.floating.maximized);
   const focused = useApp((s) => s.focusArea === "floating");
-  const under = !!model.services.host.browser?.under;
+  const under = !!model.services.host.browser;
   const [live, setLive] = useState<FloatingRect | null>(null);
   const [, redraw] = useState(0);
 
@@ -205,23 +205,6 @@ export function FloatingTrigger() {
     return () => window.removeEventListener("resize", on);
   }, []);
   const pos = live ?? resolveTrigger(anchored);
-  // 브라우저 칸 웹뷰가 HTML 위에 그려지는 껍데기(Windows)는 버튼을 가린다. 웹뷰와 겹치는 동안에는 버튼을 숨긴다 (⌘⌥A 는 된다)
-  const under = !!model.services.host.browser?.under;
-  const [underWebview, setUnderWebview] = useState(false);
-  useEffect(() => {
-    if (under) return;
-    const t = window.setInterval(() => {
-      const r = { left: pos.left, top: pos.top, right: pos.left + TRIGGER, bottom: pos.top + TRIGGER };
-      const hit = [...document.querySelectorAll("[data-browser-host]")].some((el) => {
-        const b = el.getBoundingClientRect();
-        return b.left < r.right && r.left < b.right && b.top < r.bottom && r.top < b.bottom;
-      });
-      setUnderWebview(hit);
-    }, 300);
-    return () => window.clearInterval(t);
-  }, [pos.left, pos.top, under]);
-  if (underWebview && !live) return null;
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>

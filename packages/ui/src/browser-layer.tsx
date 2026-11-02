@@ -1,4 +1,4 @@
-// 브라우저 칸 웹뷰를 메인 웹뷰 밑에 깔 때(macOS · Linux) 화면이 하는 일: 칸 자리를 뚫고, 마우스를 넘길 자리를 껍데기에 알린다.
+// 브라우저 칸 웹뷰를 메인 웹뷰 밑에 깔 때 화면이 하는 일: 칸 자리를 뚫고, 마우스를 넘길 자리를 껍데기에 알린다.
 //
 // 네이티브 웹뷰는 메인 웹뷰 밑에 있고 메인 웹뷰 바탕은 투명하다. 화면이 칸 자리에 아무것도 칠하지 않으면 웹뷰가 보이고,
 // 그 위에 그린 메뉴 · 대화 상자 · 플로팅 패널 · 끄는 모양은 숨기지 않아도 웹뷰 위에 보인다.
@@ -106,7 +106,7 @@ export function BrowserBase() {
 /** 칸 자리를 매 프레임 재서 바탕판을 뚫고, 바뀌면 껍데기에 알린다. 창 하나에 하나만 둔다 (root 모델 껍데기) */
 export function useBrowserLayer(browser: BrowserHost | undefined) {
   useEffect(() => {
-    if (!browser?.under || !browser.layer) return;
+    if (!browser) return;
     const root = document.documentElement;
     root.dataset.browserUnder = "";
     let last = "";
@@ -140,7 +140,7 @@ export function useBrowserLayer(browser: BrowserHost | undefined) {
       const key = JSON.stringify(ordered);
       if (key !== last) {
         last = key;
-        void browser.layer!(ordered).catch(() => undefined);
+        void browser.layer(ordered).catch(() => undefined);
       }
       raf = requestAnimationFrame(tick);
     };

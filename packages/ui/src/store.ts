@@ -1379,6 +1379,9 @@ export class AppModel {
       case "focus":
         this.focusPaneQuiet(e.id);
         return;
+      case "cursor":
+        setPage(pageKey(this.hostKey, e.id), { cursor: e.cursor });
+        return;
       case "key":
         // 페이지가 키보드를 잡고 있을 때 누른 앱 단축키를 메인 화면 단축키로 다시 보낸다
         this.focusPaneQuiet(e.id);

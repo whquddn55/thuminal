@@ -4860,6 +4860,8 @@ dependencies = [
  "thuminal-protocol",
  "tokio",
  "tracing",
+ "webview2-com",
+ "windows",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@
 //! macOS · Linux 는 브라우저 웹뷰를 메인 웹뷰 **밑**에 깔고 메인 웹뷰 바탕을 투명하게 한다. 화면은 칸 자리만 뚫어
 //! 보이게 하고, 그 위에 메뉴 · 대화 상자 · 플로팅 패널을 그대로 그린다. 뚫린 자리의 마우스 입력은 화면이 알려 준
 //! 사각형([`browser_layer`])대로 밑의 웹뷰로 넘긴다 (macOS [`mac_layer`], Linux [`gtk_layer`]).
-//! Windows 는 아직 메인 웹뷰 위에 얹고, 화면이 겹칠 때 숨긴다.
+//! Windows 는 WebView2 창끼리 투명하게 겹치지 못해 wry 자식 웹뷰 대신 Visual 호스팅으로 직접 띄운다 ([`win`]).
 //! 웹뷰는 칸 번호(`browser-<칸>`)로 찾는다. 칸 번호는 데몬마다 1부터 세므로 원격 호스트 칸은 호스트 id 를 넣어
 //! `browser-<호스트>-<칸>` 으로 가르고, 이벤트도 호스트마다 다른 이름(`thuminal://browser/<호스트>`)으로 보낸다.
 //! 페이지에는 Tauri 명령 권한이 없다 (capabilities 는 메인 웹뷰만).
@@ -13,8 +13,14 @@
 //! ⌘ 조합을 `thuminal-key://` 주소로 바꿔 이동을 시도하게 하고, 이동을 가로채 메인 웹뷰에 이벤트로 넘긴다.
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(windows))]
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, WebviewUrl, Window};
+#[cfg(not(windows))]
+use tauri::{LogicalPosition, LogicalSize, Manager, Rect, WebviewUrl, Window};
+use tauri::{AppHandle, Emitter};
+
+#[cfg(windows)]
+mod win;
 
 type CmdResult<T> = Result<T, String>;
 
@@ -41,6 +47,27 @@ enum BrowserEvent {
     Focus { id: u64 },
     /// 페이지가 새 창을 열려 했다 (앱이 새 브라우저 탭으로 연다)
     NewWindow { id: u64, url: String },
+    /// 페이지가 바꾼 마우스 커서 (CSS cursor). 화면이 마우스를 넘기는 Windows 만 보낸다
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Cursor { id: u64, cursor: String },
+}
+
+/// 페이지 스크립트가 `thuminal-key://` 이동으로 넘긴 단축키 · 포커스
+fn bridge_event(id: u64, u: &tauri::Url) -> Option<BrowserEvent> {
+    let q: std::collections::HashMap<String, String> = u.query_pairs().into_owned().collect();
+    let flag = |k: &str| q.get(k).is_some_and(|v| v == "1");
+    match u.host_str() {
+        Some("key") => Some(BrowserEvent::Key {
+            id,
+            key: q.get("key").cloned().unwrap_or_default(),
+            code: q.get("code").cloned().unwrap_or_default(),
+            alt: flag("alt"),
+            shift: flag("shift"),
+            ctrl: flag("ctrl"),
+        }),
+        Some("focus") => Some(BrowserEvent::Focus { id }),
+        _ => None,
+    }
 }
 
 /// 페이지마다 넣는 스크립트: 앱 단축키를 메인 웹뷰로 넘기고, 키보드를 받기 시작하면 알린다.
@@ -100,7 +127,7 @@ fn event_name(host: Option<&str>) -> String {
     }
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
     Rect { position: LogicalPosition::new(x, y).into(), size: LogicalSize::new(w.max(1.0), h.max(1.0)).into() }
 }
@@ -109,6 +136,7 @@ fn emit(app: &AppHandle, event: &str, e: BrowserEvent) {
     let _ = app.emit_to("main", event, e);
 }
 
+#[cfg(not(windows))]
 fn webview(app: &AppHandle, host: &Option<String>, id: u64) -> CmdResult<tauri::Webview> {
     app.get_webview(&label(host_tag(host)?, id)).ok_or_else(|| format!("브라우저 칸을 찾지 못했어요: {id}"))
 }
@@ -116,8 +144,21 @@ fn webview(app: &AppHandle, host: &Option<String>, id: u64) -> CmdResult<tauri::
 /// 칸 자리에 웹뷰를 연다. 이미 있으면 자리만 옮기고 보인다
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, id: u64, url: String, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
+pub async fn browser_open(app: AppHandle, window: tauri::Window, host: Option<String>, id: u64, url: String, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
     let tag = host_tag(&host)?;
+    #[cfg(windows)]
+    {
+        let _ = window;
+        win::open(app, label(tag, id), id, event_name(tag), url, [x, y, w, h]).await
+    }
+    #[cfg(not(windows))]
+    open_child(app, window, tag, id, url, x, y, w, h)
+}
+
+/// wry 자식 웹뷰를 연다 (macOS · Linux)
+#[cfg(not(windows))]
+#[allow(clippy::too_many_arguments)]
+fn open_child(app: AppHandle, window: Window, tag: Option<&str>, id: u64, url: String, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
     if let Some(v) = app.get_webview(&label(tag, id)) {
         place(&v, x, y, w, h)?;
         return v.show().map_err(|e| e.to_string());
@@ -135,23 +176,8 @@ pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, 
             if u.scheme() != "thuminal-key" {
                 return true;
             }
-            let q: std::collections::HashMap<String, String> = u.query_pairs().into_owned().collect();
-            let flag = |k: &str| q.get(k).is_some_and(|v| v == "1");
-            match u.host_str() {
-                Some("key") => emit(
-                    &a1,
-                    &e1,
-                    BrowserEvent::Key {
-                        id,
-                        key: q.get("key").cloned().unwrap_or_default(),
-                        code: q.get("code").cloned().unwrap_or_default(),
-                        alt: flag("alt"),
-                        shift: flag("shift"),
-                        ctrl: flag("ctrl"),
-                    },
-                ),
-                Some("focus") => emit(&a1, &e1, BrowserEvent::Focus { id }),
-                _ => {}
+            if let Some(e) = bridge_event(id, u) {
+                emit(&a1, &e1, e);
             }
             false
         })
@@ -173,6 +199,7 @@ pub async fn browser_open(app: AppHandle, window: Window, host: Option<String>, 
 
 /// 새 브라우저 웹뷰를 메인 웹뷰 밑에 깔고, 메인 웹뷰 바탕을 투명하게 한다 (macOS · Linux). 화면은 이미 칸 자리만
 /// 비워 두고 그 밖은 직접 바탕을 칠한다 (ui `browser-layer.tsx`)
+#[cfg(not(windows))]
 fn put_under(app: &AppHandle, v: &tauri::Webview) -> CmdResult<()> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -191,6 +218,7 @@ fn put_under(app: &AppHandle, v: &tauri::Webview) -> CmdResult<()> {
 }
 
 /// 웹뷰를 칸 자리(창 왼쪽 위 기준 논리 픽셀)로 옮긴다. Linux 는 Tauri 의 set_bounds 가 먹지 않아 GTK 로 직접 옮긴다 ([`gtk_layer`])
+#[cfg(not(windows))]
 fn place(v: &tauri::Webview, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
     #[cfg(target_os = "linux")]
     {
@@ -491,48 +519,82 @@ mod gtk_layer {
     }
 }
 
+/// Windows 칸 이름 (호스트 id 를 거른 뒤)
+#[cfg(windows)]
+fn win_label(host: &Option<String>, id: u64) -> CmdResult<String> {
+    Ok(label(host_tag(host)?, id))
+}
+
 #[tauri::command]
 pub async fn browser_bounds(app: AppHandle, host: Option<String>, id: u64, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::bounds(app, win_label(&host, id)?, [x, y, w, h]).await;
+    #[cfg(not(windows))]
     place(&webview(&app, &host, id)?, x, y, w, h)
 }
 
 #[tauri::command]
 pub async fn browser_visible(app: AppHandle, host: Option<String>, id: u64, visible: bool) -> CmdResult<()> {
-    let v = webview(&app, &host, id)?;
-    if visible { v.show() } else { v.hide() }.map_err(|e| e.to_string())
+    #[cfg(windows)]
+    return win::visible(app, win_label(&host, id)?, visible).await;
+    #[cfg(not(windows))]
+    {
+        let v = webview(&app, &host, id)?;
+        if visible { v.show() } else { v.hide() }.map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
 pub async fn browser_navigate(app: AppHandle, host: Option<String>, id: u64, url: String) -> CmdResult<()> {
     let parsed: tauri::Url = url.parse().map_err(|e| format!("주소가 올바르지 않아요: {url} ({e})"))?;
+    #[cfg(windows)]
+    return win::navigate(app, win_label(&host, id)?, parsed.to_string()).await;
+    #[cfg(not(windows))]
     webview(&app, &host, id)?.navigate(parsed).map_err(|e| e.to_string())
 }
 
 /// 뒤로(-1) · 앞으로(+1)
 #[tauri::command]
 pub async fn browser_go(app: AppHandle, host: Option<String>, id: u64, delta: i32) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::go(app, win_label(&host, id)?, delta).await;
+    #[cfg(not(windows))]
     webview(&app, &host, id)?.eval(format!("history.go({delta})")).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn browser_reload(app: AppHandle, host: Option<String>, id: u64) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::reload(app, win_label(&host, id)?).await;
+    #[cfg(not(windows))]
     webview(&app, &host, id)?.reload().map_err(|e| e.to_string())
 }
 
 /// 페이지에 키보드를 준다 (칸을 고르거나 주소를 연 뒤)
 #[tauri::command]
 pub async fn browser_focus(app: AppHandle, host: Option<String>, id: u64) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::focus(app, win_label(&host, id)?).await;
+    #[cfg(not(windows))]
     webview(&app, &host, id)?.set_focus().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn browser_devtools(app: AppHandle, host: Option<String>, id: u64) -> CmdResult<()> {
-    webview(&app, &host, id)?.open_devtools();
-    Ok(())
+    #[cfg(windows)]
+    return win::devtools(app, win_label(&host, id)?).await;
+    #[cfg(not(windows))]
+    {
+        webview(&app, &host, id)?.open_devtools();
+        Ok(())
+    }
 }
 
 #[tauri::command]
 pub async fn browser_close(app: AppHandle, host: Option<String>, id: u64) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::close(app, win_label(&host, id)?).await;
+    #[cfg(not(windows))]
     match app.get_webview(&label(host_tag(&host)?, id)) {
         Some(v) => {
             #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -562,11 +624,13 @@ pub struct LayerItem {
 
 /// 메인 웹뷰 밑에 깐 브라우저 칸들(아래에서 위 차례)과, 칸마다 메인 웹뷰가 마우스를 밑으로 넘길 사각형.
 /// 화면이 칸 자리에서 그 위에 그린 것(플로팅 패널, 떠 있는 버튼 등)을 빼고 보낸다. 메뉴 · 대화 상자가 열려 있거나
-/// 끄는 중이면 비워 보낸다. Windows 는 웹뷰가 위에 얹혀 있어 할 일이 없다
+/// 끄는 중이면 비워 보낸다. Windows 는 이 차례대로 칸 Visual 을 쌓는다
 #[tauri::command]
 pub async fn browser_layer(app: AppHandle, items: Vec<LayerItem>) -> CmdResult<()> {
     let list = items.into_iter().map(|i| Ok((label(host_tag(&i.host)?, i.id), i.rects))).collect::<CmdResult<Vec<_>>>()?;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(windows)]
+    return win::layer(app, list).await;
+    #[cfg(not(windows))]
     {
         let main = app.get_webview("main").ok_or("메인 웹뷰를 찾지 못했어요")?;
         main.with_webview(move |_| {
@@ -575,9 +639,19 @@ pub async fn browser_layer(app: AppHandle, items: Vec<LayerItem>) -> CmdResult<(
             #[cfg(target_os = "linux")]
             gtk_layer::layer(list);
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
     }
-    #[cfg(target_os = "windows")]
-    let _ = (app, list);
-    Ok(())
+}
+
+/// 화면이 칸 자리에서 받은 마우스를 페이지에 넘긴다 (Windows). 메인 웹뷰 창이 마우스를 받아 껍데기가 밑으로 흘려보낼 수
+/// 없어서다. 다른 OS 는 껍데기가 직접 넘기므로 화면이 부르지 않는다
+#[tauri::command]
+pub async fn browser_input(app: AppHandle, host: Option<String>, id: u64, input: serde_json::Value) -> CmdResult<()> {
+    #[cfg(windows)]
+    return win::input(app, win_label(&host, id)?, serde_json::from_value(input).map_err(|e| e.to_string())?).await;
+    #[cfg(not(windows))]
+    {
+        let _ = (app, host, id, input);
+        Ok(())
+    }
 }

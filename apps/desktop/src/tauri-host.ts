@@ -21,6 +21,7 @@ import type {
   BranchList,
   BrowserEvent,
   BrowserHost,
+  BrowserInput,
   CreateSession,
   DaemonEvent,
   DaemonInfo,
@@ -55,6 +56,8 @@ import type {
 
 /** 앱 화면 배율. 창 하나의 것이라 로컬·원격 HostApi 가 같이 본다 */
 let uiZoom = 1;
+
+const IS_WINDOWS = /Windows/.test(navigator.userAgent);
 
 const remoteOnly = (what: string) => Promise.reject(new Error(`원격 컴퓨터에서는 아직 쓸 수 없는 기능이에요: ${what}`));
 
@@ -219,10 +222,41 @@ export class TauriHostApi implements HostApi {
     }
   }
 
+  /** 넘길 마우스 줄. 한 번에 하나씩 보내고, 기다리는 동안 쌓인 움직임은 마지막 것만 남긴다 */
+  private inputQueue: { id: number; e: BrowserInput; done: () => void }[] = [];
+  private inputBusy = false;
+
+  private sendInput(id: number, e: BrowserInput): Promise<void> {
+    return new Promise((done) => {
+      const last = this.inputQueue[this.inputQueue.length - 1];
+      if (e.kind === "move" && last?.e.kind === "move" && last.id === id) {
+        last.done();
+        this.inputQueue[this.inputQueue.length - 1] = { id, e, done };
+      } else this.inputQueue.push({ id, e, done });
+      void this.drainInput();
+    });
+  }
+
+  private async drainInput() {
+    if (this.inputBusy) return;
+    this.inputBusy = true;
+    try {
+      for (let next = this.inputQueue.shift(); next; next = this.inputQueue.shift()) {
+        const { x, y } = this.at({ x: next.e.x, y: next.e.y, width: 0, height: 0 });
+        const z = uiZoom;
+        await this.call("browser_input", { id: next.id, input: { ...next.e, x, y, dx: next.e.dx * z, dy: next.e.dy * z } }).catch(() => undefined);
+        next.done();
+      }
+    } finally {
+      this.inputBusy = false;
+    }
+  }
+
   readonly browser: BrowserHost = {
-    // macOS · Linux 는 웹뷰를 메인 웹뷰 밑에 깐다 (src-tauri browser.rs). Windows 는 아직 위에 얹는다
-    under: !/Windows/.test(navigator.userAgent),
+    // 웹뷰는 메인 웹뷰 밑에 깔린다 (src-tauri browser.rs). layer 는 모든 호스트 칸을 한 번에 보내므로 호스트를 싣지 않는다
     layer: (items) => invoke("browser_layer", { items: items.map((i) => ({ host: i.host, id: i.id, rects: i.rects.map((r) => this.rect(r)) })) }),
+    // Windows 는 메인 웹뷰가 마우스를 받아서 칸 자리 마우스를 넘긴다 (src-tauri browser/win.rs)
+    input: IS_WINDOWS ? (id, e) => this.sendInput(id, e) : undefined,
     open: async (id, url, at) => this.call("browser_open", { id, url: await this.viewUrl(url), ...this.at(at) }),
     setBounds: (id, at) => this.call("browser_bounds", { id, ...this.at(at) }),
     setVisible: (id, visible) => this.call("browser_visible", { id, visible }),

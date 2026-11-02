@@ -48,7 +48,9 @@ export type BrowserEvent =
   /** 페이지가 키보드를 받기 시작했다 */
   | { type: "focus"; id: number }
   /** 페이지가 새 창을 열려 했다 */
-  | { type: "new_window"; id: number; url: string };
+  | { type: "new_window"; id: number; url: string }
+  /** 페이지가 바꾼 마우스 커서 (CSS cursor). `input` 을 받는 껍데기만 보낸다 */
+  | { type: "cursor"; id: number; cursor: string };
 
 /** 메인 웹뷰 밑에 깐 브라우저 칸 하나와, 메인 웹뷰가 마우스를 그 칸으로 넘길 사각형들 */
 export interface BrowserLayerItem {
@@ -58,15 +60,34 @@ export interface BrowserLayerItem {
   rects: Bounds[];
 }
 
+/** 칸 자리가 받은 마우스 하나 (DOM 이벤트 값 그대로, 좌표는 CSS 픽셀 창 기준) */
+export interface BrowserInput {
+  kind: "down" | "up" | "move" | "wheel" | "leave";
+  x: number;
+  y: number;
+  button: number;
+  buttons: number;
+  shift: boolean;
+  ctrl: boolean;
+  /** 휠 (CSS 픽셀) */
+  dx: number;
+  dy: number;
+  /** 누른 횟수 (두 번 누르기면 2) */
+  detail: number;
+}
+
 /**
  * 브라우저 칸. 칸 자리(사각형)는 화면이 잡고, 껍데기는 그 자리에 진짜 웹뷰를 띄운다. id 는 칸 번호.
- * under 면 웹뷰가 화면(HTML) 밑에 깔린다: 화면은 칸 자리만 뚫어 두고, 마우스를 넘길 자리를 layer 로 알린다.
- * 아니면 웹뷰가 화면 위에 얹히므로 메뉴·창이 겹치는 동안에는 화면이 숨겨 달라고 한다
+ * 웹뷰는 화면(HTML) 밑에 깔린다: 화면은 칸 자리만 뚫어 두고, 마우스를 넘길 자리를 layer 로 알린다
  */
 export interface BrowserHost {
-  readonly under?: boolean;
-  /** 창 하나의 것이다. 모든 호스트의 칸을 아래에서 위 차례로 한 번에 보낸다 (under 일 때만) */
-  layer?(items: BrowserLayerItem[]): Promise<void>;
+  /** 창 하나의 것이다. 모든 호스트의 칸을 아래에서 위 차례로 한 번에 보낸다 */
+  layer(items: BrowserLayerItem[]): Promise<void>;
+  /**
+   * 칸 자리가 받은 마우스를 페이지에 넘긴다. 껍데기가 마우스를 밑으로 흘려보내지 못하는 곳(Windows)에만 있다.
+   * 넘길지는 껍데기가 layer 사각형으로 가른다
+   */
+  input?(id: number, e: BrowserInput): Promise<void>;
   open(id: number, url: string, at: Bounds): Promise<void>;
   setBounds(id: number, at: Bounds): Promise<void>;
   setVisible(id: number, visible: boolean): Promise<void>;

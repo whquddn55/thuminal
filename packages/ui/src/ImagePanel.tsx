@@ -3,7 +3,7 @@
 // 그림은 데몬이 대화 기록 안 base64 에서 꺼낸다 (daemon images.rs). 단추의 수는 `AgentInfo.image_count` 이고,
 // 기록이 자라면 데몬이 1초 안에 세어 알린다. /clear 로 새 기록이 되면 0 이 되어 단추가 사라진다.
 // 팝업은 썸네일 바둑판(보이는 것만 받는다, 데몬이 줄여 보낸다), 누르면 원본을 크게 보는 라이트박스다.
-// 라이트박스는 Radix Dialog 라 브라우저 칸 위에 그대로 그려진다 (macOS · Linux 는 웹뷰가 밑에 깔린다, browser-layer.tsx). Windows 는 열리면 네이티브 웹뷰가 저절로 숨는다 (BrowserPane `useOverlayOpen`).
+// 라이트박스는 Radix Dialog 라 브라우저 칸 위에 그대로 그려진다 (웹뷰가 메인 웹뷰 밑에 깔린다, browser-layer.tsx).
 
 import { CaretLeftIcon, CaretRightIcon, ImageIcon, XIcon } from "@phosphor-icons/react";
 import { Dialog as DialogPrimitive } from "radix-ui";

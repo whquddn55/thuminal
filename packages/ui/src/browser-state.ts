@@ -7,6 +7,8 @@ export interface PageState {
   url: string;
   title: string;
   loading: boolean;
+  /** 페이지가 바꾼 마우스 커서 (CSS cursor). 화면이 마우스를 넘기는 Windows 만 알린다 */
+  cursor?: string;
 }
 
 /** 칸 번호는 호스트마다 따로라 원격 칸은 `<호스트>|<칸>` 으로 가른다 (로컬은 칸 번호 그대로) */

@@ -198,7 +198,7 @@ function Shell() {
   useShortcuts(model);
   useFileDrop(model);
   useBrowserLayer(model.services.host.browser);
-  const under = !!model.services.host.browser?.under;
+  const under = !!model.services.host.browser;
   const floating = useApp((s) => s.floating.open);
   const error = useApp((s) => s.error);
   const sidebarOpen = useApp((s) => s.sidebarOpen);

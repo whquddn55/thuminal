@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Windows 브라우저 칸 시험 페이지 (probe.ps1). 바탕이 자홍색이라 화면 사진에서 칸 자리를 찾고, 받은 입력을 서버 기록(/ev)에 남긴다. 누르면 초록으로 바뀐다 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>probe</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #ff00ff; font: 24px sans-serif; }
+      input { margin: 40px; font-size: 24px; }
+    </style>
+  </head>
+  <body>
+    <input id="text" placeholder="여기에 입력" />
+    <script>
+      const ev = (e) => fetch("/ev?e=" + encodeURIComponent(e)).catch(() => {});
+      addEventListener("pointerdown", (e) => {
+        ev("down:" + e.button);
+        document.body.style.background = "#00ff00";
+        document.getElementById("text").focus();
+      });
+      addEventListener("click", () => ev("click"));
+      addEventListener("keydown", (e) => ev("key:" + e.key));
+      addEventListener("wheel", (e) => ev("wheel:" + Math.sign(e.deltaY)));
+      addEventListener("compositionend", (e) => ev("ime:" + e.data));
+      ev("load");
+    </script>
+  </body>
+</html>

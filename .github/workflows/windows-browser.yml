@@ -1,0 +1,58 @@
+# Windows 브라우저 칸 시험: WebView2 Visual 호스팅으로 메인 웹뷰 밑에 깐 칸이 보이고 입력을 받는지 실제 앱을 실행해 확인한다.
+# 화면 사진 · 페이지 기록은 결과물(windows-browser)로 올린다 (.github/windows-browser/probe.ps1)
+name: Windows 브라우저 칸
+
+on:
+  push:
+    paths:
+      - apps/desktop/src-tauri/src/browser.rs
+      - apps/desktop/src-tauri/src/browser/**
+      - apps/desktop/src/tauri-host.ts
+      - packages/ui/src/BrowserPane.tsx
+      - packages/ui/src/browser-layer.tsx
+      - .github/windows-browser/**
+      - .github/workflows/windows-browser.yml
+  workflow_dispatch:
+
+concurrency:
+  group: windows-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: 칸 보이기 · 입력
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+      # 번들 리소스인 원격 웹 화면과 사이드카 자리
+      - run: pnpm -C apps/web build
+      - run: scripts/prepare-sidecars.sh debug
+      # 화면을 넣은 디버그 앱 (tauri build 가 화면을 빌드해 넣는다. 설치본은 만들지 않는다)
+      - run: pnpm -C apps/desktop tauri build --debug --no-bundle
+      - name: 시험
+        shell: pwsh
+        run: .github/windows-browser/probe.ps1 -Out "$env:RUNNER_TEMP\windows-browser" -Bin target\debug
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-browser
+          path: ${{ runner.temp }}/windows-browser
+          if-no-files-found: warn

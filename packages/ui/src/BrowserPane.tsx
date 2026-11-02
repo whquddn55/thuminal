@@ -1,22 +1,20 @@
 // 브라우저 칸: 주소 줄 + 진짜 웹뷰가 보일 자리.
 //
-// 웹뷰는 껍데기(Tauri)가 띄우는 네이티브 뷰다. macOS · Linux 는 메인 웹뷰 밑에 깔려(`browser.under`) 이 칸 자리로
-// 비쳐 보이므로 위에 무엇이 그려져도 그대로 둔다 (browser-layer.tsx). Windows 는 HTML 보다 위에 그려져서
-// 메뉴·창이 열려 있거나, 끄는 중이거나, 플로팅 패널이 이 칸을 덮으면 웹뷰를 잠깐 숨긴다.
-// 칸이 화면에서 빠지면(탭을 바꾸면) 숨기기만 하고, 칸이 배치에서 없어지면 모델이 닫는다.
+// 웹뷰는 껍데기(Tauri)가 띄우는 네이티브 뷰다. 메인 웹뷰 밑에 깔려 이 칸 자리로 비쳐 보이므로 위에 무엇이 그려져도
+// 그대로 둔다 (browser-layer.tsx). 마우스를 껍데기가 밑으로 넘기지 못하는 Windows 는 칸 자리가 받은 마우스를
+// 껍데기에 넘긴다 (`browser.input`). 칸이 화면에서 빠지면(탭을 바꾸면) 숨기기만 하고, 칸이 배치에서 없어지면 모델이 닫는다.
 
 import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, ArrowSquareOutIcon, BugIcon, GlobeIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import { BROWSER_PROXY_PROTOCOL_MINOR, type Bounds, type HostApi } from "@thuminal/term-core";
+import { BROWSER_PROXY_PROTOCOL_MINOR, type Bounds, type BrowserHost, type HostApi } from "@thuminal/term-core";
 
 import { pageKey, pageStore, setPage } from "./browser-state";
-import { useDrag } from "./dnd";
 import { useDaemonSupports } from "./file-features";
 import { cn } from "./lib/utils";
 import { keyLabel } from "./platform";
-import { useApp, useModel } from "./store";
+import { useModel } from "./store";
 
 /** 주소 칸에 친 글을 주소로 바꾼다. 주소처럼 보이지 않으면 검색한다 */
 export function toUrl(input: string): string {
@@ -35,21 +33,43 @@ export function looksLikeUrl(t: string): boolean {
   return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/.*)?$/i.test(s) || /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(s);
 }
 
-/** 화면 위에 메뉴·창이 떠 있는지 (Radix 가 body 에 붙인다). 툴팁은 치지 않는다 */
-function useOverlayOpen(): boolean {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const check = () => setOpen(!!document.querySelector('[role="dialog"], [role="menu"], [role="listbox"], [role="alertdialog"]'));
-    const mo = new MutationObserver(check);
-    mo.observe(document.body, { childList: true, subtree: true });
-    check();
-    return () => mo.disconnect();
-  }, []);
-  return open;
+/** 휠 한 번을 CSS 픽셀로 (줄 · 쪽 단위로 오는 휠) */
+function wheelPx(e: WheelEvent, d: number): number {
+  return e.deltaMode === 1 ? d * 40 : e.deltaMode === 2 ? d * 800 : d;
 }
 
-function intersects(a: DOMRect, b: DOMRect) {
-  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+/**
+ * 칸 자리가 받은 마우스를 껍데기에 넘긴다 (`browser.input` 이 있는 Windows 만). 넘길지는 껍데기가 화면이 알린 사각형
+ * (browser-layer.tsx)으로 가르므로 여기서는 모두 보낸다. 끌어서 글을 고를 때 칸 밖으로 나가도 이어지게 포인터를 잡는다
+ */
+function useForwardInput(browser: BrowserHost | undefined, paneId: number, host: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = host.current;
+    const send = browser?.input;
+    if (!el || !send) return;
+    const pointer = (kind: "down" | "up" | "move" | "leave") => (e: PointerEvent) => {
+      if (kind === "down") el.setPointerCapture(e.pointerId);
+      void send(paneId, { kind, x: e.clientX, y: e.clientY, button: e.button, buttons: e.buttons, shift: e.shiftKey, ctrl: e.ctrlKey, dx: 0, dy: 0, detail: e.detail }).catch(() => undefined);
+    };
+    const wheel = (e: WheelEvent) => {
+      const at = { kind: "wheel" as const, x: e.clientX, y: e.clientY, button: 0, buttons: e.buttons, shift: e.shiftKey, ctrl: e.ctrlKey, detail: 0 };
+      void send(paneId, { ...at, dx: wheelPx(e, e.deltaX), dy: wheelPx(e, e.deltaY) }).catch(() => undefined);
+    };
+    // 페이지가 오른쪽 클릭 메뉴를 띄우므로 메인 웹뷰 메뉴는 막는다
+    const menu = (e: Event) => e.preventDefault();
+    const handlers: [string, EventListener][] = [
+      ["pointerdown", pointer("down") as EventListener],
+      ["pointerup", pointer("up") as EventListener],
+      ["pointermove", pointer("move") as EventListener],
+      ["pointerleave", pointer("leave") as EventListener],
+      ["wheel", wheel as EventListener],
+      ["contextmenu", menu],
+    ];
+    for (const [n, h] of handlers) el.addEventListener(n, h);
+    return () => {
+      for (const [n, h] of handlers) el.removeEventListener(n, h);
+    };
+  }, [browser, paneId, host]);
 }
 
 export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: number; url: string; focused: boolean; inFloating: boolean }) {
@@ -60,13 +80,8 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
   const key = pageKey(model.hostKey, paneId);
   const page = useStore(pageStore, (s) => s[key]);
   const [editing, setEditing] = useState<string | null>(null);
-  const overlay = useOverlayOpen();
-  const dragging = useDrag((d) => d.source !== null);
-  const floatingOpen = useApp((s) => s.floating.open);
-  const [covered, setCovered] = useState(false);
-  const under = !!browser?.under;
-  const hidden = !under && (overlay || dragging || covered);
   const shown = page?.url || url;
+  useForwardInput(browser, paneId, host);
 
   // 웹뷰를 열고, 칸 자리가 바뀔 때마다 따라간다. 칸이 화면에서 빠지면 숨긴다
   useLayoutEffect(() => {
@@ -84,15 +99,14 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
         const key = `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}`;
         if (opened && key !== last && b.width > 0) void browser.setBounds(paneId, b).catch(() => undefined);
         last = key;
-        // 웹뷰가 위에 얹히면 메인 면의 칸은 플로팅 패널에 덮일 때 숨긴다 (네이티브 웹뷰가 패널 위로 올라오므로)
-        const fp = !under && !inFloating && floatingOpen ? document.querySelector("[data-floating-panel]") : null;
-        setCovered(fp ? intersects(fp.getBoundingClientRect(), host.current.getBoundingClientRect()) : false);
       }
       raf = requestAnimationFrame(tick);
     };
     void browser.open(paneId, url, at()).then(
       () => {
         opened = true;
+        // 칸 자리가 열기를 기다리는 동안 옮겨졌으면 다음 프레임에 다시 맞춘다
+        last = "";
         model.browserOpened(paneId);
       },
       (e) => model.fail(`브라우저 칸을 열지 못했어요: ${e}`),
@@ -104,12 +118,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
     };
     // url 은 처음 열 때만 쓴다. 그 뒤 이동은 웹뷰가 한다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browser, paneId, inFloating, floatingOpen, under, model]);
-
-  useEffect(() => {
-    if (!browser) return;
-    void browser.setVisible(paneId, !hidden).catch(() => undefined);
-  }, [browser, paneId, hidden]);
+  }, [browser, paneId, inFloating, model]);
 
   // ⌘L : 주소 칸으로
   useEffect(() => {
@@ -174,18 +183,7 @@ export function BrowserPane({ paneId, url, focused, inFloating }: { paneId: numb
           <ArrowSquareOutIcon />
         </button>
       </div>
-      <div
-        ref={host}
-        className={cn("relative min-h-0 flex-1", !under && "bg-white")}
-        data-browser-host={hidden ? undefined : paneId}
-        data-browser-of={model.hostKey}
-      >
-        {hidden && (
-          <div className="absolute inset-0 grid place-content-center bg-muted text-xs text-muted-foreground">
-            {page?.title || shown}
-          </div>
-        )}
-      </div>
+      <div ref={host} className="relative min-h-0 flex-1" style={{ cursor: page?.cursor }} data-browser-host={paneId} data-browser-of={model.hostKey} />
     </div>
   );
 }
