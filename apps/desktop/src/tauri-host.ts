@@ -428,8 +428,8 @@ export class TauriHostApi implements HostApi {
     return this.req({ type: "list_processes" }, (r) => r.report);
   }
 
-  async stopProcess(pid: number, port: number): Promise<void> {
-    await this.req({ type: "stop_process", pid, port });
+  async stopProcess(pid: number, port: number, force = false): Promise<void> {
+    await this.req({ type: "stop_process", pid, port, force });
   }
 
   findCommands(names: string[]): Promise<string[]> {

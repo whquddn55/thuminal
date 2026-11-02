@@ -67,6 +67,22 @@ pub fn terminate(pid: u32) -> io::Result<()> {
     }
 }
 
+/// 프로세스를 곧바로 끝낸다. 유닉스는 SIGKILL, Windows 는 `terminate` 와 같다
+pub fn kill(pid: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let raw = i32::try_from(pid).ok().filter(|p| *p > 1).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        if unsafe { libc::kill(raw, libc::SIGKILL) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        terminate(pid)
+    }
+}
+
 /// 실행 파일 이름 (경로 없이). 다른 프로세스를 잘못 끄지 않게 확인할 때 쓴다
 pub fn process_name(pid: u32) -> Option<String> {
     #[cfg(unix)]

@@ -8,7 +8,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import { type HostApi, type ListenPort, PROCESSES_PROTOCOL_MINOR, type ProcessReport, type SessionId } from "@thuminal/term-core";
+import { FORCE_STOP_PROTOCOL_MINOR, type HostApi, type ListenPort, PROCESSES_PROTOCOL_MINOR, type ProcessReport, type SessionId } from "@thuminal/term-core";
 
 export interface ProcessesState {
   /** 데몬이 이 요청을 아는지. 묻는 중이면 null */
@@ -17,19 +17,31 @@ export interface ProcessesState {
   error: string | null;
   /** 마지막으로 받은 때 (ms) */
   at: number;
+  /** 멈추라고 보낸 포트(`pid:port`)와 보낸 때 (ms). 목록에서 그 포트가 사라지면 뺀다 */
+  stopping: Record<string, number>;
+  /** 데몬이 강제 종료(SIGKILL)를 아는지 */
+  forceStop: boolean;
 }
 
 /** 탭 · 워크트리 카드가 다시 읽는 간격 */
 export const BACKGROUND_POLL_MS = 30_000;
 /** 리소스 관리자가 열려 있는 동안 다시 읽는 간격 */
 export const OPEN_POLL_MS = 2_000;
+/** 멈추는 중인 포트가 있는 동안 다시 읽는 간격 */
+const STOPPING_POLL_MS = 1_000;
+/** 멈추라고 보내고 이만큼 지나도 포트가 남아 있으면 강제 종료를 보인다 */
+export const FORCE_STOP_AFTER_MS = 3_000;
+
+export const stopKey = (p: ListenPort) => `${p.pid}:${p.port}`;
 
 class Poller {
-  readonly store: StoreApi<ProcessesState> = createStore<ProcessesState>(() => ({ supported: null, report: null, error: null, at: 0 }));
+  readonly store: StoreApi<ProcessesState> = createStore<ProcessesState>(() => ({ supported: null, report: null, error: null, at: 0, stopping: {}, forceStop: false }));
   private wants = new Map<symbol, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight: Promise<void> | null = null;
   private checking: Promise<void> | null = null;
+  /** 멈추는 중인 포트가 있는 동안 건 `want` 를 거두는 함수 */
+  private unwantStopping: (() => void) | null = null;
 
   constructor(private host: HostApi) {
     host.onEvent((e) => {
@@ -50,8 +62,11 @@ class Poller {
     this.checking ??= this.host
       .daemon()
       .then(
-        (d) => this.store.setState({ supported: (d.protocol?.[0] ?? 0) >= 1 && (d.protocol?.[1] ?? 0) >= PROCESSES_PROTOCOL_MINOR }),
-        () => this.store.setState({ supported: false }),
+        (d) => {
+          const [major, minor] = [d.protocol?.[0] ?? 0, d.protocol?.[1] ?? 0];
+          this.store.setState({ supported: major >= 1 && minor >= PROCESSES_PROTOCOL_MINOR, forceStop: major >= 1 && minor >= FORCE_STOP_PROTOCOL_MINOR });
+        },
+        () => this.store.setState({ supported: false, forceStop: false }),
       )
       .finally(() => (this.checking = null));
     return this.checking;
@@ -93,7 +108,11 @@ class Poller {
       if (!this.store.getState().supported) return;
       try {
         const report = await this.host.listProcesses();
-        this.store.setState({ report, error: null, at: Date.now() });
+        // 닫힌 포트는 멈추는 중에서 뺀다
+        const open = new Set(report.ports.map(stopKey));
+        const stopping = Object.fromEntries(Object.entries(this.store.getState().stopping).filter(([k]) => open.has(k)));
+        this.store.setState({ report, error: null, at: Date.now(), stopping });
+        this.watchStopping();
       } catch (e) {
         this.store.setState({ error: e instanceof Error ? e.message : String(e) });
       }
@@ -102,6 +121,29 @@ class Poller {
       this.schedule();
     });
     return this.inflight;
+  }
+
+  /**
+   * 포트를 연 프로세스를 멈추라고 보낸다 (`force` 면 SIGKILL). 그 포트가 목록에서 사라질 때까지 멈추는 중으로 두고 자주 다시 읽는다.
+   * 프로세스는 SIGTERM 을 받고 정리하느라(열린 연결을 기다리는 서버 등) 한참 뒤에 끝나기도 한다
+   */
+  async stopPort(p: ListenPort, force = false): Promise<void> {
+    await this.host.stopProcess(p.pid, p.port, force);
+    const key = stopKey(p);
+    const s = this.store.getState().stopping;
+    // 강제 종료는 기다린 때를 이어 간다 (단추가 다시 숨지 않게)
+    this.store.setState({ stopping: { ...s, [key]: s[key] ?? Date.now() } });
+    this.watchStopping();
+    await this.refresh();
+  }
+
+  private watchStopping() {
+    const any = Object.keys(this.store.getState().stopping).length > 0;
+    if (any && !this.unwantStopping) this.unwantStopping = this.want(STOPPING_POLL_MS);
+    else if (!any && this.unwantStopping) {
+      this.unwantStopping();
+      this.unwantStopping = null;
+    }
   }
 }
 

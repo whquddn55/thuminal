@@ -269,9 +269,9 @@ export interface HostApi {
   listProcesses(): Promise<ProcessReport>;
   /**
    * 포트를 연 프로세스 하나에 SIGTERM 을 보낸다. 데몬이 다시 읽어 아직 그 포트에서 LISTEN 이고 세션 · 워크트리 것일 때만 보낸다
-   * (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터)
+   * (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터). `force` 면 SIGKILL (`FORCE_STOP_PROTOCOL_MINOR` 부터, 옛 데몬은 SIGTERM)
    */
-  stopProcess(pid: number, port: number): Promise<void>;
+  stopProcess(pid: number, port: number, force?: boolean): Promise<void>;
   /** 브라우저 칸을 지원하는 껍데기만 둔다 */
   readonly browser?: BrowserHost;
   /**

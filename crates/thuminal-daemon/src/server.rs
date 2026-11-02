@@ -340,11 +340,11 @@ impl Server {
                 .map(|report| Response::Processes { report: Box::new(report) })
                 .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
             }
-            Request::StopProcess { pid, port } => {
+            Request::StopProcess { pid, port, force } => {
                 let (roots, ws) = (self.process_roots(), self.workspace.clone());
-                match tokio::task::spawn_blocking(move || crate::procs::stop_port_process(pid, port, &roots, &all_worktrees(&ws, &roots))).await {
+                match tokio::task::spawn_blocking(move || crate::procs::stop_port_process(pid, port, force, &roots, &all_worktrees(&ws, &roots))).await {
                     Ok(Ok(())) => {
-                        info!(event = "process_stopped", pid, port);
+                        info!(event = "process_stopped", pid, port, force);
                         Ok(Response::Ok)
                     }
                     Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),

@@ -598,9 +598,16 @@ pub enum Request {
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
     ListProcesses,
-    /// 포트를 연 프로세스 하나를 멈춘다 (SIGTERM). 데몬이 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고
-    /// 세션 · 워크트리 소유일 때만 보낸다. 밖(external) 프로세스와 데몬 자신은 거절한다 (minor 6)
-    StopProcess { pid: u32, port: u16 },
+    /// 포트를 연 프로세스 하나를 멈춘다 (SIGTERM, `force` 면 SIGKILL). 데몬이 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고
+    /// 세션 · 워크트리 소유일 때만 보낸다. 밖(external) 프로세스와 데몬 자신은 거절한다 (minor 6).
+    /// 이미 그 포트를 닫았으면 멈춘 것으로 보고 Ok 다 (minor 10, 그 전에는 오류)
+    StopProcess {
+        pid: u32,
+        port: u16,
+        /// SIGTERM 을 받고도 끝나지 않는 프로세스를 바로 끝낸다 (minor 10)
+        #[serde(default)]
+        force: bool,
+    },
     Tmux {
         /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
         session: SessionId,
