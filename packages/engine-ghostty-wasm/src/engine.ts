@@ -395,6 +395,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
         if (len > 0 && len <= 32) {
           ex.ghostty_render_state_row_cells_get(cells, CELL_GRAPHEMES_BUF, tmp + T_GRAPHEME);
           cp = w.dv().getUint32(tmp + T_GRAPHEME, true);
+          if (len > 1 && isChoseong(cp)) cp = composeJamo(w.dv(), tmp + T_GRAPHEME, len);
         }
         sink.cell(x, y, cp, fg, bg, flags);
       }
@@ -757,4 +758,21 @@ export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
       }
     },
   };
+}
+
+/** 한글 첫소리 자모 (옛 한글 첫소리 확장 포함) */
+function isChoseong(cp: number): boolean {
+  return (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0xa960 && cp <= 0xa97c);
+}
+
+/**
+ * 첫소리 · 가운뎃소리 · 끝소리 자모로 나뉜 한 칸(macOS 파일 이름 등 NFD)을 완성형 한 글자로 묶는다.
+ * 렌더러는 칸마다 글자 하나만 그리므로, 묶지 않으면 첫소리만 보인다. 한 글자로 묶이지 않으면(옛 한글 등) 첫소리를 그대로 둔다
+ */
+function composeJamo(dv: DataView, at: number, len: number): number {
+  let text = "";
+  for (let i = 0; i < len; i++) text += String.fromCodePoint(dv.getUint32(at + i * 4, true));
+  const nfc = text.normalize("NFC");
+  const cp = nfc.codePointAt(0) ?? 0;
+  return nfc.length === String.fromCodePoint(cp).length ? cp : dv.getUint32(at, true);
 }

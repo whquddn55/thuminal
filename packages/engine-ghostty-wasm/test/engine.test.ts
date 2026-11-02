@@ -63,6 +63,17 @@ describe("ghostty-vt.wasm 엔진", () => {
     e.dispose();
   });
 
+  it("자모로 나뉜 한글(NFD, macOS 파일 이름)은 완성형 한 글자로 그린다", () => {
+    const e = factory.create({ cols: 20, rows: 2, scrollback: 100 });
+    e.feed(enc("@한글.md".normalize("NFD")));
+    const g = grab(e);
+    // 두 칸 글자의 뒤 칸은 빈칸으로 읽힌다
+    expect(g.line(0)).toBe("@한 글 .md");
+    expect(g.cells.get("1,0")!.cp).toBe("한".codePointAt(0));
+    expect(g.cells.get("3,0")!.cp).toBe("글".codePointAt(0));
+    e.dispose();
+  });
+
   it("키를 터미널 모드에 맞게 바꾼다", () => {
     const e = factory.create({ cols: 20, rows: 2, scrollback: 100 });
     expect(dec(e.input.key(key({ key: "a", code: "KeyA" })))).toBe("a");
