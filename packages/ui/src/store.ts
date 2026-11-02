@@ -1385,9 +1385,9 @@ export class AppModel {
       case "key":
         // 페이지가 키보드를 잡고 있을 때 누른 앱 단축키를 메인 화면 단축키로 다시 보낸다
         this.focusPaneQuiet(e.id);
-        // 페이지 쪽 스크립트는 macOS 는 ⌘, 그 밖은 Ctrl 이 눌린 키만 넘긴다
+        // 페이지 쪽은 macOS 는 ⌘ 이 눌린 키만 넘긴다. 그 밖은 Ctrl 을 누른 키와 Windows 의 Alt+숫자 · Alt+←→ 다
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: e.key, code: e.code, metaKey: IS_MAC, altKey: e.alt, shiftKey: e.shift, ctrlKey: IS_MAC ? e.ctrl : true, bubbles: true, cancelable: true }),
+          new KeyboardEvent("keydown", { key: e.key, code: e.code, metaKey: IS_MAC, altKey: e.alt, shiftKey: e.shift, ctrlKey: e.ctrl, bubbles: true, cancelable: true }),
         );
         return;
       case "new_window": {

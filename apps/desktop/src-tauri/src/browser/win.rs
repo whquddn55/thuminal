@@ -26,6 +26,7 @@ use windows::core::{HSTRING, Interface, PWSTR};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual, IDCompositionVisual2};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
 
 use super::{BRIDGE, BrowserEvent, CmdResult, bridge_event, emit};
@@ -338,7 +339,7 @@ unsafe fn attach(app: &AppHandle, webview: &ICoreWebView2, comp: &ICoreWebView2C
             })),
             &mut token,
         )?;
-        let s = send;
+        let s = send.clone();
         comp.add_CursorChanged(
             &CursorChangedEventHandler::create(Box::new(move |c, _| {
                 let Some(c) = c else { return Ok(()) };
@@ -349,8 +350,76 @@ unsafe fn attach(app: &AppHandle, webview: &ICoreWebView2, comp: &ICoreWebView2C
             })),
             &mut token,
         )?;
+        // 앱 단축키는 페이지보다 먼저 받는다. WebView2 는 Ctrl+Alt+글자를 AltGr 로 보고 페이지 keydown 을
+        // 내지 않아 페이지 스크립트(BRIDGE)로는 ⌘⌥A 같은 키를 넘기지 못한다
+        let s = send;
+        let controller: ICoreWebView2Controller = comp.cast()?;
+        controller.add_AcceleratorKeyPressed(
+            &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+                args.KeyEventKind(&mut kind)?;
+                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN {
+                    return Ok(());
+                }
+                let mut vk = 0u32;
+                args.VirtualKey(&mut vk)?;
+                // 키는 WebView2 의 다른 프로세스 창이 받으므로 이 스레드 키 상태가 아니라 지금 눌린 상태를 본다
+                let held = |k: u16| GetAsyncKeyState(k as i32) < 0;
+                let (ctrl, alt, shift) = (held(VK_CONTROL.0), held(VK_MENU.0), held(VK_SHIFT.0));
+                if let Some((key, code)) = app_key(vk, ctrl, alt, shift) {
+                    args.SetHandled(true)?;
+                    s(BrowserEvent::Key { id, key, code, alt, shift, ctrl });
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
     }
     Ok(())
+}
+
+/// 앱 단축키로 넘길 키면 KeyboardEvent 의 (key, code). 규칙은 BRIDGE 와 같다: Ctrl 을 누른 키 가운데 편집 키
+/// (Ctrl+C V X A Z Y F, Shift · Alt 없이)는 페이지 몫이다. 그 밖에 Alt+1~9(탭) · Alt+←→(방문 기록)도 넘긴다
+fn app_key(vk: u32, ctrl: bool, alt: bool, shift: bool) -> Option<(String, String)> {
+    let (key, code) = match vk {
+        0x30..=0x39 => {
+            let d = char::from_u32(vk)?.to_string();
+            (d.clone(), format!("Digit{d}"))
+        }
+        0x41..=0x5A => {
+            let c = char::from_u32(vk)?;
+            let key = if shift { c } else { c.to_ascii_lowercase() };
+            (key.to_string(), format!("Key{c}"))
+        }
+        0x70..=0x7B => (format!("F{}", vk - 0x6F), format!("F{}", vk - 0x6F)),
+        0x25 => ("ArrowLeft".into(), "ArrowLeft".into()),
+        0x26 => ("ArrowUp".into(), "ArrowUp".into()),
+        0x27 => ("ArrowRight".into(), "ArrowRight".into()),
+        0x28 => ("ArrowDown".into(), "ArrowDown".into()),
+        0x0D => ("Enter".into(), "Enter".into()),
+        0x08 => ("Backspace".into(), "Backspace".into()),
+        0x09 => ("Tab".into(), "Tab".into()),
+        0xBB => ("=".into(), "Equal".into()),
+        0xBD => ("-".into(), "Minus".into()),
+        0xBC => (",".into(), "Comma".into()),
+        0xBE => (".".into(), "Period".into()),
+        0xBF => ("/".into(), "Slash".into()),
+        0xBA => (";".into(), "Semicolon".into()),
+        0xDE => ("'".into(), "Quote".into()),
+        0xC0 => ("`".into(), "Backquote".into()),
+        0xDB => ("[".into(), "BracketLeft".into()),
+        0xDD => ("]".into(), "BracketRight".into()),
+        0xDC => ("\\".into(), "Backslash".into()),
+        _ => return None,
+    };
+    if ctrl {
+        let editing = !alt && !shift && matches!(vk, 0x43 | 0x56 | 0x58 | 0x41 | 0x5A | 0x59 | 0x46);
+        return (!editing).then_some((key, code));
+    }
+    let tab = (0x31..=0x39).contains(&vk);
+    let history = vk == 0x25 || vk == 0x27;
+    (alt && !shift && (tab || history)).then_some((key, code))
 }
 
 /// 시스템 커서 번호(IDC_*) → CSS cursor

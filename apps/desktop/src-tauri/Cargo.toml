@@ -47,7 +47,7 @@ gtk = "0.18"
 [target.'cfg(windows)'.dependencies]
 # 브라우저 칸을 WebView2 Visual 호스팅으로 메인 웹뷰 밑에 깐다 (browser/win.rs). Tauri(wry) 가 쓰는 것과 같은 버전
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_DirectComposition", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_DirectComposition", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # 켜진 앱에 "다음으로 열기" 로 연 파일을 넘긴다 (open_files.rs). macOS 는 RunEvent::Opened 로 받는다
