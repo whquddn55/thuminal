@@ -263,6 +263,11 @@ export interface HostApi {
   agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
   savePasteImage(data: string, ext: string): Promise<string>;
+  /**
+   * 이 컴퓨터 클립보드에 글을 쓴다 (터미널 프로그램이 OSC 52 로 보낸 복사). 누름 없이 와도 써야 해서 껍데기가 직접 쓴다.
+   * 없으면 화면이 `navigator.clipboard` 로 쓴다
+   */
+  writeClipboard?(text: string): Promise<void>;
   /** 세션 셸 밑에서 이름이 names 에 든 프로세스(에이전트)가 도는 세션들 */
   runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]>;
   /** 세션마다 셸 밑 프로세스 · CPU · 메모리와 LISTEN 포트 (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터) */

@@ -8,6 +8,7 @@
 import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
 
 import { HangulComposer, isJamo } from "./hangul";
+import { Osc52Scanner } from "./osc52";
 import { IS_MAC, PRIMARY_KEY, primaryMod } from "./platform";
 import type { Services } from "./services";
 import { type LinkHandler, LinkHover } from "./terminal-link-hover";
@@ -67,6 +68,7 @@ export class TerminalController {
     const { host, engines, scrollback } = this.s;
     const daemon = await host.daemon();
     const onOutput = (bytes: Uint8Array) => {
+      for (const text of this.osc52.scan(bytes)) this.writeClipboard(text);
       if (this.engine) this.engine.feed(bytes);
       else this.pending.push(bytes);
       // 앞 글자가 확정되어 커서가 움직였다. IME 후보 창 자리도 옮긴다 (커서 자리는 다음 그리기 때 바뀐다)
@@ -684,6 +686,15 @@ export class TerminalController {
       }
     }
     if (paths.length) this.paste(paths.join(" "));
+  }
+
+  /** 프로그램이 OSC 52 로 맡긴 복사 (원격 claude 에서 끌어 고른 글 등) */
+  private readonly osc52 = new Osc52Scanner();
+
+  private writeClipboard(text: string) {
+    const host = this.s.host;
+    const write = host.writeClipboard ? host.writeClipboard(text) : navigator.clipboard.writeText(text);
+    void write.catch((e) => console.warn("OSC 52 복사를 클립보드에 쓰지 못했다", e));
   }
 
   hasSelection(): boolean {

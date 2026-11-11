@@ -8,6 +8,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
@@ -414,6 +415,10 @@ export class TauriHostApi implements HostApi {
 
   agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }> {
     return this.req({ type: "agent_image", session, id, thumb }, (r) => ({ mediaType: String(r.media_type), data: String(r.data) }));
+  }
+
+  writeClipboard(text: string): Promise<void> {
+    return writeText(text);
   }
 
   savePasteImage(data: string, ext: string): Promise<string> {

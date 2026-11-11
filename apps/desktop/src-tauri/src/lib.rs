@@ -610,6 +610,7 @@ pub fn run() {
         // 화면이 가져갈 때까지 쌓아 두는 경로. macOS 는 setup 전에 `Opened` 가 올 수 있어 빌더에서 단다
         .manage(open_files::Pending::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol(media::SCHEME, |ctx, req, responder| {
