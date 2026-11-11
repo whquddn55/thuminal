@@ -484,6 +484,7 @@ fn router(server: Arc<Server>) -> Router {
         .route("/api/file", get(worktree_file))
         .route("/api/push", axum::routing::post(push_register))
         .route("/api/summary", get(summary))
+        .route("/api/name", axum::routing::post(rename_computer))
         .fallback(get(static_file))
         .with_state(server)
 }
@@ -599,6 +600,27 @@ async fn push_register(State(server): State<Arc<Server>>, Query(q): Query<TokenQ
     axum::Json(serde_json::json!({ "push": server.remote.push.configured() })).into_response()
 }
 
+#[derive(Deserialize)]
+struct NameBody {
+    name: String,
+}
+
+/// 폰 앱이 이 컴퓨터 이름(기본 워크스페이스 이름)을 바꾼다. 붙어 있는 화면에는 워크스페이스 바뀜으로 알린다
+async fn rename_computer(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>, axum::Json(b): axum::Json<NameBody>) -> Response {
+    if server.remote.device_for(&q.token).is_none() {
+        return unauthorized();
+    }
+    let s = server.clone();
+    match tokio::task::spawn_blocking(move || s.workspace.set_computer_name(&b.name)).await {
+        Ok(Ok(_)) => {
+            let _ = server.manager.events.send(thuminal_protocol::Event::WorkspaceChanged);
+            axum::Json(serde_json::json!({ "name": server.workspace.computer_name() })).into_response()
+        }
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// 폰 앱 컴퓨터 목록이 보는 요약: 칸에 있는 세션마다 워크스페이스 · 상태 · 마지막 말
 async fn summary(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>) -> Response {
     if server.remote.device_for(&q.token).is_none() {
@@ -631,6 +653,7 @@ async fn summary(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>)
             .collect();
         serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
+            "name": s.workspace.computer_name(),
             "push": s.remote.push.configured(),
             "sessions": sessions,
         })

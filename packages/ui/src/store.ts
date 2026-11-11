@@ -15,6 +15,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   baseName,
   type DaemonEvent,
+  DEFAULT_GROUP,
   FLOATING_WORKSPACE,
   type GitStatus,
   isAbsolutePath,
@@ -41,7 +42,7 @@ import type { AppUpdate } from "@thuminal/term-core";
 import { AGENTS } from "./agents";
 import { bootFinish, bootTrack } from "./boot";
 import { pageKey, setPage } from "./browser-state";
-import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
+import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
@@ -592,10 +593,24 @@ export class AppModel {
   /** 워크스페이스 목록. 옛 데몬이라 모르면 빈 목록(모두 기본)으로 본다 */
   private loadGroups(): Promise<RepoGroup[]> {
     if (this.groupsUnsupported) return Promise.resolve([]);
-    return this.services.host.listGroups().catch(() => {
-      this.groupsUnsupported = true;
-      return [];
-    });
+    return this.services.host.listGroups().then(
+      (groups) => (this.syncHostName(groups), groups),
+      () => {
+        this.groupsUnsupported = true;
+        return [];
+      },
+    );
+  }
+
+  /**
+   * 원격 호스트 모델: 그 컴퓨터 이름(기본 워크스페이스 이름)이 이 앱에 남긴 이름과 다르면 맞춘다. 끊겨 있어도 마지막 이름이 보이게 남긴다.
+   * 옛 데몬은 컴퓨터 이름 대신 "기본" 을 주므로 맞추지 않는다
+   */
+  private syncHostName(groups: RepoGroup[]) {
+    if (this.isRoot) return;
+    const name = groups.find((g) => g.id === DEFAULT_GROUP)?.name;
+    const known = this.root.get().remoteHosts.find((h) => h.id === this.hostKey);
+    if (name && name !== DEFAULT_GROUP_NAME && known && known.name !== name) void this.root.services.host.hosts?.rename?.(this.hostKey, name).catch(() => undefined);
   }
 
   /** git 상태를 다시 읽는다. `only` 를 주면 그 워크트리만 */
@@ -1530,6 +1545,7 @@ export class AppModel {
     try {
       const groups = await this.services.host.setGroups(next);
       this.set({ groups });
+      this.syncHostName(groups);
       return groups;
     } catch (e) {
       this.set({ groups: prev });

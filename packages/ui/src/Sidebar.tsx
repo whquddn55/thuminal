@@ -350,6 +350,8 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
   const repoById = new Map(repos.map((r) => [r.id, r]));
   const pinned = worktrees.filter((w) => w.pinned);
   const key = groupKey(`host:${host.id}`);
+  // 이름은 그 컴퓨터 이름(그 컴퓨터의 기본 워크스페이스 이름)이라 바꾸면 그 컴퓨터와 거기 붙은 모든 화면이 같이 바뀐다
+  const [renaming, setRenaming] = useState(false);
   const title = [host.address, host.daemonVersion && `thuminal ${host.daemonVersion}`, host.error, host.warning].filter(Boolean).join("\n");
   return (
     <div data-host={host.id}>
@@ -361,9 +363,18 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
         collapsed={collapsed.has(key)}
         onToggle={() => onToggle(key)}
         remote={{ state: host.state, title }}
+        renaming={renaming}
+        onStartRename={() => host.state === "connected" && setRenaming(true)}
+        onRename={(name) => {
+          setRenaming(false);
+          if (name !== null && name.trim() && name.trim() !== host.name) model.renameGroup(DEFAULT_GROUP, name);
+        }}
         empty={host.state === "connected" ? "이 컴퓨터에 등록한 프로젝트가 없어요" : `${HOST_STATE_LABEL[host.state]} · 연결되면 프로젝트가 보여요`}
         menu={
           <>
+            <DropdownMenuItem disabled={host.state !== "connected"} onSelect={() => setRenaming(true)}>
+              이름 바꾸기
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void model.root.services.host.hosts?.reconnect(host.id).catch(model.fail)}>다시 연결</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => model.root.setDialog({ kind: "settings", section: "hosts" })}>설정에서 다시 등록…</DropdownMenuItem>
             <DropdownMenuSeparator />

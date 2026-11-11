@@ -177,6 +177,8 @@ export interface RemoteHostsApi {
   /** 짝짓기 주소(`http://100.x.y.z:6780/#token=…`)로 등록한다. Tailscale 주소만 받고, 붙어 보고 되면 남긴다. 같은 주소면 이름·토큰을 바꾼다 */
   add(url: string, name?: string): Promise<RemoteHost>;
   remove(id: string): Promise<void>;
+  /** 이 앱에 남긴 이름을 바꾼다. 그 컴퓨터 이름(기본 워크스페이스 이름)이 바뀐 것을 보면 화면이 맞춘다 */
+  rename?(id: string, name: string): Promise<void>;
   /** 기다리는 중이면 바로 다시 붙어 본다 */
   reconnect(id: string): Promise<void>;
   /** 목록이나 연결 상태가 바뀔 때마다 목록 전체. 구독하자마자 지금 목록을 한 번 준다 */

@@ -79,6 +79,10 @@ class TauriHosts implements RemoteHostsApi {
     return invoke("hosts_remove", { id });
   }
 
+  rename(id: string, name: string): Promise<void> {
+    return invoke("hosts_rename", { id, name });
+  }
+
   reconnect(id: string): Promise<void> {
     return invoke("hosts_reconnect", { id });
   }

@@ -457,8 +457,13 @@ async fn hosts_add(app: AppHandle, state: State<'_, AppState>, url: String, name
     let pair = thuminal_client::ws::parse_pair_url(&url)?;
     // 붙어 본다 (토큰, 판). 확인용 연결은 바로 놓고, 남긴 뒤 Link 가 새로 붙는다
     let probe = Client::connect_ws(&pair.base, &pair.token, "desktop").await.map_err(err)?;
+    // 이름을 주지 않으면 그 컴퓨터가 정한 이름(기본 워크스페이스 이름)을 쓴다. 옛 데몬("기본")이면 주소
+    let own = match name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(_) => None,
+        None => probe.groups().await.ok().and_then(|g| g.into_iter().find(|g| g.id == thuminal_protocol::DEFAULT_GROUP)).map(|g| g.name).filter(|n| n != "기본"),
+    };
     drop(probe);
-    let name = name.map(|n| n.trim().chars().take(60).collect::<String>()).filter(|n| !n.is_empty()).unwrap_or_else(|| pair.ip.to_string());
+    let name = name.or(own).map(|n| n.trim().chars().take(60).collect::<String>()).filter(|n| !n.is_empty()).unwrap_or_else(|| pair.ip.to_string());
     let mut events = state.events.lock().await;
     let id = {
         let mut remotes = state.remotes.lock().unwrap();
@@ -498,6 +503,26 @@ async fn hosts_remove(state: State<'_, AppState>, id: String) -> CmdResult<()> {
         keep
     });
     state.events.lock().await.remove(&key);
+    state.save_hosts()?;
+    state.notify_hosts();
+    Ok(())
+}
+
+/// 원격 호스트 이름을 바꿔 남긴다. 화면이 그 컴퓨터 이름(기본 워크스페이스 이름)이 바뀐 것을 보면 부른다
+#[tauri::command]
+fn hosts_rename(state: State<'_, AppState>, id: String, name: String) -> CmdResult<()> {
+    let name: String = name.trim().chars().take(60).collect();
+    if name.is_empty() {
+        return Err("이름이 비어 있어요".into());
+    }
+    {
+        let mut remotes = state.remotes.lock().unwrap();
+        let r = remotes.get_mut(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?;
+        if r.record.name == name {
+            return Ok(());
+        }
+        r.record.name = name;
+    }
     state.save_hosts()?;
     state.notify_hosts();
     Ok(())
@@ -688,6 +713,7 @@ pub fn run() {
             hosts_subscribe,
             hosts_add,
             hosts_remove,
+            hosts_rename,
             hosts_reconnect,
             notify::notify,
             notify::set_badge,

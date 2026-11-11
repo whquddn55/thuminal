@@ -210,6 +210,51 @@ final class Hosts {
         return request("GET", originOf(url) + "/api/summary?token=" + tokenOf(url), null);
     }
 
+    /** 요약에 든 컴퓨터 이름 (그 컴퓨터의 기본 워크스페이스 이름). 옛 데몬이거나 못 읽으면 null */
+    static String nameIn(Reply r) {
+        if (r.code != 200) return null;
+        try {
+            String n = new JSONObject(r.body).optString("name", "").trim();
+            return n.isEmpty() ? null : n;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    /** 그 컴퓨터가 정한 이름이 목록 이름과 다르면 맞춘다 */
+    static void syncName(Context c, String url, Reply r) {
+        String name = nameIn(r);
+        Host h = find(c, originOf(url));
+        if (name != null && h != null && !name.equals(h.name)) put(c, name, h.url);
+    }
+
+    /**
+     * 그 컴퓨터 이름을 바꾼다 (`/api/name`). 그 컴퓨터와 거기 붙은 모든 화면에 같이 바뀐다.
+     * 옛 데몬은 이 요청을 몰라 이 폰 목록에서만 바꾼다. 실패하면 화면에 보일 글
+     */
+    static String rename(Context c, String url, String name) {
+        String body;
+        try {
+            body = new JSONObject().put("name", name).toString();
+        } catch (JSONException e) {
+            return "이름을 보내지 못했어요";
+        }
+        Reply r = request("POST", originOf(url) + "/api/name?token=" + tokenOf(url), body);
+        if (r.code == 0) return "그 컴퓨터에 연결되지 않아 이름을 바꾸지 못했어요";
+        if (r.code == 401) return "접속 주소의 토큰이 맞지 않아요";
+        if (r.code == 400) return r.body;
+        String got = null;
+        if (r.code == 200) {
+            try {
+                got = new JSONObject(r.body).optString("name", null);
+            } catch (JSONException ignored) {
+            }
+        }
+        Host h = find(c, originOf(url));
+        if (h != null) put(c, got == null || got.isEmpty() ? name : got, h.url);
+        return null;
+    }
+
     /** 이 컴퓨터에 FCM 토큰을 맡긴다. 같은 토큰을 이미 맡겼으면 건너뛴다 (force 면 다시) */
     static void registerPush(Context c, String url, String fcm, boolean force) {
         String origin = originOf(url);

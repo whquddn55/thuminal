@@ -158,6 +158,9 @@ window.onSummary = (origin, code, body) => {
   if (c === 200) {
     try {
       sums[origin] = { state: "ok", data: JSON.parse(body) };
+      // 그 컴퓨터가 정한 이름 (앱이 목록에도 맞춰 남겼다)
+      const h = hosts.find((x) => x.origin === origin);
+      if (h && sums[origin].data.name) h.name = sums[origin].data.name;
     } catch {
       sums[origin] = { state: "old" };
     }
@@ -298,16 +301,19 @@ function addSheet(err) {
     <button class="btn" data-act="next">다음</button>`);
 }
 
-function nameSheet(url) {
+/** 컴퓨터를 넣는다. 이름은 그 컴퓨터에서 받아 오고, 이미 있으면 접속 주소만 바꾼다 */
+function addHost(url) {
   const h = hosts.find((x) => x.origin === originOf(url));
-  sheet(`<h3>${h ? "이미 있는 컴퓨터예요" : "이 컴퓨터 이름"}</h3>
-    <p>${h ? "접속 주소를 새것으로 바꿔요." : "목록과 알림에 이 이름이 보여요."}</p>
-    <input class="name" id="name" value="${esc(h ? h.name : app.defaultName(url))}">
-    <button class="btn primary" data-act="save" data-url="${esc(url)}">저장</button>`);
-  const i = $("name");
-  i.focus();
-  i.select();
+  sheet(`<h3>${h ? "접속 주소 바꾸는 중" : "컴퓨터 추가 중"}</h3><p>그 컴퓨터에 연결해 이름을 받아 와요.</p>`);
+  if (h) delete sums[h.origin];
+  app.add(url);
 }
+
+window.onAdded = (err) => {
+  if (err) return addSheet(err);
+  closeSheet();
+  load();
+};
 
 function menuSheet(url) {
   const h = hosts.find((x) => x.url === url);
@@ -320,10 +326,22 @@ function menuSheet(url) {
 
 function renameSheet(url) {
   const h = hosts.find((x) => x.url === url);
-  sheet(`<h3>이름 바꾸기</h3><input class="name" id="name" value="${esc(h?.name)}">
+  sheet(`<h3>이름 바꾸기</h3><p>그 컴퓨터의 이름(기본 워크스페이스 이름)을 바꿔요. 그 컴퓨터를 등록한 다른 컴퓨터와 폰에도 같이 바뀌어요.</p>
+    <input class="name" id="name" value="${esc(h?.name)}">
     <button class="btn primary" data-act="save" data-url="${esc(url)}">저장</button>`);
   $("name").focus();
 }
+
+window.onRenamed = (err) => {
+  if (err) {
+    error = err;
+    closeSheet();
+    render();
+    return;
+  }
+  closeSheet();
+  load();
+};
 
 function removeSheet(url) {
   const h = hosts.find((x) => x.url === url);
@@ -338,7 +356,7 @@ function originOf(url) {
   return m ? m[1] : url;
 }
 
-window.onScan = (url, err) => (url ? nameSheet(url) : addSheet(err));
+window.onScan = (url, err) => (url ? addHost(url) : addSheet(err));
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
@@ -370,15 +388,14 @@ document.addEventListener("click", (e) => {
     case "next": {
       const v = $("url").value.trim();
       if (!/^https?:\/\//.test(v)) addSheet("http:// 로 시작하는 주소를 넣어 주세요");
-      else nameSheet(v);
+      else addHost(v);
       break;
     }
     case "save": {
-      const h = hosts.find((x) => x.url === url || x.origin === originOf(url));
-      app.save($("name").value, url);
-      if (h && h.url !== url) delete sums[h.origin];
-      closeSheet();
-      load();
+      const v = $("name").value.trim();
+      if (!v) break;
+      sheet(`<h3>이름 바꾸는 중</h3>`);
+      app.rename(url, v);
       break;
     }
     case "rename":
@@ -403,7 +420,7 @@ $("add").onclick = () => addSheet();
 const params = new URLSearchParams(location.hash.slice(1));
 error = params.get("error");
 load();
-if (params.get("add")) nameSheet(params.get("add"));
+if (params.get("add")) addHost(params.get("add"));
 history.replaceState(null, "", location.pathname);
 // 보고 있는 동안 5초마다 새로 받는다
 setInterval(() => {

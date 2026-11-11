@@ -6,13 +6,14 @@ import { CheckIcon, CopyIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import { useEffect, useState } from "react";
 import { renderSVG } from "uqr";
 
-import { FILES_PROTOCOL_MINOR } from "@thuminal/term-core";
+import { DEFAULT_GROUP, FILES_PROTOCOL_MINOR } from "@thuminal/term-core";
 import type { AgentSettings, AgentSettingsState, RemoteApi, RemoteHost, RemoteHostsApi, RemoteStatus } from "@thuminal/term-core";
 import { type TerminalTheme, themes } from "@thuminal/themes";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Label } from "./components/ui/label";
 import { Switch } from "./components/ui/switch";
+import { normalizeGroups } from "./groups";
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel } from "./platform";
 import {
@@ -408,6 +409,32 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** 이 컴퓨터 이름 = 기본 워크스페이스 이름. 다른 컴퓨터 · 폰이 이 이름으로 보고, 바꾸면 거기도 같이 바뀐다 */
+function ComputerName() {
+  const model = useModel();
+  const saved = useApp((s) => normalizeGroups(s.groups, s.repos).find((g) => g.id === DEFAULT_GROUP)?.name ?? "");
+  const [name, setName] = useState(saved);
+  useEffect(() => setName(saved), [saved]);
+  const save = () => {
+    if (name.trim() && name.trim() !== saved) model.renameGroup(DEFAULT_GROUP, name);
+    else setName(saved);
+  };
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border p-3">
+      <div className="text-sm font-medium">이 컴퓨터 이름</div>
+      <input
+        className="h-8 min-w-0 rounded border bg-background px-2 text-sm"
+        value={name}
+        maxLength={60}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        onBlur={save}
+      />
+      <p className="text-xs text-muted-foreground">기본 워크스페이스 이름이기도 해요. 이 컴퓨터를 등록한 다른 컴퓨터와 폰에도 이 이름으로 보이고, 바꾸면 거기도 같이 바뀌어요.</p>
+    </div>
+  );
+}
+
 /** 원격 접속: 폰·다른 컴퓨터 브라우저가 Tailscale 로 이 컴퓨터 데몬에 붙는다. 설정은 데몬이 들고 있어 앱을 꺼도 받는다 */
 function RemoteSection({ remote }: { remote: RemoteApi }) {
   const model = useModel();
@@ -437,6 +464,7 @@ function RemoteSection({ remote }: { remote: RemoteApi }) {
 
   return (
     <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+      <ComputerName />
       <Toggle checked={st.enabled} onChange={(v) => change({ enabled: v })} title="원격 접속 켜기">
         같은 Tailscale 망의 폰이나 다른 컴퓨터 브라우저에서 이 컴퓨터의 터미널과 에이전트를 보고 칠 수 있어요. 앱을 꺼도 데몬이 계속 수신 대기해요. 아래 접속 주소(토큰)를 아는 기기만 연결할 수 있어요.
       </Toggle>
@@ -560,7 +588,6 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
   const model = useModel();
   const [list, setList] = useState<RemoteHost[]>([]);
   const [url, setUrl] = useState("");
-  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => hosts.onChange(setList), [hosts]);
@@ -568,9 +595,8 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
     setBusy(true);
     setError(null);
     try {
-      await hosts.add(url, name.trim() || undefined);
+      await hosts.add(url);
       setUrl("");
-      setName("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -594,13 +620,7 @@ function HostsSection({ hosts }: { hosts: RemoteHostsApi }) {
           placeholder="http://100.x.y.z:6780/#token=…"
         />
         <div className="flex items-center gap-2">
-          <input
-            className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && url.trim() && !busy && void add()}
-            placeholder="이름 (예: 작업 맥). 비우면 주소"
-          />
+          <span className="flex-1 text-xs text-muted-foreground">이름은 그 컴퓨터에서 정한 이름으로 보여요.</span>
           <button
             className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             disabled={!url.trim() || busy}

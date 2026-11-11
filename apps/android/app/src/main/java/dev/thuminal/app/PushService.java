@@ -40,6 +40,8 @@ public class PushService extends FirebaseMessagingService {
         String title = orEmpty(d.get("title"));
         String subtitle = orEmpty(d.get("subtitle"));
         String body = orEmpty(d.get("body"));
+        // 그 컴퓨터가 정한 이름 (옛 데몬은 보내지 않는다)
+        String computer = orEmpty(d.get("computer"));
         boolean bell = "bell".equals(d.get("kind"));
 
         channels(this);
@@ -54,7 +56,7 @@ public class PushService extends FirebaseMessagingService {
         Notification n = new Notification.Builder(this, bell ? CHANNEL_BELL : CHANNEL_AGENT)
                 .setSmallIcon(R.drawable.ic_notify)
                 .setColor(getColor(R.color.accent))
-                .setSubText(host.name)
+                .setSubText(computer.isEmpty() ? host.name : computer)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(body.isEmpty() ? subtitle : subtitle + "\n" + body))

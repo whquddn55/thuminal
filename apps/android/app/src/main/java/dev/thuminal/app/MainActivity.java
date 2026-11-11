@@ -273,6 +273,7 @@ public class MainActivity extends Activity {
         public void summary(String url) {
             new Thread(() -> {
                 Hosts.Reply r = Hosts.summary(url);
+                Hosts.syncName(MainActivity.this, url, r);
                 if (r.code == 200 && fcm != null) Hosts.registerPush(MainActivity.this, url, fcm, false);
                 runOnUiThread(() -> homeCall("onSummary", Hosts.originOf(url), String.valueOf(r.code), r.body));
             }).start();
@@ -290,23 +291,47 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> showWeb(url, s));
         }
 
+        /**
+         * 컴퓨터를 목록에 넣는다. 이름은 그 컴퓨터가 정한 것을 받아 쓴다 (옛 데몬이거나 지금 연결되지 않으면 이미 있던 이름이나 주소).
+         * 이미 있으면 접속 주소만 바꾼다. 끝나면 onAdded(오류 글 또는 null)
+         */
         @JavascriptInterface
-        public void save(String name, String url) {
+        public void add(String url) {
             String u = Hosts.normalize(url);
-            if (u == null) return;
-            Hosts.put(MainActivity.this, name == null || name.trim().isEmpty() ? Hosts.defaultName(u) : name.trim(), u);
-            String t = fcm;
-            if (t != null) new Thread(() -> Hosts.registerPush(MainActivity.this, u, t, true)).start();
+            if (u == null) {
+                runOnUiThread(() -> homeCall("onAdded", "http:// 로 시작하는 주소를 넣어 주세요"));
+                return;
+            }
+            new Thread(() -> {
+                Hosts.Reply r = Hosts.summary(u);
+                if (r.code == 401) {
+                    runOnUiThread(() -> homeCall("onAdded", "접속 주소의 토큰이 맞지 않아요. 그 컴퓨터의 설정 → 원격 접속에서 주소를 다시 확인해 주세요"));
+                    return;
+                }
+                Hosts.Host old = Hosts.find(MainActivity.this, Hosts.originOf(u));
+                String name = Hosts.nameIn(r);
+                if (name == null) name = old != null ? old.name : Hosts.defaultName(u);
+                Hosts.put(MainActivity.this, name, u);
+                String t = fcm;
+                if (t != null) Hosts.registerPush(MainActivity.this, u, t, true);
+                runOnUiThread(() -> homeCall("onAdded", (String) null));
+            }).start();
+        }
+
+        /** 그 컴퓨터 이름을 바꾼다. 끝나면 onRenamed(오류 글 또는 null) */
+        @JavascriptInterface
+        public void rename(String url, String name) {
+            String n = name == null ? "" : name.trim();
+            if (n.isEmpty()) return;
+            new Thread(() -> {
+                String err = Hosts.rename(MainActivity.this, url, n);
+                runOnUiThread(() -> homeCall("onRenamed", err));
+            }).start();
         }
 
         @JavascriptInterface
         public void remove(String url) {
             Hosts.remove(MainActivity.this, url);
-        }
-
-        @JavascriptInterface
-        public String defaultName(String url) {
-            return Hosts.defaultName(url);
         }
 
         @JavascriptInterface

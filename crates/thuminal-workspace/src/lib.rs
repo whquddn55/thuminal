@@ -132,19 +132,21 @@ pub struct Workspace {
     meta: Mutex<std::collections::BTreeMap<PathBuf, WorktreeMeta>>,
     /// 남긴 그대로의 워크스페이스. 읽을 때마다 [`normalize_groups`] 로 지금 저장소 목록에 맞춘다
     groups: Mutex<Vec<RepoGroup>>,
+    /// 기본 워크스페이스 이름을 정하지 않았을 때 쓰는 이름 (OS 의 컴퓨터 이름, [`system_computer_name`])
+    system_name: String,
     /// 마지막으로 확인한 워크트리 목록과 그때 (`known_worktree`)
     known: Mutex<Option<(std::time::Instant, Vec<PathBuf>)>>,
 }
 
-/// 기본 워크스페이스 이름 (사용자가 바꿀 수 있다)
-const DEFAULT_GROUP_NAME: &str = "기본";
+/// 예전(0.1.5 까지)의 기본 워크스페이스 이름. 남은 것은 컴퓨터 이름으로 바꿔 읽는다
+const OLD_DEFAULT_GROUP_NAME: &str = "기본";
 
 /// 워크스페이스 이름 최대 글자 수
 const MAX_GROUP_NAME: usize = 80;
 
 /// 워크스페이스 목록을 저장소 목록에 맞춘다: 같은 id 는 앞 것만, 없는 저장소와 두 번째로 나온 저장소는 빼고,
-/// 기본 워크스페이스가 없으면 맨 앞에 넣고, 어디에도 없는 저장소는 등록한 차례대로 기본 끝에 붙인다
-fn normalize_groups(groups: &[RepoGroup], repos: &[String]) -> Vec<RepoGroup> {
+/// 기본 워크스페이스가 없으면 맨 앞에 넣고(이름이 비었으면 `default_name`), 어디에도 없는 저장소는 등록한 차례대로 기본 끝에 붙인다
+fn normalize_groups(groups: &[RepoGroup], repos: &[String], default_name: &str) -> Vec<RepoGroup> {
     let mut ids = std::collections::HashSet::new();
     let mut placed = std::collections::HashSet::new();
     let mut out: Vec<RepoGroup> = groups
@@ -157,11 +159,37 @@ fn normalize_groups(groups: &[RepoGroup], repos: &[String]) -> Vec<RepoGroup> {
         })
         .collect();
     if !out.iter().any(|g| g.id == DEFAULT_GROUP) {
-        out.insert(0, RepoGroup { id: DEFAULT_GROUP.into(), name: DEFAULT_GROUP_NAME.into(), repos: Vec::new() });
+        out.insert(0, RepoGroup { id: DEFAULT_GROUP.into(), name: String::new(), repos: Vec::new() });
     }
     let rest: Vec<String> = repos.iter().filter(|r| !placed.contains(r.as_str())).cloned().collect();
-    out.iter_mut().find(|g| g.id == DEFAULT_GROUP).expect("기본 워크스페이스를 넣었다").repos.extend(rest);
+    let def = out.iter_mut().find(|g| g.id == DEFAULT_GROUP).expect("기본 워크스페이스를 넣었다");
+    def.repos.extend(rest);
+    if def.name.is_empty() {
+        def.name = default_name.into();
+    }
     out
+}
+
+/// OS 가 아는 이 컴퓨터 이름. macOS 는 시스템 설정의 컴퓨터 이름(`scutil --get ComputerName`), Windows 는 `COMPUTERNAME`,
+/// 그 밖은 호스트 이름(`.local` 은 뗀다). 못 찾으면 "이 컴퓨터"
+pub fn system_computer_name() -> String {
+    fn run(cmd: &str, args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new(cmd).args(args).stderr(std::process::Stdio::null()).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+    let mut found = Vec::new();
+    if cfg!(target_os = "macos") {
+        found.push(run("scutil", &["--get", "ComputerName"]));
+    }
+    found.push(std::env::var("COMPUTERNAME").ok().filter(|_| cfg!(windows)));
+    found.push(std::fs::read_to_string("/etc/hostname").ok());
+    found.push(run("hostname", &[]));
+    found
+        .into_iter()
+        .flatten()
+        .map(|n| n.trim().trim_end_matches(".local").chars().take(MAX_GROUP_NAME).collect::<String>())
+        .find(|n| !n.is_empty())
+        .unwrap_or_else(|| "이 컴퓨터".into())
 }
 
 /// 경로로 만든 짧은 id (FNV-1a 64비트의 앞 8자리)
@@ -181,16 +209,36 @@ pub fn branch_slug(branch: &str) -> String {
 
 impl Workspace {
     pub fn open(vcs: Arc<dyn Vcs>, home: &Path) -> Self {
+        Self::open_named(vcs, home, system_computer_name())
+    }
+
+    /// 기본 워크스페이스 이름을 정하지 않았을 때 쓸 이름(`system_name`)을 주고 연다
+    pub fn open_named(vcs: Arc<dyn Vcs>, home: &Path, system_name: String) -> Self {
         let file = home.join("workspace.json");
-        let saved: Saved = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let mut saved: Saved = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        for g in saved.groups.iter_mut().filter(|g| g.id == DEFAULT_GROUP && g.name == OLD_DEFAULT_GROUP_NAME) {
+            g.name.clear();
+        }
         Self {
             vcs,
             file,
             repos: Mutex::new(saved.repos),
             meta: Mutex::new(saved.worktrees),
             groups: Mutex::new(saved.groups),
+            system_name,
             known: Mutex::new(None),
         }
+    }
+
+    /// 이 컴퓨터 이름 = 기본 워크스페이스 이름. 원격으로 붙은 다른 컴퓨터 · 폰이 이 이름으로 보인다
+    pub fn computer_name(&self) -> String {
+        self.groups().into_iter().find(|g| g.id == DEFAULT_GROUP).map(|g| g.name).unwrap_or_default()
+    }
+
+    /// 이 컴퓨터 이름(기본 워크스페이스 이름)을 바꾼다
+    pub fn set_computer_name(&self, name: &str) -> Result<Vec<RepoGroup>, WorkspaceError> {
+        let groups = self.groups().into_iter().map(|g| if g.id == DEFAULT_GROUP { RepoGroup { name: name.into(), ..g } } else { g }).collect();
+        self.set_groups(groups)
     }
 
     fn save(&self, repos: &[SavedRepo]) -> Result<(), WorkspaceError> {
@@ -266,7 +314,7 @@ impl Workspace {
     /// 사이드바 워크스페이스. 기본 워크스페이스가 늘 들어 있고, 등록한 프로젝트는 저마다 꼭 한 워크스페이스에 든다
     pub fn groups(&self) -> Vec<RepoGroup> {
         let ids = self.repo_ids();
-        normalize_groups(&self.groups.lock().unwrap(), &ids)
+        normalize_groups(&self.groups.lock().unwrap(), &ids, &self.system_name)
     }
 
     /// 워크스페이스 목록을 통째로 바꾼다. id 가 빈 것은 새 id 를 붙이고, 빠진 기본 워크스페이스는 다시 넣고,
@@ -304,7 +352,7 @@ impl Workspace {
             .collect();
         let repos = self.repos.lock().unwrap().clone();
         let ids: Vec<String> = repos.iter().map(|r| repo_id(&r.path)).collect();
-        let normalized = normalize_groups(&groups, &ids);
+        let normalized = normalize_groups(&groups, &ids, &self.system_name);
         *self.groups.lock().unwrap() = normalized.clone();
         self.save(&repos)?;
         info!(event = "groups_set", groups = normalized.len());
@@ -810,7 +858,7 @@ mod tests {
     }
 
     fn open(home: &Path) -> Workspace {
-        Workspace::open(Arc::new(PathVcs), home)
+        Workspace::open_named(Arc::new(PathVcs), home, "기본".into())
     }
 
     fn group(id: &str, name: &str, repos: &[&str]) -> RepoGroup {
@@ -833,6 +881,20 @@ mod tests {
         std::fs::write(d.path().join("workspace.json"), r#"{"repos":[{"path":"/w/a"},{"path":"/w/b"}],"worktrees":{}}"#).unwrap();
         let ws = open(d.path());
         assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "기본", &["a", "b"])]);
+    }
+
+    #[test]
+    fn default_group_is_named_after_computer() {
+        let d = tempfile::tempdir().unwrap();
+        // 예전에 남긴 "기본" 도 컴퓨터 이름으로 읽는다
+        std::fs::write(d.path().join("workspace.json"), r#"{"repos":[{"path":"/w/a"}],"groups":[{"id":"default","name":"기본","repos":[]}]}"#).unwrap();
+        let ws = Workspace::open_named(Arc::new(PathVcs), d.path(), "맥북".into());
+        assert_eq!(shape(&ws), [row(DEFAULT_GROUP, "맥북", &["a"])]);
+        assert_eq!(ws.computer_name(), "맥북");
+        // 바꾼 이름은 남는다
+        ws.set_computer_name(" 집 ").unwrap();
+        assert_eq!(Workspace::open_named(Arc::new(PathVcs), d.path(), "맥북".into()).computer_name(), "집");
+        assert!(ws.set_computer_name(" ").is_err());
     }
 
     #[test]

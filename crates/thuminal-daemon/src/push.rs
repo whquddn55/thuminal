@@ -145,7 +145,7 @@ impl Push {
     }
 
     /// 등록한 폰마다 보낸다
-    async fn send_all(&self, session: SessionId, title: &str, n: &Notice) {
+    async fn send_all(&self, session: SessionId, computer: &str, title: &str, n: &Notice) {
         let Some(sa) = self.account() else { return };
         let phones = self.phones.lock().unwrap().clone();
         if phones.is_empty() {
@@ -168,6 +168,7 @@ impl Push {
                     "token": p.token,
                     "data": {
                         "host": p.host,
+                        "computer": computer,
                         "session": session.to_string(),
                         "kind": n.kind,
                         "title": title,
@@ -468,10 +469,12 @@ pub async fn watch(server: Arc<Server>) {
         tokio::spawn(async move {
             // 워크트리 이름은 git 을 읽는다
             let s = server.clone();
-            let title = tokio::task::spawn_blocking(move || workspace_title(&s, &ws))
-                .await
-                .unwrap_or_default();
-            push.send_all(session, &title, &notice).await;
+            let (computer, title) = tokio::task::spawn_blocking(move || {
+                (s.workspace.computer_name(), workspace_title(&s, &ws))
+            })
+            .await
+            .unwrap_or_default();
+            push.send_all(session, &computer, &title, &notice).await;
         });
     }
 }
