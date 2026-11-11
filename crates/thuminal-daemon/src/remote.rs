@@ -134,6 +134,8 @@ pub struct Remote {
     fonts: Mutex<Option<Fonts>>,
     /// 원격 기기용 브라우저 칸 대리 (browser_proxy.rs)
     proxies: crate::browser_proxy::Proxies,
+    /// 폰 알림 (push.rs)
+    pub push: Arc<crate::push::Push>,
 }
 
 impl Remote {
@@ -157,6 +159,7 @@ impl Remote {
             reconcile_rx: Mutex::new(Some(rx)),
             fonts: Mutex::new(None),
             proxies: Default::default(),
+            push: crate::push::Push::load(home),
         });
         if fresh {
             me.save(&me.state.lock().unwrap());
@@ -479,6 +482,8 @@ fn router(server: Arc<Server>) -> Router {
         .route("/api/fonts", get(fonts))
         .route("/api/font/{id}", get(font))
         .route("/api/file", get(worktree_file))
+        .route("/api/push", axum::routing::post(push_register))
+        .route("/api/summary", get(summary))
         .fallback(get(static_file))
         .with_state(server)
 }
@@ -565,6 +570,74 @@ async fn bridge(server: Arc<Server>, socket: WebSocket, device: String) {
     let _ = serving.await;
     server.remote.leave(&device, n);
     info!(event = "remote_disconnected", device = %device, conn = n);
+}
+
+#[derive(Deserialize)]
+struct PushBody {
+    /// FCM 등록 토큰
+    fcm: String,
+    /// 폰 앱이 이 컴퓨터를 부르는 열쇠 (알림에 돌려준다)
+    #[serde(default)]
+    host: String,
+    #[serde(default = "yes")]
+    on: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// 폰 앱이 알림 받을 FCM 토큰을 맡긴다 (push.rs). 이 컴퓨터가 보낼 수 있는지(서비스 계정 키가 있는지) 돌려준다
+async fn push_register(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>, axum::Json(b): axum::Json<PushBody>) -> Response {
+    if server.remote.device_for(&q.token).is_none() {
+        return unauthorized();
+    }
+    if b.fcm.is_empty() || b.fcm.len() > 4096 {
+        return (StatusCode::BAD_REQUEST, "토큰이 비었어요").into_response();
+    }
+    server.remote.push.register(&b.fcm, &b.host, b.on);
+    axum::Json(serde_json::json!({ "push": server.remote.push.configured() })).into_response()
+}
+
+/// 폰 앱 컴퓨터 목록이 보는 요약: 칸에 있는 세션마다 워크스페이스 · 상태 · 마지막 말
+async fn summary(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>) -> Response {
+    if server.remote.device_for(&q.token).is_none() {
+        return unauthorized();
+    }
+    let s = server.clone();
+    let body = tokio::task::spawn_blocking(move || {
+        use crate::push::{place_of, status_of, workspace_title};
+        let layouts = s.layouts.get(None);
+        let mut titles: HashMap<String, String> = HashMap::new();
+        let sessions: Vec<serde_json::Value> = s
+            .manager
+            .list()
+            .into_iter()
+            .filter_map(|x| {
+                let (ws, tab) = place_of(&layouts, x.id)?;
+                let wt = titles.entry(ws.clone()).or_insert_with(|| workspace_title(&s, &ws)).clone();
+                let a = x.agent.as_ref();
+                Some(serde_json::json!({
+                    "id": x.id,
+                    "title": tab.unwrap_or_else(|| x.title.clone()),
+                    "workspace": ws,
+                    "workspace_title": wt,
+                    "status": status_of(&x),
+                    "agent": a.map(|a| a.kind.clone()),
+                    "message": a.and_then(|a| a.last_assistant_message.clone().or(a.prompt.clone())).map(|m| m.chars().take(160).collect::<String>()),
+                    "updated_at": a.map(|a| a.updated_at).unwrap_or(x.last_output_at),
+                }))
+            })
+            .collect();
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "push": s.remote.push.configured(),
+            "sessions": sessions,
+        })
+    })
+    .await
+    .unwrap_or_default();
+    axum::Json(body).into_response()
 }
 
 async fn fonts(State(server): State<Arc<Server>>, Query(q): Query<TokenQuery>) -> Response {

@@ -31,3 +31,6 @@ apps/web/public/download/
 
 # 에이전트가 쓰는 git worktree (Claude Code)
 .claude/worktrees/
+
+# Firebase 프로젝트 설정 (폰 알림). 저장소에 두지 않고 CI 는 secret 으로 넣는다
+apps/android/app/google-services.json

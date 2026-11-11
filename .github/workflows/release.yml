@@ -26,8 +26,11 @@ jobs:
       - name: APK 만들기
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          # 폰 알림(FCM)용 Firebase 설정. 없으면 알림만 빠진 앱이 된다
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/thuminal.keystore"
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then printf '%s' "$GOOGLE_SERVICES_JSON" > apps/android/app/google-services.json; fi
           THUMINAL_ANDROID_KEYSTORE="$RUNNER_TEMP/thuminal.keystore" scripts/build-android.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -75,7 +78,10 @@ jobs:
           name: android-apk
           path: apps/web/public/download
       # 번들에 들어갈 데몬 · CLI 와 원격 접속 웹 화면 (안드로이드 앱이 dist/download 로 들어간다)
+      # 데몬에 폰 알림(FCM) 보내기 키를 넣는다 (push.rs). FCM 보내기 권한만 있는 서비스 계정이다
       - run: scripts/prepare-sidecars.sh release
+        env:
+          THUMINAL_FCM_KEY: ${{ secrets.FCM_SERVICE_ACCOUNT }}
       - run: pnpm -C apps/web build
       - uses: tauri-apps/tauri-action@v0
         env:

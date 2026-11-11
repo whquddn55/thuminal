@@ -36,6 +36,10 @@ if-addrs = "0.15"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # 웹 화면 파일 · 글꼴을 gzip 으로 줄여 보낸다 (폰은 Tailscale 너머라 받는 양이 시작 시간을 정한다)
 flate2 = "1"
+# 폰 알림 (push.rs): FCM HTTP v1 으로 보내고, 서비스 계정 키로 RS256 서명한다. 암호 구현은 ring (aws-lc 는 Windows 빌드에 cmake · nasm 이 든다)
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17"
 
 # macOS 는 ps · lsof 로 읽는다 (procs.rs). 그 밖에서는 프로세스 표와 LISTEN 포트를 이것으로 읽는다
 [target.'cfg(not(target_os = "macos"))'.dependencies]

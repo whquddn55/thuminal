@@ -100,7 +100,8 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
 - **글꼴**: 폰에는 Nerd Font 가 없어 프롬프트 기호가 깨지므로 `/api/fonts`·`/api/font/<열쇠>` 가 데스크톱에 설치된 글꼴 파일을 낸다. 열쇠는 파일 경로 · 크기 · 고친 때로 만들어 데몬이 다시 떠도 같아서, 브라우저가 글꼴을 오래 캐시한다 (`immutable`). 글꼴과 웹 화면 파일은 gzip 으로 줄여 보낸다.
 - **화면**: 넓으면 데스크톱과 같은 화면, 좁으면 폰 화면(`ui/src/MobileApp.tsx`: 에이전트 목록 → 워크트리 → 터미널, 키 줄·입력 줄). `?ui=mobile|desktop` 으로 고정한다. 안드로이드 키보드는 모든 키를 keyCode 229 로 보내므로 지우기·Enter 를 `input` 이벤트(`deleteContentBackward`, `insertLineBreak`)로 받는다.
 - **세션 크기**: 마지막으로 입력한(누른) 화면 크기를 따른다 (tmux `window-size latest`). 다른 화면이 크기를 가져가면 데스크톱 칸 오른쪽 위에 "다른 기기 크기로 그려지는 중 · 되돌리기"가 뜬다.
-- **안드로이드 앱**(`apps/android`, Java, 의존성은 Play 서비스 QR 찍기 하나): WebView 로 웹 화면을 띄우는 얇은 껍데기다. QR 찍기·주소 붙여 넣기·`thuminal://open?url=…` 로 주소를 받아 남기고, 뒤로 가기·클립보드·접속 정보 지우기를 `window.ThuminalApp` 으로 이어 준다. Orca 는 Expo(React Native) 앱이지만 터미널은 그 안 WebView 의 xterm.js 이고 화면 일부도 데스크톱이 내는 웹 묶음을 WebView 로 그린다. thuminal 은 그 웹 부분만 남겨 데스크톱이 화면을 모두 내게 했다 (앱을 다시 깔지 않아도 화면이 바뀐다). `scripts/build-android.sh` 가 만들어 `apps/web/public/download/thuminal.apk` 에 두고, 데몬이 `/download/thuminal.apk` 로 낸다.
+- **안드로이드 앱**(`apps/android`, Java, 의존성은 Play 서비스 QR 찍기와 Firebase 메시징): WebView 로 웹 화면을 띄우는 얇은 껍데기다. QR 찍기·주소 붙여 넣기·`thuminal://open?url=…` 로 주소를 받아 남기고, 뒤로 가기·클립보드·접속 정보 지우기를 `window.ThuminalApp` 으로 이어 준다. 첫 화면(`assets/home.html`, `window.ThuminalHome`)은 컴퓨터마다 카드와 모든 컴퓨터의 세션을 상태별(응답 대기 · 작업 중 · 끝남)로 모아 보인다. 데몬 `/api/summary` 를 5초마다 받고, 세션을 누르면 그 컴퓨터 웹 화면을 `#…&open=<세션>` 으로 열어 그 터미널로 바로 간다.
+- **폰 알림**: 안드로이드는 잠든 앱의 연결을 끊으므로 연결을 붙잡지 않고 FCM 으로 깨운다. 폰 앱이 FCM 토큰을 컴퓨터마다 `/api/push` 로 맡기고(`push.json`), 데몬은 세션 변화를 데스크톱 알림과 같은 규칙(`daemon/src/push.rs` `notice_for` = `ui/src/notifications.ts` `noticeFor`)으로 보고 FCM HTTP v1 데이터 메시지를 보낸다. 알림은 앱(`PushService`)이 그리고, 누르면 그 세션을 연다. 보내는 키는 FCM 보내기 권한만 있는 서비스 계정(`thuminal-push`) 키로, 릴리스 빌드가 데몬에 넣는다 (CI secret `FCM_SERVICE_ACCOUNT` → `THUMINAL_FCM_KEY`). 공개 릴리스에서 꺼낼 수 있지만 보낼 폰 토큰은 데몬 · 폰에만 있다. 데몬 폴더의 `fcm-service-account.json` 이 있으면 그것을 먼저 쓴다 (개발 빌드). 2분 안에 웹 화면 밖(데스크톱 앱 · 다른 PC 앱)에서 입력이 있었으면 사용자가 컴퓨터 앞에 있다고 보고 보내지 않는다. 앱 빌드에는 Firebase 설정 `apps/android/app/google-services.json` 이 있어야 알림이 들어간다 (저장소 밖, CI 는 secret `GOOGLE_SERVICES_JSON`). Orca 는 Expo(React Native) 앱이지만 터미널은 그 안 WebView 의 xterm.js 이고 화면 일부도 데스크톱이 내는 웹 묶음을 WebView 로 그린다. thuminal 은 그 웹 부분만 남겨 데스크톱이 화면을 모두 내게 했다 (앱을 다시 깔지 않아도 화면이 바뀐다). `scripts/build-android.sh` 가 만들어 `apps/web/public/download/thuminal.apk` 에 두고, 데몬이 `/download/thuminal.apk` 로 낸다.
 
 ### 원격 호스트 (데스크톱 앱이 다른 컴퓨터 데몬에 붙기)
 
@@ -128,6 +129,8 @@ layout-v1.json      탭과 칸 배치, 다음 칸·탭 번호 (바뀌고 1초 �
 terminal-colors.json 터미널 기본색 (앱 테마)
 agent-settings.json  에이전트를 띄울 때 붙일 옵션 (설정 창 · 에이전트)
 remote.json         원격 접속 설정과 접속 토큰 (0600)
+push.json           알림 받을 폰의 FCM 토큰
+fcm-service-account.json  폰 알림을 보낼 Firebase 서비스 계정 키 (없으면 빌드에 든 키, 개발 빌드용)
 hosts.json          데스크톱 앱이 붙는 원격 호스트 id·이름·주소·토큰 (0600, 앱이 쓴다)
 shell/              셸 통합 파일, claude 실행기(claude-launch), 에이전트 팀용 가짜 tmux(teams-bin/tmux)
 ```

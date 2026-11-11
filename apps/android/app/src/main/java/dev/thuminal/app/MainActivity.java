@@ -1,23 +1,19 @@
 package dev.thuminal.app;
 
+import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
-import android.os.Bundle;
-import android.text.InputType;
-import android.util.TypedValue;
+import android.content.pm.PackageManager;
 import android.graphics.Insets;
-import android.view.Gravity;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
 import android.view.View;
-import android.view.WindowInsets;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -25,20 +21,12 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
 
-import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.List;
-
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
@@ -47,182 +35,101 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 /**
  * thuminal 안드로이드 앱. 데스크톱 데몬이 내는 웹 화면(원격 접속)을 WebView 로 띄우는 얇은 껍데기다.
  *
- * 컴퓨터 여러 대를 목록으로 기억한다. 컴퓨터마다 데스크톱 설정 → 원격 접속의 접속 주소(QR)를 찍거나 붙여 넣어 더한다.
- * 컴퓨터가 하나면 바로 들어가고, 여럿이면 목록에서 고른다. 같은 컴퓨터(같은 주소 · 포트)를 다시 넣으면 주소만 바꾼다
- * (토큰을 바꾼 뒤). 화면·터미널·키 줄은 모두 웹 화면이 그리고, 앱은 뒤로 가기·클립보드·목록만 이어 준다 (window.ThuminalApp).
+ * 컴퓨터 여러 대를 목록으로 기억한다 ({@link Hosts}). 첫 화면(assets/home.html)은 컴퓨터마다 카드와, 모든 컴퓨터의 세션을
+ * 상태별로 모아 보인다. 컴퓨터가 하나면 바로 그 웹 화면으로 들어간다. 화면·터미널·키 줄은 모두 웹 화면이 그리고,
+ * 앱은 뒤로 가기·클립보드·목록·알림만 이어 준다 (window.ThuminalApp, 첫 화면은 window.ThuminalHome).
+ * 알림은 데몬이 FCM 으로 보내고 {@link PushService} 가 그린다.
  */
 public class MainActivity extends Activity {
-    private static final String PREFS = "thuminal";
-    /** 예전 판이 남긴 주소 하나 (처음 켤 때 목록으로 옮긴다) */
-    private static final String KEY_URL = "url";
-    /** 컴퓨터 목록: [{"name": …, "url": …}] */
-    private static final String KEY_HOSTS = "hosts";
+    private static final String HOME = "file:///android_asset/home.html";
+    private static final int REQ_NOTIFY = 1;
 
     private WebView web;
-    private SharedPreferences prefs;
-    /** 지금 웹 화면으로 연 컴퓨터 주소 */
+    /** 지금 웹 화면으로 연 컴퓨터 주소. 첫 화면이면 null */
     private String current;
+    /** FCM 등록 토큰 (Firebase 설정 없이 빌드했으면 null) */
+    private volatile String fcm;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        migrate();
-        String fromIntent = urlFromIntent(getIntent());
-        if (fromIntent != null) {
-            askName(fromIntent);
-            return;
-        }
-        List<Host> hosts = hosts();
-        if (hosts.isEmpty()) showSetup(null);
-        else if (hosts.size() == 1) showWeb(hosts.get(0).url);
-        else showList(null);
+        Hosts.migrate(this);
+        startPush();
+        if (handle(getIntent())) return;
+        if (Hosts.list(this).size() == 1) showWeb(Hosts.list(this).get(0).url, 0);
+        else showHome(null, null);
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        String url = urlFromIntent(intent);
-        if (url != null) askName(url);
+        handle(intent);
     }
 
-    /** thuminal://open?url=… 로 열었으면 그 주소 */
-    private static String urlFromIntent(Intent intent) {
-        Uri data = intent == null ? null : intent.getData();
-        if (data == null || !"thuminal".equals(data.getScheme())) return null;
-        return normalize(data.getQueryParameter("url"));
-    }
-
-    /** http(s) 주소만 받는다. 끝의 공백·줄바꿈은 지운다 */
-    private static String normalize(String text) {
-        if (text == null) return null;
-        String t = text.trim();
-        if (t.startsWith("http://") || t.startsWith("https://")) return t;
-        return null;
-    }
-
-    // ---- 컴퓨터 목록 ----
-
-    private static final class Host {
-        final String name;
-        final String url;
-
-        Host(String name, String url) {
-            this.name = name;
-            this.url = url;
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) {
+            web.onResume();
+            if (current == null) web.evaluateJavascript("window.thuminalRefresh && thuminalRefresh()", null);
         }
     }
 
-    private List<Host> hosts() {
-        List<Host> out = new ArrayList<>();
-        try {
-            JSONArray a = new JSONArray(prefs.getString(KEY_HOSTS, "[]"));
-            for (int i = 0; i < a.length(); i++) {
-                JSONObject o = a.getJSONObject(i);
-                out.add(new Host(o.optString("name"), o.optString("url")));
+    @Override
+    protected void onPause() {
+        if (web != null && current == null) web.onPause();
+        super.onPause();
+    }
+
+    /** 알림을 눌렀거나 thuminal://open?url=… 로 열었다. 다룬 인텐트면 true */
+    private boolean handle(Intent intent) {
+        if (intent == null) return false;
+        if (PushService.ACTION_OPEN.equals(intent.getAction())) {
+            Hosts.Host h = Hosts.find(this, intent.getStringExtra(PushService.EXTRA_HOST));
+            if (h == null) return false;
+            long session = intent.getLongExtra(PushService.EXTRA_SESSION, 0);
+            // 같은 컴퓨터 화면이 열려 있으면 다시 읽지 않고 그 세션으로만 간다
+            if (web != null && current != null && Hosts.originOf(current).equals(Hosts.originOf(h.url))) {
+                web.evaluateJavascript("window.thuminalOpen && thuminalOpen(" + session + ")", null);
+            } else {
+                showWeb(h.url, session);
             }
-        } catch (JSONException ignored) {
+            return true;
         }
-        return out;
-    }
-
-    private void saveHosts(List<Host> hosts) {
-        JSONArray a = new JSONArray();
-        try {
-            for (Host h : hosts) a.put(new JSONObject().put("name", h.name).put("url", h.url));
-        } catch (JSONException ignored) {
+        Uri data = intent.getData();
+        if (data != null && "thuminal".equals(data.getScheme())) {
+            String url = Hosts.normalize(data.getQueryParameter("url"));
+            if (url != null) {
+                showHome(url, null);
+                return true;
+            }
         }
-        prefs.edit().putString(KEY_HOSTS, a.toString()).apply();
+        return false;
     }
 
-    /** 예전 판의 주소 하나를 목록으로 옮긴다 */
-    private void migrate() {
-        String old = prefs.getString(KEY_URL, null);
-        if (old == null) return;
-        List<Host> hosts = hosts();
-        if (indexOf(hosts, old) < 0) hosts.add(new Host(defaultName(old), old));
-        saveHosts(hosts);
-        prefs.edit().remove(KEY_URL).apply();
+    // ---- 알림 ----
+
+    private void startPush() {
+        PushService.channels(this);
+        // google-services.json 없이 빌드했으면 Firebase 가 없다. 알림만 빠지고 나머지는 그대로 쓴다
+        if (FirebaseApp.getApps(this).isEmpty()) return;
+        FirebaseMessaging.getInstance().getToken().addOnSuccessListener(t -> {
+            fcm = t;
+            new Thread(() -> Hosts.registerAll(this, t, false)).start();
+        });
     }
 
-    /** 같은 컴퓨터(주소 · 포트가 같은)의 자리 */
-    private static int indexOf(List<Host> hosts, String url) {
-        String origin = originOf(url);
-        for (int i = 0; i < hosts.size(); i++) {
-            if (origin != null && origin.equals(originOf(hosts.get(i).url))) return i;
-        }
-        return -1;
+    private boolean notifyAllowed() {
+        return Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private static String defaultName(String url) {
-        try {
-            String h = Uri.parse(url).getHost();
-            return h == null ? "컴퓨터" : h;
-        } catch (Exception e) {
-            return "컴퓨터";
-        }
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code == REQ_NOTIFY && web != null && current == null) web.evaluateJavascript("window.thuminalRefresh && thuminalRefresh()", null);
     }
 
-    /** 목록에 넣는다. 같은 컴퓨터가 있으면 이름 · 주소를 바꾼다 */
-    private void putHost(String name, String url) {
-        List<Host> hosts = hosts();
-        int i = indexOf(hosts, url);
-        Host h = new Host(name, url);
-        if (i >= 0) hosts.set(i, h);
-        else hosts.add(h);
-        saveHosts(hosts);
-    }
-
-    private void removeHost(String url) {
-        List<Host> hosts = hosts();
-        int i = indexOf(hosts, url);
-        if (i >= 0) hosts.remove(i);
-        saveHosts(hosts);
-    }
-
-    /** 새로 넣는 주소의 이름을 묻고 넣은 뒤 그 컴퓨터로 들어간다. 이미 있는 컴퓨터면 그 이름을 채워 둔다 */
-    private void askName(String url) {
-        List<Host> hosts = hosts();
-        int i = indexOf(hosts, url);
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(i >= 0 ? hosts.get(i).name : defaultName(url));
-        input.setSelectAllOnFocus(true);
-        new AlertDialog.Builder(this)
-                .setTitle("이 컴퓨터 이름")
-                .setView(input)
-                .setPositiveButton("저장", (d, w) -> {
-                    String name = input.getText().toString().trim();
-                    putHost(name.isEmpty() ? defaultName(url) : name, url);
-                    showWeb(url);
-                })
-                .setNegativeButton("취소", (d, w) -> {
-                    if (web == null) showList(null);
-                })
-                .setCancelable(false)
-                .show();
-    }
-
-    private int dp(int v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
-    }
-
-    private Button button(String label, boolean primary) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(15);
-        b.setTextColor(primary ? Color.parseColor("#16161E") : getColor(R.color.fg));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(10));
-        if (primary) bg.setColor(getColor(R.color.accent));
-        else bg.setStroke(dp(1), getColor(R.color.muted));
-        b.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
-        lp.topMargin = dp(12);
-        b.setLayoutParams(lp);
-        return b;
-    }
+    // ---- 화면 ----
 
     private void closeWeb() {
         if (web != null) {
@@ -232,138 +139,64 @@ public class MainActivity extends Activity {
         current = null;
     }
 
-    private TextView text(String s, int sp, int color) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        return t;
+    private WebView newWeb() {
+        closeWeb();
+        WebView w = new WebView(this);
+        w.setBackgroundColor(getColor(R.color.bg));
+        WebSettings s = w.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setSupportZoom(false);
+        s.setTextZoom(100);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        w.setWebChromeClient(new WebChromeClient());
+        web = w;
+        return w;
     }
 
-    /** 컴퓨터 목록: 누르면 들어가고, 길게 누르면 이름 바꾸기 · 지우기 */
-    private void showList(String error) {
-        List<Host> hosts = hosts();
-        if (hosts.isEmpty()) {
-            showSetup(error);
-            return;
-        }
-        closeWeb();
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(28), dp(24), dp(28));
-        box.addView(text("thuminal", 26, getColor(R.color.fg)));
-        TextView desc = text("연결할 컴퓨터를 골라요. 길게 누르면 이름을 바꾸거나 지울 수 있어요.", 14, getColor(R.color.muted));
-        desc.setPadding(0, dp(8), 0, dp(4));
-        box.addView(desc);
-        if (error != null) {
-            TextView err = text(error, 13, Color.parseColor("#F7768E"));
-            err.setPadding(0, dp(6), 0, dp(6));
-            box.addView(err);
-        }
-        for (Host h : hosts) {
-            Button row = button(h.name + "\n" + originOf(h.url), false);
-            row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(16), 0, dp(16), 0);
-            row.getLayoutParams().height = dp(64);
-            row.setOnClickListener(v -> showWeb(h.url));
-            row.setOnLongClickListener(v -> {
-                new AlertDialog.Builder(this)
-                        .setTitle(h.name)
-                        .setItems(new String[] {"이름 바꾸기", "목록에서 지우기"}, (d, which) -> {
-                            if (which == 0) askRename(h);
-                            else new AlertDialog.Builder(this)
-                                    .setMessage(h.name + " 을(를) 목록에서 지울까요? 다시 쓰려면 그 컴퓨터의 접속 주소로 다시 넣어야 해요.")
-                                    .setPositiveButton("지우기", (d2, w2) -> {
-                                        removeHost(h.url);
-                                        showList(null);
-                                    })
-                                    .setNegativeButton("취소", null)
-                                    .show();
-                        })
-                        .show();
+    /** 첫 화면: 컴퓨터 카드 + 모든 컴퓨터의 세션. add 가 있으면 그 주소를 넣는 창을 띄우고, error 가 있으면 위에 보인다 */
+    private void showHome(String add, String error) {
+        WebView w = newWeb();
+        w.getSettings().setAllowFileAccess(true);
+        w.addJavascriptInterface(new Home(), "ThuminalHome");
+        w.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 return true;
-            });
-            box.addView(row);
-        }
-        Button add = button("컴퓨터 추가", true);
-        add.setOnClickListener(v -> showSetup(null));
-        box.addView(add);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(box);
-        setContentView(fitInsets(scroll));
-    }
-
-    private void askRename(Host h) {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(h.name);
-        input.setSelectAllOnFocus(true);
-        new AlertDialog.Builder(this)
-                .setTitle("이름 바꾸기")
-                .setView(input)
-                .setPositiveButton("저장", (d, w) -> {
-                    String name = input.getText().toString().trim();
-                    if (!name.isEmpty()) putHost(name, h.url);
-                    showList(null);
-                })
-                .setNegativeButton("취소", null)
-                .show();
-    }
-
-    /** 컴퓨터 추가: QR 찍기 또는 주소 붙여 넣기 */
-    private void showSetup(String error) {
-        closeWeb();
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setGravity(Gravity.CENTER_VERTICAL);
-        box.setPadding(dp(28), dp(28), dp(28), dp(28));
-        box.setBackgroundColor(getColor(R.color.bg));
-
-        box.addView(text("컴퓨터 추가", 26, getColor(R.color.fg)));
-
-        TextView desc = text("데스크톱 thuminal의 설정 → 원격 접속에 있는 접속 주소의 QR을 찍거나 주소를 붙여 넣어 주세요. 폰과 그 컴퓨터가 같은 Tailscale 망에 있어야 해요.", 14, getColor(R.color.muted));
-        desc.setLineSpacing(0, 1.3f);
-        desc.setPadding(0, dp(10), 0, dp(6));
-        box.addView(desc);
-
-        if (error != null) {
-            TextView err = text(error, 13, Color.parseColor("#F7768E"));
-            err.setPadding(0, dp(6), 0, dp(6));
-            box.addView(err);
-        }
-
-        Button scan = button("QR 찍기", true);
-        scan.setOnClickListener(v -> scan());
-        box.addView(scan);
-
-        EditText input = new EditText(this);
-        input.setHint("http://100.x.y.z:6780/#token=…");
-        input.setHintTextColor(getColor(R.color.muted));
-        input.setTextColor(getColor(R.color.fg));
-        input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ilp.topMargin = dp(20);
-        input.setLayoutParams(ilp);
-        box.addView(input);
-
-        Button go = button("추가", false);
-        go.setOnClickListener(v -> {
-            String url = normalize(input.getText().toString());
-            if (url == null) {
-                input.setError("http:// 로 시작하는 주소를 넣어 주세요");
-                return;
             }
-            askName(url);
         });
-        box.addView(go);
+        setContentView(fitInsets(w));
+        StringBuilder hash = new StringBuilder();
+        if (add != null) hash.append("add=").append(Uri.encode(add));
+        if (error != null) hash.append(hash.length() > 0 ? "&" : "").append("error=").append(Uri.encode(error));
+        w.loadUrl(hash.length() > 0 ? HOME + "#" + hash : HOME);
+    }
 
-        if (!hosts().isEmpty()) {
-            Button back = button("목록으로", false);
-            back.setOnClickListener(v -> showList(null));
-            box.addView(back);
-        }
-        setContentView(fitInsets(box));
+    /** 컴퓨터 웹 화면. 주소의 #token= 은 웹 화면이 받아 이 WebView 저장소(컴퓨터 주소마다 따로)에 남긴다 */
+    private void showWeb(String url, long session) {
+        WebView w = newWeb();
+        current = url;
+        w.addJavascriptInterface(new Bridge(), "ThuminalApp");
+        String origin = Hosts.originOf(url);
+        w.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                // 데스크톱 주소 밖(문서 링크 등)은 폰 브라우저로 연다
+                if (origin != null && !origin.equals(Hosts.originOf(u.toString()))) {
+                    startActivity(new Intent(Intent.ACTION_VIEW, u));
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError error) {
+                if (req.isForMainFrame()) showHome(null, "컴퓨터에 연결하지 못했어요 (" + error.getDescription() + "). Tailscale이 켜져 있는지, 그 컴퓨터에서 원격 접속이 켜져 있는지 확인해 주세요.");
+            }
+        });
+        setContentView(fitInsets(w));
+        w.loadUrl(Hosts.openUrl(url, session));
     }
 
     /**
@@ -387,72 +220,120 @@ public class MainActivity extends Activity {
         GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
         scanner.startScan()
                 .addOnSuccessListener(code -> {
-                    String url = normalize(code.getRawValue());
-                    if (url == null) {
-                        showSetup("thuminal 접속 주소가 든 QR이 아니에요: " + code.getRawValue());
-                        return;
-                    }
-                    askName(url);
+                    String url = Hosts.normalize(code.getRawValue());
+                    homeCall("onScan", url, url == null ? "thuminal 접속 주소가 든 QR이 아니에요: " + code.getRawValue() : null);
                 })
-                .addOnFailureListener(e -> showSetup("QR을 찍지 못했어요: " + e.getMessage()));
+                .addOnFailureListener(e -> homeCall("onScan", null, "QR을 찍지 못했어요: " + e.getMessage()));
     }
 
-    /** 웹 화면. 주소의 #token= 은 웹 화면이 받아 이 WebView 저장소(컴퓨터 주소마다 따로)에 남긴다 */
-    private void showWeb(String url) {
-        closeWeb();
-        current = url;
-        web = new WebView(this);
-        web.setBackgroundColor(getColor(R.color.bg));
-        WebSettings s = web.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setSupportZoom(false);
-        s.setTextZoom(100);
-        s.setMediaPlaybackRequiresUserGesture(false);
-        web.addJavascriptInterface(new Bridge(), "ThuminalApp");
-        web.setWebChromeClient(new WebChromeClient());
-        String origin = originOf(url);
-        web.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                Uri u = req.getUrl();
-                // 데스크톱 주소 밖(문서 링크 등)은 폰 브라우저로 연다
-                if (origin != null && !origin.equals(originOf(u.toString()))) {
-                    startActivity(new Intent(Intent.ACTION_VIEW, u));
-                    return true;
-                }
-                return false;
-            }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError error) {
-                if (req.isForMainFrame()) showList("컴퓨터에 연결하지 못했어요 (" + error.getDescription() + "). Tailscale이 켜져 있는지, 그 컴퓨터에서 원격 접속이 켜져 있는지 확인해 주세요.");
-            }
-        });
-        setContentView(fitInsets(web));
-        web.loadUrl(url);
-    }
-
-    private static String originOf(String url) {
-        try {
-            Uri u = Uri.parse(url);
-            return u.getScheme() + "://" + u.getAuthority();
-        } catch (Exception e) {
-            return null;
+    /** 첫 화면의 함수를 글 인자들로 부른다 (null 은 null 로) */
+    private void homeCall(String fn, String... args) {
+        if (web == null || current != null) return;
+        StringBuilder js = new StringBuilder("window.").append(fn).append(" && ").append(fn).append("(");
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) js.append(",");
+            js.append(args[i] == null ? "null" : JSONObject.quote(args[i]));
         }
+        web.evaluateJavascript(js.append(")").toString(), null);
     }
 
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack()) web.goBack();
-        else if (web != null && hosts().size() > 1) showList(null);
-        else moveTaskToBack(true);
+        if (web == null) {
+            moveTaskToBack(true);
+        } else if (current == null) {
+            // 첫 화면: 떠 있는 창이 있으면 닫고, 없으면 앱을 뒤로
+            web.evaluateJavascript("window.thuminalBack ? thuminalBack() : false", r -> {
+                if (!"true".equals(r)) moveTaskToBack(true);
+            });
+        } else if (web.canGoBack()) {
+            web.goBack();
+        } else if (Hosts.list(this).size() > 1) {
+            showHome(null, null);
+        } else {
+            moveTaskToBack(true);
+        }
     }
 
     @Override
     protected void onDestroy() {
         if (web != null) web.destroy();
         super.onDestroy();
+    }
+
+    /** 첫 화면이 부르는 앱 기능 (window.ThuminalHome) */
+    private class Home {
+        @JavascriptInterface
+        public String hosts() {
+            return Hosts.json(MainActivity.this).toString();
+        }
+
+        /** 컴퓨터 요약을 받아 `onSummary(origin, code, body)` 로 돌려준다. 받으면 알림 토큰도 맡긴다 */
+        @JavascriptInterface
+        public void summary(String url) {
+            new Thread(() -> {
+                Hosts.Reply r = Hosts.summary(url);
+                if (r.code == 200 && fcm != null) Hosts.registerPush(MainActivity.this, url, fcm, false);
+                runOnUiThread(() -> homeCall("onSummary", Hosts.originOf(url), String.valueOf(r.code), r.body));
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void open(String url, String session) {
+            long id;
+            try {
+                id = Long.parseLong(session);
+            } catch (NumberFormatException e) {
+                id = 0;
+            }
+            long s = id;
+            runOnUiThread(() -> showWeb(url, s));
+        }
+
+        @JavascriptInterface
+        public void save(String name, String url) {
+            String u = Hosts.normalize(url);
+            if (u == null) return;
+            Hosts.put(MainActivity.this, name == null || name.trim().isEmpty() ? Hosts.defaultName(u) : name.trim(), u);
+            String t = fcm;
+            if (t != null) new Thread(() -> Hosts.registerPush(MainActivity.this, u, t, true)).start();
+        }
+
+        @JavascriptInterface
+        public void remove(String url) {
+            Hosts.remove(MainActivity.this, url);
+        }
+
+        @JavascriptInterface
+        public String defaultName(String url) {
+            return Hosts.defaultName(url);
+        }
+
+        @JavascriptInterface
+        public void scan() {
+            runOnUiThread(MainActivity.this::scan);
+        }
+
+        /** "on" 알림 허용 · "off" 막힘 · "none" 이 빌드에 알림이 없다 */
+        @JavascriptInterface
+        public String notifyState() {
+            if (FirebaseApp.getApps(MainActivity.this).isEmpty()) return "none";
+            return notifyAllowed() ? "on" : "off";
+        }
+
+        @JavascriptInterface
+        public void allowNotify() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 33 && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+                        && Hosts.prefs(MainActivity.this).getBoolean("asked_notify", false)) {
+                    // 두 번 거절하면 권한 창이 더는 뜨지 않는다. 앱 알림 설정을 연다
+                    startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+                    return;
+                }
+                Hosts.prefs(MainActivity.this).edit().putBoolean("asked_notify", true).apply();
+                if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
+            });
+        }
     }
 
     /** 웹 화면이 부르는 앱 기능 (window.ThuminalApp) */
@@ -474,20 +355,21 @@ public class MainActivity extends Activity {
             if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("thuminal", text));
         }
 
-        /** 지금 컴퓨터를 목록에서 지우고 목록으로 (웹 화면이 이미 물어봤다) */
+        /** 지금 컴퓨터를 목록에서 지우고 첫 화면으로 (웹 화면이 이미 물어봤다) */
         @JavascriptInterface
         public void forget() {
             runOnUiThread(() -> {
-                if (current != null) removeHost(current);
+                String url = current;
+                if (url != null) Hosts.remove(MainActivity.this, url);
                 if (web != null) web.clearCache(false);
-                showList(null);
+                showHome(null, null);
             });
         }
 
-        /** 컴퓨터 목록으로 (다른 컴퓨터를 고르거나 더한다) */
+        /** 첫 화면으로 (다른 컴퓨터를 고르거나 더한다) */
         @JavascriptInterface
         public void changeServer() {
-            runOnUiThread(() -> showList(null));
+            runOnUiThread(() -> showHome(null, null));
         }
     }
 }

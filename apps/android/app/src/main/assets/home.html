@@ -1,0 +1,416 @@
+<!doctype html>
+<!--
+  안드로이드 앱 첫 화면: 컴퓨터마다 카드 하나, 그 아래 모든 컴퓨터의 세션을 상태별로 모은다.
+  컴퓨터 목록 · 요약 받기 · 열기는 앱(window.ThuminalHome, MainActivity.Home)이 한다. 요약은 데몬 /api/summary 다.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  :root {
+    --bg: #16161e;
+    --card: #1c1c26;
+    --line: #2a2a37;
+    --fg: #e6e6eb;
+    --muted: #8a8a99;
+    --dim: #5c5c6b;
+    --accent: #7aa2f7;
+    --attention: #f97316;
+    --working: #eab308;
+    --done: #10b981;
+    --failed: #ef4444;
+    --mono: ui-monospace, "Roboto Mono", "Noto Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, "Roboto", "Noto Sans KR", sans-serif; }
+  body { padding-bottom: 24px; user-select: none; -webkit-user-select: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+  .press:active { background: rgba(255, 255, 255, 0.05); }
+
+  header { display: flex; align-items: center; height: 56px; padding: 0 8px 0 16px; }
+  header h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.2px; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; color: var(--muted); }
+  .icon-btn svg { width: 22px; height: 22px; }
+
+  .banner { margin: 0 16px 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+  .banner.err { background: rgba(239, 68, 68, 0.12); }
+  .banner.info { background: var(--card); border: 1px solid var(--line); }
+  .banner span { flex: 1; }
+  .banner button { color: var(--accent); font-weight: 500; white-space: nowrap; }
+
+  h2 { margin: 18px 16px 8px; font-size: 12px; font-weight: 500; color: var(--muted); display: flex; gap: 6px; }
+  h2 .n { color: var(--dim); }
+
+  /* 컴퓨터 카드 */
+  .hosts { display: grid; gap: 8px; padding: 0 16px; }
+  .host { position: relative; display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 8px 12px 14px; }
+  .host .top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .host .name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .host .more { width: 32px; height: 32px; margin: -4px 0; }
+  .host .addr { font: 12px var(--mono); color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 6px; }
+  .host .stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-right: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); font-size: 12px; color: var(--muted); }
+  .chip b { font-weight: 600; color: var(--fg); }
+  .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .conn i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .conn.ok i { background: var(--done); }
+  .conn.bad i { background: var(--failed); }
+  .host .note { margin-top: 8px; font-size: 12px; color: var(--dim); padding-right: 6px; }
+
+  /* 세션 줄 */
+  .list { margin: 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 12px; width: 100%; text-align: left; padding: 11px 14px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--dim); }
+  .dot.attention { background: var(--attention); }
+  .dot.error { background: var(--failed); }
+  .dot.working { background: var(--working); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.done { background: var(--done); }
+  .dot.ready, .dot.interrupted { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .dot.active { background: var(--muted); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  .row .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .time { font-size: 12px; color: var(--dim); padding-left: 8px; }
+  .row .where { grid-column: 2 / 4; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .where .pc { color: var(--accent); }
+  .row .msg { grid-column: 2 / 4; margin-top: 3px; font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
+  .more-row { display: block; width: 100%; padding: 11px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); text-align: left; }
+  .empty { margin: 0 16px; padding: 18px 14px; border: 1px dashed var(--line); border-radius: 12px; font-size: 13px; color: var(--muted); text-align: center; }
+
+  /* 추가 · 메뉴 창 (아래에서 올라온다) */
+  .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: none; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 8px 16px 20px; display: none; }
+  .open .scrim, .open .sheet { display: block; }
+  .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 12px; }
+  .sheet h3 { margin: 4px 0 4px; font-size: 17px; font-weight: 600; }
+  .sheet p { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .sheet .err { color: var(--failed); }
+  input { width: 100%; height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 14px var(--mono); outline: none; }
+  input:focus { border-color: var(--accent); }
+  input.name { font-family: inherit; font-size: 15px; }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 46px; border-radius: 10px; margin-top: 10px; font-weight: 500; border: 1px solid var(--line); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #16161e; }
+  .btn.danger { color: var(--failed); }
+  .btn svg { width: 20px; height: 20px; }
+  .or { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 12px; color: var(--dim); }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .item { display: block; width: 100%; text-align: left; padding: 14px 4px; font-size: 15px; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; }
+  .item.danger { color: var(--failed); }
+</style>
+</head>
+<body>
+<header>
+  <h1>thuminal</h1>
+  <button class="icon-btn press" id="add" aria-label="컴퓨터 추가">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</header>
+<div id="banners"></div>
+<div id="main"></div>
+<div id="overlay">
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+const app = window.ThuminalHome;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+const STATUS = {
+  attention: "응답 대기",
+  error: "오류",
+  working: "작업 중",
+  done: "끝남",
+  interrupted: "멈춤",
+  ready: "입력 대기",
+  active: "터미널",
+  exited: "끝난 터미널",
+};
+// 위에 보일 차례. 묶음 하나에 여러 상태가 들어간다
+const GROUPS = [
+  { key: "attention", title: "응답 대기", has: ["attention", "error"] },
+  { key: "working", title: "작업 중", has: ["working"] },
+  { key: "done", title: "끝남", has: ["done"] },
+  { key: "rest", title: "그 밖", has: ["interrupted", "ready", "active", "exited"], fold: true },
+];
+
+let hosts = [];
+/** origin → { state: "loading" | "ok" | "unauthorized" | "old" | "down", data } */
+const sums = {};
+let restOpen = false;
+let error = null;
+
+function load() {
+  hosts = JSON.parse(app.hosts());
+  for (const h of hosts) {
+    sums[h.origin] ??= { state: "loading" };
+    app.summary(h.url);
+  }
+  for (const o of Object.keys(sums)) if (!hosts.some((h) => h.origin === o)) delete sums[o];
+  render();
+}
+
+window.onSummary = (origin, code, body) => {
+  const c = Number(code);
+  if (c === 200) {
+    try {
+      sums[origin] = { state: "ok", data: JSON.parse(body) };
+    } catch {
+      sums[origin] = { state: "old" };
+    }
+  } else if (c === 401) sums[origin] = { state: "unauthorized" };
+  else if (c === 404) sums[origin] = { state: "old" };
+  else sums[origin] = { state: "down" };
+  render();
+};
+
+window.thuminalRefresh = load;
+
+function ago(ms) {
+  if (!ms) return "";
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return `${Math.floor(s / 86400)}일 전`;
+}
+
+function render() {
+  const b = [];
+  if (error) b.push(`<div class="banner err"><span>${esc(error)}</span><button data-act="dismiss">닫기</button></div>`);
+  const ns = app.notifyState();
+  if (hosts.length && ns === "off") b.push(`<div class="banner info"><span>알림이 꺼져 있어요. 켜면 에이전트가 묻거나 일을 마쳤을 때 알려 줘요.</span><button data-act="notify">켜기</button></div>`);
+  $("banners").innerHTML = b.join("");
+
+  if (!hosts.length) {
+    $("main").innerHTML = `<h2>컴퓨터</h2><div class="empty">아직 연결한 컴퓨터가 없어요.<br>오른쪽 위 + 를 눌러 추가해 주세요.</div>`;
+    return;
+  }
+  const out = [`<h2>컴퓨터 <span class="n">${hosts.length}</span></h2><div class="hosts">`];
+  for (const h of hosts) out.push(hostCard(h));
+  out.push(`</div>`);
+
+  // 모든 컴퓨터의 세션
+  const all = [];
+  for (const h of hosts) {
+    const s = sums[h.origin];
+    if (s?.state !== "ok") continue;
+    for (const x of s.data.sessions ?? []) all.push({ ...x, host: h });
+  }
+  all.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
+  if (all.length) {
+    for (const g of GROUPS) {
+      const rows = all.filter((x) => g.has.includes(x.status));
+      if (!rows.length) continue;
+      out.push(`<h2>${g.title} <span class="n">${rows.length}</span></h2><div class="list">`);
+      if (g.fold && !restOpen) {
+        out.push(`<button class="more-row press" data-act="rest">${rows.length}개 보기</button>`);
+      } else {
+        for (const x of rows) out.push(sessionRow(x));
+      }
+      out.push(`</div>`);
+    }
+  } else if (hosts.some((h) => sums[h.origin]?.state === "ok")) {
+    out.push(`<h2>세션</h2><div class="empty">열린 터미널이 없어요</div>`);
+  }
+  $("main").innerHTML = out.join("");
+}
+
+function hostCard(h) {
+  const s = sums[h.origin] ?? { state: "loading" };
+  const addr = h.origin.replace(/^https?:\/\//, "");
+  let conn = `<span class="conn"><i></i>확인 중</span>`;
+  let body = "";
+  if (s.state === "ok") {
+    const ss = s.data.sessions ?? [];
+    const n = (st) => ss.filter((x) => st.includes(x.status)).length;
+    const att = n(["attention", "error"]);
+    const work = n(["working"]);
+    const chips = [];
+    if (att) chips.push(`<span class="chip"><i class="dot attention" style="width:6px;height:6px;border-radius:50%"></i>응답 대기 <b>${att}</b></span>`);
+    if (work) chips.push(`<span class="chip"><i class="dot working" style="width:6px;height:6px;border-radius:50%"></i>작업 중 <b>${work}</b></span>`);
+    chips.push(`<span class="chip">세션 <b>${ss.length}</b></span>`);
+    conn = `<span class="conn ok"><i></i>연결됨</span>`;
+    body = `<div class="stats">${chips.join("")}</div>`;
+    const notes = [`v${esc(s.data.version)}`];
+    if (!s.data.push && app.notifyState() !== "none") notes.push("이 컴퓨터는 알림 키가 없어요");
+    body += `<div class="note">${notes.join(" · ")}</div>`;
+  } else if (s.state === "unauthorized") {
+    conn = `<span class="conn bad"><i></i>토큰 바뀜</span>`;
+    body = `<div class="note">접속 주소가 바뀌었어요. 그 컴퓨터 설정 → 원격 접속의 QR로 다시 추가해 주세요.</div>`;
+  } else if (s.state === "old") {
+    conn = `<span class="conn ok"><i></i>연결됨</span>`;
+    body = `<div class="note">이 컴퓨터의 thuminal을 업데이트하면 세션과 알림을 여기서 볼 수 있어요.</div>`;
+  } else if (s.state === "down") {
+    conn = `<span class="conn bad"><i></i>연결 안 됨</span>`;
+    body = `<div class="note">Tailscale이 켜져 있는지, 그 컴퓨터에서 원격 접속이 켜져 있는지 확인해 주세요.</div>`;
+  }
+  return `<div class="host press" data-act="open" data-url="${esc(h.url)}">
+    <div class="top"><span class="name">${esc(h.name)}</span>${conn}
+      <button class="icon-btn more" data-act="menu" data-url="${esc(h.url)}" aria-label="메뉴">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button></div>
+    <div class="addr">${esc(addr)}</div>${body}</div>`;
+}
+
+function sessionRow(x) {
+  // 제목은 워크트리, 그 밑에 탭 이름(에이전트 이름과 같으면 하나만)과 컴퓨터
+  const where = [...new Set([x.title, x.agent].filter(Boolean))].map(esc).join(" · ");
+  const pc = hosts.length > 1 ? ` · <span class="pc">${esc(x.host.name)}</span>` : "";
+  const msg = x.message && ["attention", "error", "done", "working"].includes(x.status) ? `<div class="msg">${esc(x.message)}</div>` : "";
+  return `<button class="row press" data-act="open" data-url="${esc(x.host.url)}" data-session="${x.id}">
+    <i class="dot ${x.status}"></i><span class="title">${esc(x.workspace_title || x.title || STATUS[x.status])}</span><span class="time">${ago(x.updated_at)}</span>
+    <span></span><span class="where">${where || STATUS[x.status]}${pc}</span>
+    ${msg ? `<span></span>${msg}` : ""}</button>`;
+}
+
+// ---- 창 ----
+
+function sheet(html) {
+  $("sheet").innerHTML = `<div class="grab"></div>${html}`;
+  $("overlay").classList.add("open");
+}
+function closeSheet() {
+  $("overlay").classList.remove("open");
+  $("sheet").innerHTML = "";
+}
+window.thuminalBack = () => {
+  if ($("overlay").classList.contains("open")) {
+    closeSheet();
+    return true;
+  }
+  return false;
+};
+$("scrim").onclick = closeSheet;
+
+const QR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>`;
+
+function addSheet(err) {
+  sheet(`<h3>컴퓨터 추가</h3>
+    <p>데스크톱 thuminal의 설정 → 원격 접속에 있는 접속 주소의 QR을 찍거나 주소를 붙여 넣어 주세요. 폰과 그 컴퓨터가 같은 Tailscale 망에 있어야 해요.</p>
+    ${err ? `<p class="err">${esc(err)}</p>` : ""}
+    <button class="btn primary" data-act="scan">${QR}QR 찍기</button>
+    <div class="or">또는</div>
+    <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://100.x.y.z:6780/#token=…">
+    <button class="btn" data-act="next">다음</button>`);
+}
+
+function nameSheet(url) {
+  const h = hosts.find((x) => x.origin === originOf(url));
+  sheet(`<h3>${h ? "이미 있는 컴퓨터예요" : "이 컴퓨터 이름"}</h3>
+    <p>${h ? "접속 주소를 새것으로 바꿔요." : "목록과 알림에 이 이름이 보여요."}</p>
+    <input class="name" id="name" value="${esc(h ? h.name : app.defaultName(url))}">
+    <button class="btn primary" data-act="save" data-url="${esc(url)}">저장</button>`);
+  const i = $("name");
+  i.focus();
+  i.select();
+}
+
+function menuSheet(url) {
+  const h = hosts.find((x) => x.url === url);
+  if (!h) return;
+  sheet(`<h3>${esc(h.name)}</h3><p style="font-family:var(--mono)">${esc(h.origin.replace(/^https?:\/\//, ""))}</p>
+    <button class="item press" data-act="open" data-url="${esc(url)}">열기</button>
+    <button class="item press" data-act="rename" data-url="${esc(url)}">이름 바꾸기</button>
+    <button class="item danger press" data-act="ask-remove" data-url="${esc(url)}">목록에서 지우기</button>`);
+}
+
+function renameSheet(url) {
+  const h = hosts.find((x) => x.url === url);
+  sheet(`<h3>이름 바꾸기</h3><input class="name" id="name" value="${esc(h?.name)}">
+    <button class="btn primary" data-act="save" data-url="${esc(url)}">저장</button>`);
+  $("name").focus();
+}
+
+function removeSheet(url) {
+  const h = hosts.find((x) => x.url === url);
+  sheet(`<h3>${esc(h?.name)} 을(를) 지울까요?</h3>
+    <p>다시 쓰려면 그 컴퓨터의 접속 주소로 다시 추가해야 해요. 이 폰으로 오던 알림도 멈춰요.</p>
+    <button class="btn danger" data-act="remove" data-url="${esc(url)}">지우기</button>
+    <button class="btn" data-act="close">취소</button>`);
+}
+
+function originOf(url) {
+  const m = /^(https?:\/\/[^/#?]+)/.exec(url);
+  return m ? m[1] : url;
+}
+
+window.onScan = (url, err) => (url ? nameSheet(url) : addSheet(err));
+
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  e.stopPropagation();
+  const url = el.dataset.url;
+  switch (el.dataset.act) {
+    case "open":
+      closeSheet();
+      app.open(url, el.dataset.session ?? "0");
+      break;
+    case "menu":
+      menuSheet(url);
+      break;
+    case "rest":
+      restOpen = true;
+      render();
+      break;
+    case "dismiss":
+      error = null;
+      render();
+      break;
+    case "notify":
+      app.allowNotify();
+      break;
+    case "scan":
+      app.scan();
+      break;
+    case "next": {
+      const v = $("url").value.trim();
+      if (!/^https?:\/\//.test(v)) addSheet("http:// 로 시작하는 주소를 넣어 주세요");
+      else nameSheet(v);
+      break;
+    }
+    case "save": {
+      const h = hosts.find((x) => x.url === url || x.origin === originOf(url));
+      app.save($("name").value, url);
+      if (h && h.url !== url) delete sums[h.origin];
+      closeSheet();
+      load();
+      break;
+    }
+    case "rename":
+      renameSheet(url);
+      break;
+    case "ask-remove":
+      removeSheet(url);
+      break;
+    case "remove":
+      app.remove(url);
+      closeSheet();
+      load();
+      break;
+    case "close":
+      closeSheet();
+      break;
+  }
+});
+$("add").onclick = () => addSheet();
+
+// 앱이 넘긴 것: #add=<주소> (thuminal://open?url=…), #error=<글>
+const params = new URLSearchParams(location.hash.slice(1));
+error = params.get("error");
+load();
+if (params.get("add")) nameSheet(params.get("add"));
+history.replaceState(null, "", location.pathname);
+// 보고 있는 동안 5초마다 새로 받는다
+setInterval(() => {
+  if (document.visibilityState === "visible" && !$("overlay").classList.contains("open")) for (const h of hosts) app.summary(h.url);
+}, 5000);
+// 시간 글("3분 전")만 새로 그린다
+setInterval(render, 30000);
+</script>
+</body>
+</html>

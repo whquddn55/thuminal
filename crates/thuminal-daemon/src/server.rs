@@ -155,6 +155,7 @@ impl Server {
                 }
                 Frame::Input { session, data } => {
                     if hello {
+                        self.remote.push.note_input(&client);
                         let _ = self.manager.input(session, data);
                     }
                 }
