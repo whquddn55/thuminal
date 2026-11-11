@@ -459,6 +459,25 @@ pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 데몬이 끝나 잠금 파일을 놓을 때까지 기다린다 (최대 `timeout`). 놓았으면 true.
+/// 데몬은 연결을 끊은 뒤에도 세션 기록을 쓰는 동안 잠금을 쥐고 있어, 그 사이에 새 데몬을 띄우면 이미 떠 있다며 끝난다
+pub async fn wait_daemon_exit(paths: &Paths, timeout: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let free = match std::fs::File::open(paths.lock()) {
+            Ok(f) => f.try_lock().is_ok(),
+            Err(_) => true,
+        };
+        if free {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald` (Windows 는 `thuminald.exe`).
 pub fn default_daemon_bin() -> PathBuf {
     if let Some(p) = std::env::var_os("THUMINAL_DAEMON_BIN") {
