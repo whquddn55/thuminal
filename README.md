@@ -8,6 +8,20 @@
 
 구조는 [docs/architecture.md](docs/architecture.md).
 
+## 설치
+
+macOS (Apple Silicon):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/whquddn55/thuminal/main/scripts/install.sh | sh
+```
+
+설치본은 Apple 공증을 받지 않았다. 브라우저로 받은 `.dmg` 는 Gatekeeper 가 "악성 코드가 없음을 확인할 수 없습니다" 로 막으므로
+위 명령으로 설치한다 (curl 로 받은 파일에는 격리 표시가 붙지 않는다). 그 뒤 버전은 앱 안 업데이트로 받는다.
+이미 `.dmg` 로 설치했다면 `xattr -dr com.apple.quarantine /Applications/thuminal.app` 로 표시를 지운다.
+
+Windows · Linux 는 [Releases](https://github.com/whquddn55/thuminal/releases) 에서 받는다.
+
 ## 개발
 
 ```sh
