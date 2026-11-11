@@ -101,7 +101,14 @@ async fn create_session_is_placed_by_labels_and_removed_with_its_pane() {
     // 세션을 지우면 칸이 빠지고, 마지막 칸이었으면 workspace 배치도 없어진다
     let mut events = c.events();
     c.remove(a.id).await.unwrap();
-    assert!(matches!(next_layout_event(&mut events).await, Event::LayoutRemoved { workspace } if workspace == "/tmp/wt-a"));
+    // 앞서 만든 세션들의 배치 바뀜이 늦게 올 수 있어 넘기고 없어짐만 기다린다 (안 오면 3초 뒤 실패)
+    loop {
+        match next_layout_event(&mut events).await {
+            Event::LayoutRemoved { workspace } if workspace == "/tmp/wt-a" => break,
+            Event::LayoutChanged { .. } => {}
+            e => panic!("/tmp/wt-a 배치가 없어져야 한다: {e:?}"),
+        }
+    }
     assert!(c.layouts(Some("/tmp/wt-a".into())).await.unwrap().is_empty());
 }
 
