@@ -106,8 +106,9 @@ impl AppState {
         Ok(c)
     }
 
-    /// 떠 있는 로컬 데몬이 앱과 버전이 다르면 세션을 남긴 채 내리고 이 앱의 데몬을 새로 띄운다.
-    /// 앱 안 업데이트는 설치 전에 데몬을 내리지만, .dmg · 설치 스크립트로 덮어 깔면 옛 데몬이 그대로 남는다.
+    /// 떠 있는 로컬 데몬이 이 앱과 빌드 id(`DAEMON_BUILD`, 데몬 소스의 해시)가 다르면 세션을 남긴 채 내리고 이 앱의 데몬을 새로 띄운다.
+    /// 앱 버전만 바뀌고 데몬 코드는 그대로인 릴리스에서는 데몬을 그대로 둔다 (다시 시작하면 터미널에서 돌던 프로그램이 끝난다).
+    /// 앱 안 업데이트(macOS)와 .dmg · 설치 스크립트로 덮어 깐 경우 모두 여기서 고른다. 옛 데몬은 빌드 id 를 보내지 않아 늘 바꾼다.
     /// 앱이 뜬 뒤 처음 붙을 때 한 번만 본다. 개발 빌드는 보지 않는다 (작업 중인 개발 데몬을 내리지 않는다)
     async fn replace_stale_daemon(&self, c: Arc<Client>) -> Result<Arc<Client>, ClientError> {
         if cfg!(debug_assertions) || self.daemon_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -115,10 +116,13 @@ impl AppState {
         }
         let app = env!("CARGO_PKG_VERSION");
         let Some((daemon, ..)) = c.hello() else { return Ok(c) };
-        if daemon == app {
+        if c.daemon_build() == thuminal_protocol::DAEMON_BUILD {
+            if daemon != app {
+                tracing::info!(event = "daemon_kept", daemon, app, build = thuminal_protocol::DAEMON_BUILD);
+            }
             return Ok(c);
         }
-        tracing::info!(event = "stale_daemon", daemon, app);
+        tracing::info!(event = "stale_daemon", daemon, app, build = c.daemon_build(), want = thuminal_protocol::DAEMON_BUILD);
         if c.restart_daemon().await.is_err() {
             return Ok(c);
         }

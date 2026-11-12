@@ -50,6 +50,15 @@ async fn wait_screen(c: &Client, s: SessionId, needle: &str) -> String {
     panic!("화면에 {needle:?} 이 나오지 않았다");
 }
 
+/// 앱은 이 값이 자기 것과 다를 때만 데몬을 다시 시작한다
+#[tokio::test]
+async fn hello_carries_daemon_build() {
+    let (_dir, paths) = start().await;
+    let c = Client::connect(&paths, "test").await.unwrap();
+    assert_eq!(c.daemon_build(), thuminal_protocol::DAEMON_BUILD);
+    assert_eq!(thuminal_protocol::DAEMON_BUILD.len(), 16);
+}
+
 #[tokio::test]
 async fn creates_session_and_reads_screen() {
     let (_dir, paths) = start().await;

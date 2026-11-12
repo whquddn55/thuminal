@@ -16,5 +16,7 @@ pub use message::*;
 
 /// 주 버전이 다르면 서로 붙지 않는다. 소켓 이름에도 들어간다.
 pub const PROTOCOL_MAJOR: u32 = 1;
+/// 데몬 빌드 id: 데몬 동작을 정하는 소스의 해시 (build.rs). 앱은 떠 있는 데몬의 id 가 이것과 다를 때만 데몬을 다시 시작한다
+pub const DAEMON_BUILD: &str = env!("THUMINAL_DAEMON_BUILD");
 /// 부 버전은 하위 호환으로 늘린다 (필드 추가 등).
 pub const PROTOCOL_MINOR: u32 = 10;

@@ -184,6 +184,7 @@ impl Server {
                 protocol_minor: PROTOCOL_MINOR,
                 pid: std::process::id(),
                 engine: m.engine_name().into(),
+                daemon_build: thuminal_protocol::DAEMON_BUILD.into(),
             }),
             Request::Status => Ok(Response::Status {
                 daemon_version: env!("CARGO_PKG_VERSION").into(),

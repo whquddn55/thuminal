@@ -142,7 +142,7 @@ async fn fake_daemon(answer: ResponseResult) -> String {
 }
 
 fn hello(major: u32, minor: u32) -> ResponseResult {
-    ResponseResult::Ok(Response::Hello { daemon_version: "9.9.9".into(), protocol_major: major, protocol_minor: minor, pid: 1, engine: "x".into() })
+    ResponseResult::Ok(Response::Hello { daemon_version: "9.9.9".into(), protocol_major: major, protocol_minor: minor, pid: 1, engine: "x".into(), daemon_build: String::new() })
 }
 
 #[tokio::test]

@@ -626,7 +626,16 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Response {
-    Hello { daemon_version: String, protocol_major: u32, protocol_minor: u32, pid: u32, engine: String },
+    Hello {
+        daemon_version: String,
+        protocol_major: u32,
+        protocol_minor: u32,
+        pid: u32,
+        engine: String,
+        /// [`crate::DAEMON_BUILD`]. 옛 데몬은 보내지 않는다 (빈 글)
+        #[serde(default)]
+        daemon_build: String,
+    },
     Status { daemon_version: String, pid: u32, started_at: u64, sessions: usize, engine: String },
     Session { session: SessionInfo },
     Sessions { sessions: Vec<SessionInfo> },

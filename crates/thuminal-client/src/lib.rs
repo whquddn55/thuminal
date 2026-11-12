@@ -209,6 +209,14 @@ impl Client {
         }
     }
 
+    /// `hello` 응답의 데몬 빌드 id (`DAEMON_BUILD`). 옛 데몬은 빈 글
+    pub fn daemon_build(&self) -> &str {
+        match &self.daemon {
+            Response::Hello { daemon_build, .. } => daemon_build,
+            _ => "",
+        }
+    }
+
     pub fn events(&self) -> broadcast::Receiver<Event> {
         self.events.subscribe()
     }

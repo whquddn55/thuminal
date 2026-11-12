@@ -81,7 +81,7 @@ plugins/claude-code/thuminal  (Claude Code 플러그인: 훅 → `thuminal agent
   - 칸·탭 번호는 데몬 전체에서 하나씩 늘고 다시 떠도 이어 센다. 되살린 세션은 `restored_from` 으로 옛 번호를 새 번호로 바꿔 끼우고, 되살리지 못한 세션의 칸은 뺀다. 뜰 때 칸에 없는 돌고 있는 세션은 새 탭으로 넣는다.
 - **터미널 색**: 앱이 테마 색(전경, 배경, 커서, 팔레트)을 `set_terminal_colors` 로 주면 데몬은 모든 세션 엔진과 앞으로 만들 엔진의 기본색으로 넣는다. 그래서 프로그램의 색 질의(OSC 4/10/11/12)에 데몬 엔진이 테마 색으로 답하고, 프로그램이 OSC 로 바꾼 색은 엔진이 지킨다. `CSI ?996n` 에는 배경이 전경보다 어두우면 dark 로 답하고, mode 2031 을 켠 세션에는 밝기가 바뀔 때만 `CSI ?997;1n`/`;2n` 을 써 준다.
 - **되살리기**: 데몬은 돌고 있는 세션의 정보(`sessions-v1.json`)를 바뀔 때마다, 화면 저장본(`sessions/<번호>.vt`)을 30초마다와 종료 신호 때 남긴다. 다시 뜨면 같은 폴더에서 로그인 셸을 띄우고, 이전 화면을 먼저 그리고, claude 세션이 있었으면 `claude --resume <id>` 를 입력한다. `thuminal daemon stop` 으로 내리면 기록을 지운다.
-- **데몬 버전 맞추기**: 앱 안 업데이트는 설치 전에 데몬을 기록을 남긴 채 내린다(`Request::Restart`). `.dmg` · 설치 스크립트(`scripts/install.sh`)로 덮어 깔면 옛 데몬이 남으므로, 앱(릴리스 빌드)은 뜬 뒤 처음 로컬 데몬에 붙을 때 버전이 다르면 같은 방법으로 내리고, 잠금이 풀리길 기다려(`wait_daemon_exit`) 번들의 데몬을 띄운다.
+- **데몬 버전 맞추기**: 데몬을 다시 시작하면 터미널에서 돌던 프로그램이 끝나므로 데몬 코드가 바뀐 때만 한다. 기준은 앱 버전이 아니라 데몬 빌드 id(`thuminal_protocol::DAEMON_BUILD`)다. `thuminal-protocol/build.rs` 가 `crates/`(CLI · 클라이언트 · 시험 빼고), `plugins/`, 버전 줄을 뺀 `Cargo.toml` · `Cargo.lock` 을 해시하고, 데몬은 `hello` 응답에 실어 보낸다. 앱(릴리스 빌드)은 뜬 뒤 처음 로컬 데몬에 붙을 때 그 id 가 자기 것과 다르면 기록을 남긴 채 내리고(`Request::Restart`), 잠금이 풀리길 기다려(`wait_daemon_exit`) 번들의 데몬을 띄운다 (`replace_stale_daemon`. 옛 데몬은 id 를 보내지 않아 늘 바꾼다). 앱 안 업데이트도 macOS 는 데몬을 그대로 두고 이 확인에 맡긴다 (번들을 바꿔 끼워도 떠 있는 데몬은 옛 파일로 돈다). Windows 는 설치 프로그램이 떠 있는 `thuminald.exe` 를 덮어쓰지 못하고 Linux AppImage 는 앱이 끝나면 마운트가 사라지므로 설치 전에 내린다. `.dmg` · 설치 스크립트(`scripts/install.sh`)로 덮어 깐 경우도 같은 확인을 탄다.
 
 ## 프로토콜
 
