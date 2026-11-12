@@ -83,7 +83,7 @@ export interface NewWorktree {
 }
 
 /** 설정창의 칸. remote 는 이 컴퓨터 원격 접속, hosts 는 내가 붙는 원격 컴퓨터 */
-export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "remote" | "hosts";
+export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "remote" | "hosts" | "about";
 
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }
@@ -746,17 +746,18 @@ export class AppModel {
 
   // ---- 앱 업데이트 ----
 
-  /** 새 앱 버전이 있는지 본다. quiet 가 아니면(설정에서 누른 것) 결과를 알린다 */
-  checkUpdate = async (quiet = true) => {
+  /** 새 앱 버전이 있는지 보고 돌려준다. quiet 가 아니면(설정에서 누른 것) 실패를 던진다 */
+  checkUpdate = async (quiet = true): Promise<AppUpdate | null> => {
     const updates = this.services.host.updates;
-    if (!updates) return;
+    if (!updates) return null;
     try {
       const found = await updates.check();
       this.set({ update: found });
-      if (!quiet && !found) this.notice("최신 버전이에요");
+      return found;
     } catch (e) {
-      if (quiet) console.warn("[thuminal] 업데이트 확인", e);
-      else this.fail(e);
+      if (!quiet) throw e;
+      console.warn("[thuminal] 업데이트 확인", e);
+      return null;
     }
   };
 

@@ -5,6 +5,7 @@
 // 기능이라 원격 HostApi 에서도 로컬 것과 같다. 브라우저 칸은 칸 번호가 호스트마다 따로라 호스트를 실어 가른다.
 // Finder·기본 앱·폴더 고르기처럼 로컬 경로를 쓰는 것은 원격이면 오류다.
 
+import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -126,6 +127,7 @@ export class TauriHostApi implements HostApi {
     if (!this.isRemote) {
       this.hosts = new TauriHosts();
       this.updates = {
+        version: getVersion,
         check: () => invoke<AppUpdate | null>("update_check"),
         install: () => invoke<void>("update_install"),
       };

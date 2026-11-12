@@ -354,6 +354,8 @@ export interface AppUpdate {
 
 /** 앱 업데이트: GitHub Release 의 latest.json 을 보고, 서명을 확인해 설치한다 */
 export interface UpdatesApi {
+  /** 지금 앱 버전 */
+  version(): Promise<string>;
   /** 새 버전이 있으면 그것, 없으면 null */
   check(): Promise<AppUpdate | null>;
   /** 확인한 새 버전을 내려받아 설치하고 앱을 다시 시작한다. 그 전에 데몬을 세션을 남긴 채 내린다 */
