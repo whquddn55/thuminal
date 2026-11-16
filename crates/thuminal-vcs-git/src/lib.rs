@@ -9,13 +9,25 @@ use thuminal_workspace::{Vcs, VcsError, VcsWorktree};
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitCli;
 
+/// git 명령. Windows 데몬은 콘솔 없이 뜨므로 콘솔 창을 만들지 않게 한다 (안 그러면 git 을 부를 때마다 창이 떴다 꺼진다)
+fn git_command() -> Command {
+    let mut c = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 fn git(dir: &Path, args: &[&str]) -> Result<String, VcsError> {
     git_raw(dir, args).map(|o| String::from_utf8_lossy(&o).trim_end().to_string())
 }
 
 /// 출력을 다듬지 않고 그대로 돌려준다 (`-z` 출력, diff)
 fn git_raw(dir: &Path, args: &[&str]) -> Result<Vec<u8>, VcsError> {
-    let out = Command::new("git")
+    let out = git_command()
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -165,7 +177,7 @@ impl Vcs for GitCli {
             return git(repo, &["branch", "-D", branch]).map(|_| ());
         }
         // 거절 글로 까닭을 가린다. 사용자 언어 설정과 상관없이 같은 글이 나오게 C 로 돌린다
-        let out = Command::new("git")
+        let out = git_command()
             .arg("-C")
             .arg(repo)
             .args(["branch", "-d", branch])
@@ -198,7 +210,7 @@ impl Vcs for GitCli {
                 git_raw(worktree, &["diff", "--no-color", "--no-ext-diff", "--", file])?
             } else {
                 // 새 파일: 빈 파일과 비교한다. 다르면 git diff --no-index 는 종료 코드 1 을 낸다
-                let out = Command::new("git")
+                let out = git_command()
                     .arg("-C")
                     .arg(worktree)
                     .args(["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file])
@@ -258,7 +270,7 @@ impl Vcs for GitCli {
 
     fn push(&self, worktree: &Path) -> Result<String, VcsError> {
         let has_upstream = git(worktree, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).is_ok();
-        let out = Command::new("git")
+        let out = git_command()
             .arg("-C")
             .arg(worktree)
             .args(if has_upstream { vec!["push"] } else { vec!["push", "-u", "origin", "HEAD"] })
@@ -277,7 +289,7 @@ impl Vcs for GitCli {
             args.push("-i");
         }
         args.extend(["-e", query]);
-        let out = Command::new("git").arg("-C").arg(worktree).args(&args).env("GIT_PAGER", "cat").output().map_err(|e| VcsError::Command(e.to_string()))?;
+        let out = git_command().arg("-C").arg(worktree).args(&args).env("GIT_PAGER", "cat").output().map_err(|e| VcsError::Command(e.to_string()))?;
         // 찾은 것이 없으면 종료 코드 1 이다
         if !out.status.success() && out.status.code() != Some(1) {
             return Err(VcsError::Command(String::from_utf8_lossy(&out.stderr).trim().to_string()));
@@ -335,7 +347,7 @@ impl Vcs for GitCli {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
-        let mut child = Command::new("git")
+        let mut child = git_command()
             .arg("-C")
             .arg(worktree)
             .args(["check-ignore", "--stdin", "-z"])

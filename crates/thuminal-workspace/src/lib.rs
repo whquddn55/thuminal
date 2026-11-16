@@ -174,7 +174,15 @@ fn normalize_groups(groups: &[RepoGroup], repos: &[String], default_name: &str) 
 /// 그 밖은 호스트 이름(`.local` 은 뗀다). 못 찾으면 "이 컴퓨터"
 pub fn system_computer_name() -> String {
     fn run(cmd: &str, args: &[&str]) -> Option<String> {
-        let out = std::process::Command::new(cmd).args(args).stderr(std::process::Stdio::null()).output().ok()?;
+        let mut c = std::process::Command::new(cmd);
+        // Windows 데몬은 콘솔 없이 뜨므로 콘솔 창을 만들지 않게 한다
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        let out = c.args(args).stderr(std::process::Stdio::null()).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
     let mut found = Vec::new();
