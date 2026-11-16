@@ -2,7 +2,7 @@
 //!
 //! Orca 는 프로필마다 `~/Library/Application Support/orca/profiles/<프로필>/profile-state.db`(sqlite)에
 //! 문서(`domain` → JSON `payload`)를 둔다. 옛 판은 같은 폴더의 `orca-data.json` 한 파일이다.
-//! sqlite 는 `sqlite3` 명령(macOS 에는 들어 있다)을 읽기 전용으로 부른다 (Orca 가 떠 있어도 건드리지 않는다).
+//! sqlite 는 함께 빌드한 sqlite(rusqlite)로 읽기 전용으로 연다 (Orca 가 떠 있어도 건드리지 않는다. Windows 에는 sqlite3 명령이 없다).
 //! 읽기만 하고 바꾸지 않는다. 고른 것을 등록하고 탭을 여는 일은 앱이 한다.
 
 use std::collections::BTreeMap;
@@ -43,29 +43,49 @@ fn profile_dir(home: &Path) -> PathBuf {
 fn documents(profile: &Path, domains: &[&str]) -> Result<BTreeMap<String, Value>, String> {
     let db = profile.join("profile-state.db");
     if db.is_file() {
-        let list = domains.iter().map(|d| format!("'{d}'")).collect::<Vec<_>>().join(",");
-        let out = std::process::Command::new("sqlite3")
-            .args(["-readonly", "-json"])
-            .arg(&db)
-            .arg(format!("select domain, payload from profile_state_documents where domain in ({list})"))
-            .output()
-            .map_err(|e| format!("sqlite3 을 실행하지 못했어요: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("Orca 상태 파일을 읽지 못했어요: {}", String::from_utf8_lossy(&out.stderr).trim()));
-        }
-        let rows: Vec<Value> = if out.stdout.iter().all(u8::is_ascii_whitespace) { Vec::new() } else { serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())? };
-        return Ok(rows
-            .into_iter()
-            .filter_map(|r| {
-                let domain = r.get("domain")?.as_str()?.to_string();
-                let payload = serde_json::from_str(r.get("payload")?.as_str()?).ok()?;
-                Some((domain, payload))
-            })
-            .collect());
+        return read_db(&db, domains).map_err(|e| format!("Orca 상태 파일을 읽지 못했어요: {e}"));
     }
     let json = profile.join("orca-data.json");
     let all: Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("Orca 데이터를 찾지 못했어요: {} ({e})", json.display()))?).map_err(|e| e.to_string())?;
     Ok(domains.iter().filter_map(|d| all.get(*d).map(|v| (d.to_string(), v.clone()))).collect())
+}
+
+fn read_db(db: &Path, domains: &[&str]) -> rusqlite::Result<BTreeMap<String, Value>> {
+    use rusqlite::{OpenFlags, params_from_iter};
+    // Orca 는 WAL 모드로 쓴다. Orca 가 꺼져 있으면 `-wal` · `-shm` 이 없어 읽기 전용으로는 열지 못한다 (sqlite3 -readonly 도 같다).
+    // 그때는 WAL 에 남은 것이 없으므로 immutable 로 연다 (잠그지도, 파일을 만들지도 않는다)
+    let wal = std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI;
+    let conn = if wal == 0 {
+        rusqlite::Connection::open_with_flags(file_uri(db) + "?immutable=1", flags)?
+    } else {
+        rusqlite::Connection::open_with_flags(db, flags)?
+    };
+    let marks = vec!["?"; domains.len()].join(",");
+    let mut stmt = conn.prepare(&format!("select domain, payload from profile_state_documents where domain in ({marks})"))?;
+    let rows = stmt.query_map(params_from_iter(domains), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = BTreeMap::new();
+    for row in rows {
+        let (domain, payload) = row?;
+        if let Ok(v) = serde_json::from_str(&payload) {
+            out.insert(domain, v);
+        }
+    }
+    Ok(out)
+}
+
+/// sqlite URI (`file:/a/b%20c.db`). Windows 경로는 `file:/C:/a/b.db` 로 쓴다
+fn file_uri(path: &Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/");
+    let mut out = String::from(if p.starts_with('/') { "file:" } else { "file:/" });
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~:".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
@@ -237,5 +257,58 @@ mod tests {
         assert_eq!(clean_title("✳ 공항라운지 이용 조건"), "공항라운지 이용 조건");
         assert_eq!(clean_title("◐ Plugin scratch"), "Plugin scratch");
         assert_eq!(clean_title("python3"), "python3");
+    }
+
+    #[test]
+    fn reads_documents_from_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("profile-state.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            r#"create table profile_state_documents (domain text primary key, payload text);
+               insert into profile_state_documents values ('repos', '[{"path":"/a"}]'), ('other', '{}'), ('broken', 'not json');"#,
+        )
+        .unwrap();
+        drop(conn);
+        let docs = documents(dir.path(), &["repos", "broken", "missing"]).unwrap();
+        assert_eq!(docs.keys().collect::<Vec<_>>(), vec!["repos"]);
+        assert_eq!(docs["repos"][0]["path"], "/a");
+    }
+
+    #[test]
+    fn reads_wal_database_without_creating_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("a b");
+        std::fs::create_dir(&sub).unwrap();
+        let db = sub.join("profile-state.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            r#"pragma journal_mode=wal;
+               create table profile_state_documents (domain text primary key, payload text);
+               insert into profile_state_documents values ('repos', '[]');"#,
+        )
+        .unwrap();
+        drop(conn);
+        // 닫으면 -wal · -shm 이 지워진다. 꺼진 Orca 와 같은 모양이다
+        let files = || std::fs::read_dir(&sub).unwrap().count();
+        assert_eq!(files(), 1);
+        assert!(documents(&sub, &["repos"]).unwrap().contains_key("repos"));
+        assert_eq!(files(), 1, "읽기만 하고 파일을 만들지 않는다");
+    }
+
+    #[test]
+    fn makes_sqlite_file_uris() {
+        assert_eq!(file_uri(Path::new("/a b/c#d.db")), "file:/a%20b/c%23d.db");
+        assert_eq!(file_uri(Path::new(r"C:\Users\x\a.db")), "file:/C:/Users/x/a.db");
+    }
+
+    /// 이 컴퓨터의 진짜 Orca 상태 파일을 읽는다 (Orca 가 깔린 컴퓨터에서 손으로 돌린다)
+    #[test]
+    #[ignore]
+    fn reads_real_orca() {
+        let profile = profile_dir(&orca_home().unwrap());
+        let docs = documents(&profile, &["repos", "worktreeMeta", "tabs"]).unwrap();
+        eprintln!("{:?}", docs.keys().collect::<Vec<_>>());
+        assert!(!docs.is_empty());
     }
 }

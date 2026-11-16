@@ -201,6 +201,11 @@ struct WaitArgs {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    // Windows 에이전트 팀의 가짜 tmux 는 이 실행 파일의 사본(`teams-bin\tmux.exe`)이다. 이름이 tmux 면 `thuminal tmux` 로 동작한다
+    let as_tmux = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.eq_ignore_ascii_case("tmux"))).unwrap_or(false);
+    if as_tmux {
+        return tmux(std::env::args().skip(1).collect()).await;
+    }
     let cli = Cli::parse();
     match run(cli).await {
         Ok(code) => code,
@@ -214,7 +219,21 @@ async fn main() -> ExitCode {
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 async fn connect() -> Res<Client> {
+    if let Some(host) = std::env::var("THUMINAL_HOST").ok().filter(|h| !h.is_empty()) {
+        return connect_host(&host).await;
+    }
     Ok(Client::connect_or_spawn(&Paths::default_home(), "cli", &default_daemon_bin()).await?)
+}
+
+/// `THUMINAL_HOST`: 이 컴퓨터 앱이 등록한 원격 컴퓨터(`hosts.json` 의 이름이나 id)의 데몬에 원격 접속으로 붙는다.
+/// 토큰은 앱이 저장한 것을 쓴다
+async fn connect_host(host: &str) -> Res<Client> {
+    let file = Paths::default_home().home.join("hosts.json");
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).map_err(|e| format!("{} 을 읽지 못했다: {e}", file.display()))?)?;
+    let found = v["hosts"].as_array().into_iter().flatten().find(|h| h["name"] == host || h["id"] == host);
+    let Some(h) = found else { return Err(format!("등록한 원격 컴퓨터가 아니다: {host} ({})", file.display()).into()) };
+    let (Some(base), Some(token)) = (h["base"].as_str(), h["token"].as_str()) else { return Err(format!("hosts.json 의 {host} 에 주소나 토큰이 없다").into()) };
+    Ok(Client::connect_ws(base, token, "cli").await?)
 }
 
 /// 세션 자리의 글: `12`, `s12`, `.`(이 셸), `p7`(그 칸의 세션. 배치를 한 번 읽는다)

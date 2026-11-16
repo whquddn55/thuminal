@@ -427,7 +427,7 @@ impl Teams {
         }
         let cwd = a.value('c').map(str::to_string).or_else(|| call.cwd.clone()).or_else(|| Some(near.cwd.clone()));
         let req = CreateSession {
-            command: if command.is_empty() { Vec::new() } else { vec!["/bin/sh".into(), "-c".into(), command] },
+            command: if command.is_empty() { Vec::new() } else { vec![posix_shell()?, "-c".into(), command] },
             cwd,
             env,
             cols: COLS,
@@ -440,6 +440,34 @@ impl Teams {
         info!(event = "teammate_spawned", leader = team.leader.id.0, session = info.id.0, pane, respawn = replace.is_some());
         Ok(pane)
     }
+}
+
+/// 팀원 명령을 돌릴 sh. claude 는 팀원 명령을 sh 문법으로 만든다 (`cd '…' && env … claude …`)
+#[cfg(not(windows))]
+fn posix_shell() -> Result<String, String> {
+    Ok("/bin/sh".into())
+}
+
+/// Windows 는 Git for Windows 의 bash 로 돌린다 (Windows 의 claude 도 이것을 쓴다). claude 와 같게
+/// `CLAUDE_CODE_GIT_BASH_PATH` 를 먼저 보고, 없으면 PATH 의 git.exe 옆(`Git\cmd` → `Git\bin\bash.exe`), 기본 설치 자리 순으로 찾는다
+#[cfg(windows)]
+fn posix_shell() -> Result<String, String> {
+    use std::path::PathBuf;
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let from_git = std::env::var_os("PATH")
+        .and_then(|p| std::env::split_paths(&p).map(|d| d.join("git.exe")).find(|g| g.is_file()))
+        .and_then(|g| g.parent()?.parent().map(|root| root.join("bin").join("bash.exe")));
+    let installed = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"].into_iter().filter_map(|k| {
+        let base = env(k)?;
+        Some(if k == "LOCALAPPDATA" { base.join("Programs").join("Git") } else { base.join("Git") }.join("bin").join("bash.exe"))
+    });
+    env("CLAUDE_CODE_GIT_BASH_PATH")
+        .into_iter()
+        .chain(from_git)
+        .chain(installed)
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .ok_or_else(|| "팀원을 띄우려면 Git for Windows 의 bash 가 있어야 해요".to_string())
 }
 
 /// 팀원 세션이면 리더 세션 번호
