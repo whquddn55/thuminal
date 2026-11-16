@@ -116,6 +116,8 @@ enum DaemonCmd {
     },
     /// 모든 세션을 끝내고 데몬을 내린다
     Stop,
+    /// 세션을 남긴 채 데몬을 내린다. 다음에 뜬 데몬(앱이 띄운다)이 화면 저장본으로 되살리고 claude 는 `--resume` 으로 잇는다
+    Restart,
 }
 
 #[derive(Subcommand)]
@@ -477,6 +479,10 @@ async fn run(cli: Cli) -> Res<ExitCode> {
             }
             Err(_) => println!("데몬이 떠 있지 않다"),
         },
+        Command::Daemon(DaemonCmd::Restart) => {
+            connect().await?.restart_daemon().await?;
+            println!("세션을 남기고 데몬을 내렸다");
+        }
         Command::Remote(cmd) => remote(&connect().await?, cmd).await?,
         Command::Ps { all, json } => ps(&connect().await?, all, json).await?,
         Command::Term(cmd) => return term(cmd).await,
