@@ -47,6 +47,9 @@ public class MainActivity extends Activity {
     private WebView web;
     /** 지금 웹 화면으로 연 컴퓨터 주소. 첫 화면이면 null */
     private String current;
+    /** 웹 화면이 알려 준 테마 색을 남기는 키 (Hosts.prefs) */
+    static final String THEME_KEY = "theme";
+
     /** FCM 등록 토큰 (Firebase 설정 없이 빌드했으면 null) */
     private volatile String fcm;
 
@@ -69,6 +72,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 새 앱 버전이 있는지 본다 (6시간에 한 번). 있으면 첫 화면 · 웹 화면 설정이 알린다
+        Updater.check(this, false, info -> runOnUiThread(() -> updateCall(info)));
         if (web != null) {
             web.onResume();
             if (current == null) web.evaluateJavascript("window.thuminalRefresh && thuminalRefresh()", null);
@@ -84,6 +89,7 @@ public class MainActivity extends Activity {
     /** 알림을 눌렀거나 thuminal://open?url=… 로 열었다. 다룬 인텐트면 true */
     private boolean handle(Intent intent) {
         if (intent == null) return false;
+        if (Updater.handle(this, intent)) return true;
         if (PushService.ACTION_OPEN.equals(intent.getAction())) {
             Hosts.Host h = Hosts.find(this, intent.getStringExtra(PushService.EXTRA_HOST));
             if (h == null) return false;
@@ -227,14 +233,38 @@ public class MainActivity extends Activity {
     }
 
     /** 첫 화면의 함수를 글 인자들로 부른다 (null 은 null 로) */
-    private void homeCall(String fn, String... args) {
-        if (web == null || current != null) return;
+    /** 업데이트 확인 결과를 지금 화면에 알린다 (첫 화면 onUpdate, 웹 화면 thuminalUpdate). info 가 null 이면 확인하지 못했다 */
+    private void updateCall(String info) {
+        homeCall("onUpdate", info);
+        webCall("thuminalUpdate", info);
+    }
+
+    /** 설치 진행을 지금 화면에 알린다 ({@link Updater#install} 의 status) */
+    private void updateStatus(String st) {
+        runOnUiThread(() -> {
+            homeCall("onUpdateStatus", st);
+            webCall("thuminalUpdateStatus", st);
+        });
+    }
+
+    /** 웹 화면(컴퓨터 화면)의 함수를 부른다. 첫 화면이면 하지 않는다 */
+    private void webCall(String fn, String... args) {
+        if (web == null || current == null) return;
+        web.evaluateJavascript(jsCall(fn, args), null);
+    }
+
+    private static String jsCall(String fn, String... args) {
         StringBuilder js = new StringBuilder("window.").append(fn).append(" && ").append(fn).append("(");
         for (int i = 0; i < args.length; i++) {
             if (i > 0) js.append(",");
             js.append(args[i] == null ? "null" : JSONObject.quote(args[i]));
         }
-        web.evaluateJavascript(js.append(")").toString(), null);
+        return js.append(")").toString();
+    }
+
+    private void homeCall(String fn, String... args) {
+        if (web == null || current != null) return;
+        web.evaluateJavascript(jsCall(fn, args), null);
     }
 
     @Override
@@ -266,6 +296,30 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String hosts() {
             return Hosts.json(MainActivity.this).toString();
+        }
+
+        /** 앱 버전과 새 버전 (Updater.info JSON) */
+        @JavascriptInterface
+        public String update() {
+            return Updater.info(MainActivity.this);
+        }
+
+        /** 지금 새 버전을 확인한다. 결과는 onUpdate(info) */
+        @JavascriptInterface
+        public void checkUpdate() {
+            Updater.check(MainActivity.this, true, info -> runOnUiThread(() -> updateCall(info)));
+        }
+
+        /** 새 버전을 받아 설치 창을 띄운다. 진행은 onUpdateStatus(status) */
+        @JavascriptInterface
+        public void installUpdate() {
+            runOnUiThread(() -> Updater.install(MainActivity.this, MainActivity.this::updateStatus));
+        }
+
+        /** 웹 화면이 마지막으로 알려 준 테마 색 (JSON, 없으면 빈 글). 첫 화면이 같은 색으로 그린다 */
+        @JavascriptInterface
+        public String theme() {
+            return Hosts.prefs(MainActivity.this).getString(THEME_KEY, "");
         }
 
         /** 컴퓨터 요약을 받아 `onSummary(origin, code, body)` 로 돌려준다. 받으면 알림 토큰도 맡긴다 */
@@ -395,6 +449,36 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void changeServer() {
             runOnUiThread(() -> showHome(null, null));
+        }
+
+        /** 앱 버전과 새 버전 (Updater.info JSON) */
+        @JavascriptInterface
+        public String updateInfo() {
+            return Updater.info(MainActivity.this);
+        }
+
+        /** 지금 새 버전을 확인한다. 결과는 thuminalUpdate(info) */
+        @JavascriptInterface
+        public void checkUpdate() {
+            Updater.check(MainActivity.this, true, info -> runOnUiThread(() -> updateCall(info)));
+        }
+
+        /** 새 버전을 받아 설치 창을 띄운다. 진행은 thuminalUpdateStatus(status) */
+        @JavascriptInterface
+        public void installUpdate() {
+            runOnUiThread(() -> Updater.install(MainActivity.this, MainActivity.this::updateStatus));
+        }
+
+        /** 안드로이드 앱 알림 설정 (알림 종류마다 끄고 켠다) */
+        @JavascriptInterface
+        public void openNotifySettings() {
+            startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+        }
+
+        /** 웹 화면의 테마 색 (JSON). 남겨 두었다가 첫 화면이 같은 색으로 그린다 */
+        @JavascriptInterface
+        public void setTheme(String json) {
+            Hosts.prefs(MainActivity.this).edit().putString(THEME_KEY, json).apply();
         }
     }
 }

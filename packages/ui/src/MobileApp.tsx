@@ -29,6 +29,8 @@ import { useShallow } from "zustand/react/shallow";
 import { baseName, type Renderer, type SessionId, type SessionInfo, type WorkspaceId, type WorktreeInfo } from "@thuminal/term-core";
 
 import { AgentIcon } from "./agent-icons";
+import { appBridge } from "./app-bridge";
+import { agentLabel } from "./agent-title";
 import { FramePane } from "./BrowserPane";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
@@ -42,18 +44,29 @@ import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
 import { AppModel, type AppState, FLOATING_WORKSPACE, ModelContext, OTHER_WORKSPACE, TEAM_LEADER_LABEL, TEAM_NAME_LABEL, useApp, useModel, worktreeTitle } from "./store";
 import { SizeTakenOverlay, useSizeTaken } from "./size-overlay";
 import { rendererOptions } from "./terminal-font";
+import { Header } from "./mobile-parts";
+import { FONT_KEY, MOBILE_FONT_SIZE, SettingsScreen, type SettingsPage } from "./MobileSettings";
 import "./styles.css";
 
-/** 안드로이드 앱(apps/android)이 WebView 에 넣어 주는 기능 */
-interface AppBridge {
-  clipboardText(): string;
-  copyText(text: string): void;
-  forget(): void;
-  changeServer(): void;
-}
+/** 앱 첫 화면에 넘길 테마 색 (CSS 변수 이름 → 값) */
+const THEME_VARS = ["background", "foreground", "card", "border", "muted-foreground", "primary", "primary-foreground", "agent-working", "agent-attention", "agent-done", "agent-failed"];
 
-export function appBridge(): AppBridge | null {
-  return (window as unknown as { ThuminalApp?: AppBridge }).ThuminalApp ?? null;
+/** 지금 테마 색을 앱에 알리고, 테마가 바뀌면(`<html>` style 이 바뀐다) 다시 알린다 */
+function useShareTheme() {
+  useEffect(() => {
+    const bridge = appBridge();
+    if (!bridge?.setTheme) return;
+    let last = "";
+    const send = () => {
+      const cs = getComputedStyle(document.documentElement);
+      const json = JSON.stringify(Object.fromEntries(THEME_VARS.map((v) => [v, cs.getPropertyValue(`--${v}`).trim()])));
+      if (json !== last) bridge.setTheme?.((last = json));
+    };
+    send();
+    const mo = new MutationObserver(send);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    return () => mo.disconnect();
+  }, []);
 }
 
 /** 원격 연결 상태를 알려 주는 껍데기 (웹 HostApi) */
@@ -63,12 +76,14 @@ export interface RemoteConnection {
   reconnectNow(): void;
 }
 
-type Screen = { kind: "home" } | { kind: "ws"; ws: WorkspaceId } | { kind: "term"; ws: WorkspaceId; session: SessionId } | { kind: "web"; ws: WorkspaceId; pane: number };
+type Screen =
+  | { kind: "home" }
+  | { kind: "ws"; ws: WorkspaceId }
+  | { kind: "term"; ws: WorkspaceId; session: SessionId }
+  | { kind: "web"; ws: WorkspaceId; pane: number }
+  | { kind: "settings"; page?: SettingsPage };
 
 const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
-const FONT_KEY = "thuminal.mobileFontSize";
-/** 폰 터미널 글자 크기 기본값 (글꼴 · 굵기는 설정창 값을 쓴다) */
-const MOBILE_FONT_SIZE = 12;
 
 export function MobileApp({
   services,
@@ -114,6 +129,7 @@ function useNav(): [Screen, (s: Screen) => void, () => void] {
 
 function Phone({ conn, onForget, openSession }: { conn: RemoteConnection; onForget: () => void; openSession?: SessionId }) {
   const [screen, go, back] = useNav();
+  useShareTheme();
   // 안드로이드 앱이 고른 세션: 시작할 때 주소로 받거나, 이미 열려 있으면 window.thuminalOpen 으로 받는다. 배치를 읽으면 그 터미널로 간다
   const [want, setWant] = useState<SessionId | null>(openSession ?? null);
   useEffect(() => {
@@ -145,6 +161,7 @@ function Phone({ conn, onForget, openSession }: { conn: RemoteConnection; onForg
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem onSelect={() => go({ kind: "settings" })}>설정</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => location.reload()}>새로 고침</DropdownMenuItem>
         {appBridge() && <DropdownMenuItem onSelect={() => appBridge()?.changeServer()}>컴퓨터 목록</DropdownMenuItem>}
         <DropdownMenuSeparator />
@@ -184,25 +201,7 @@ function Phone({ conn, onForget, openSession }: { conn: RemoteConnection; onForg
       {screen.kind === "ws" && <WorkspaceScreen ws={screen.ws} go={go} back={back} menu={menu} />}
       {screen.kind === "term" && <TerminalScreen key={screen.session} ws={screen.ws} session={screen.session} go={go} back={back} />}
       {screen.kind === "web" && <WebScreen key={screen.pane} ws={screen.ws} pane={screen.pane} back={back} />}
-    </div>
-  );
-}
-
-function Header({ title, sub, back, right }: { title: React.ReactNode; sub?: React.ReactNode; back?: () => void; right?: React.ReactNode }) {
-  return (
-    <div className="flex h-12 shrink-0 items-center gap-1 border-b px-1.5">
-      {back ? (
-        <button className="flex size-9 shrink-0 items-center justify-center rounded-md active:bg-accent" onClick={back} aria-label="뒤로">
-          <ArrowLeftIcon className="size-5" />
-        </button>
-      ) : (
-        <span className="w-2" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-semibold">{title}</div>
-        {sub ? <div className="truncate text-[11px] text-muted-foreground">{sub}</div> : null}
-      </div>
-      {right}
+      {screen.kind === "settings" && <SettingsScreen page={screen.page} go={(page) => go({ kind: "settings", page })} back={back} />}
     </div>
   );
 }
@@ -277,7 +276,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
                 <StatusIndicator status={status} />
                 <AgentIcon kind={s.agent?.kind} className="size-4" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px]">{s.agent?.prompt || sessionLabel(s)}</div>
+                  <div className="truncate text-[14px]">{agentLabel(s) || sessionLabel(s)}</div>
                   <div className="truncate text-[11px] text-muted-foreground">
                     {wsTitle(ws!, worktrees)} · {s.agent?.last_assistant_message || statusText(status)}
                   </div>
@@ -293,7 +292,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
             if (!r || !list.length) return [];
             const { roots, kids } = worktreeForest(list);
             return [
-              <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-3.5" />}>
+              <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-4" />}>
                 {roots.map((w) => (
                   <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
                 ))}
@@ -303,13 +302,18 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
           const key = groupKey(g.id);
           const open = !collapsed.has(key);
           return (
-            <div key={g.id} className="border-t first:border-t-0">
-              <button className="flex min-h-11 w-full items-center gap-2 px-4 pt-2 text-left active:bg-accent" aria-expanded={open} onClick={() => toggle(key)}>
+            <div key={g.id} className="mt-2.5 first:mt-2">
+              {/* 워크스페이스 머리는 데스크톱 사이드바처럼 진한 띠로 칠한다 */}
+              <button
+                className="mx-2 flex min-h-10 w-[calc(100%-1rem)] items-center gap-2 rounded-lg bg-[color-mix(in_oklab,var(--foreground)_9%,var(--background))] px-3 text-left active:bg-[color-mix(in_oklab,var(--foreground)_14%,var(--background))]"
+                aria-expanded={open}
+                onClick={() => toggle(key)}
+              >
                 <CaretDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")} />
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{g.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{g.name}</span>
                 <span className="text-[11px] tabular-nums text-muted-foreground">{g.repos.length}</span>
               </button>
-              {open && (projects.length ? projects : <p className="px-4 pb-2 text-[12px] text-muted-foreground">워크트리가 있는 프로젝트가 없어요</p>)}
+              {open && (projects.length ? projects : <p className="px-5 pt-2 pb-1 text-[12px] text-muted-foreground">워크트리가 있는 프로젝트가 없어요</p>)}
             </div>
           );
         })}
@@ -381,7 +385,7 @@ function WorktreeBranch({
         <LineageToggle nested={depth > 0} paths={descendantsOf(w.path, kids).map((d) => d.path)} count={mine.length} open={open} onToggle={() => onToggle(key)} />
       )}
       {mine.length > 0 && open && (
-        <div className={cn("flex flex-col border-l border-border", depth > 0 ? "ml-[18px]" : "ml-[22px]")}>
+        <div className={cn("flex flex-col border-l border-border", depth > 0 ? "ml-[22px]" : "ml-[26px]")}>
           {mine.map((c) => (
             <WorktreeBranch key={c.path} w={c} kids={kids} collapsed={collapsed} onToggle={onToggle} go={go} depth={depth + 1} />
           ))}
@@ -399,7 +403,7 @@ function LineageToggle({ paths, count, open, onToggle, nested }: { paths: string
   const counts = lineageCounts(statuses);
   return (
     <button
-      className={cn("-mt-1 flex min-h-11 w-full items-center pr-4 text-left active:bg-accent", nested ? "pl-[34px]" : "pl-[38px]")}
+      className={cn("-mt-1 flex min-h-11 w-full items-center pr-4 text-left active:bg-accent", nested ? "pl-[38px]" : "pl-[42px]")}
       aria-expanded={open}
       aria-label={open ? "하위 워크트리 접기" : "하위 워크트리 펴기"}
       onClick={onToggle}
@@ -432,7 +436,7 @@ function statusText(s: Status): string {
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="pt-3">
-      <h2 className="flex items-center gap-1.5 px-4 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+      <h2 className="flex items-center gap-2 px-4 pb-1 text-[14px] font-semibold text-foreground">
         {icon}
         {title}
       </h2>
@@ -443,7 +447,7 @@ function Section({ title, icon, children }: { title: string; icon?: React.ReactN
 
 function Row({ onClick, children, className }: { onClick: () => void; children: React.ReactNode; className?: string }) {
   return (
-    <button className={cn("flex min-h-12 w-full items-center gap-2.5 px-4 py-2 text-left active:bg-accent", className)} onClick={onClick}>
+    <button className={cn("mx-2 flex min-h-12 w-[calc(100%-1rem)] items-center gap-2.5 rounded-lg px-3 py-2 text-left active:bg-accent", className)} onClick={onClick}>
       {children}
     </button>
   );

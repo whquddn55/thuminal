@@ -65,6 +65,7 @@ import {
 } from "./components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { beginDrag, useDrag } from "./dnd";
+import { agentLabel } from "./agent-title";
 import { GroupSection } from "./GroupSection";
 import { groupKey, NEW_GROUP_NAME, normalizeGroups } from "./groups";
 import { paneOfSession, sessionsOf } from "./layout";
@@ -885,24 +886,13 @@ function WorkspaceCard({
 }
 
 /**
- * claude 가 터미널 제목으로 정한 주제. 앞의 상태 표시(✳, 점자 스피너)를 떼고, 주제를 아직 못 정한 기본 제목이면 null.
- * claude 는 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 가 켜져 있으면 주제를 만들지 않아 기본 제목에 머문다
- */
-function agentTopic(title: string): string | null {
-  const t = title.replace(/^[⠀-⣿✳✻✽✶✢·*\s]+/, "").trim();
-  return t && !/^(claude code|claude)$/i.test(t) ? t : null;
-}
-
-/**
  * 에이전트 한 줄: 상태, 에이전트, 작업 이름 - 지금 도구 또는 마지막 답, 모델, 지난 시간.
  * 작업 이름은 터미널 제목(claude 가 정한 주제)이고, 제목이 기본값("Claude Code")뿐이면 마지막 프롬프트를 쓴다
  */
 function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
   const model = useModel();
   const agent = s.agent!;
-  // 백그라운드 작업 알림(`<task-notification>…`)처럼 claude 가 스스로 넣은 프롬프트는 이름으로 쓰지 않는다
-  const prompt = agent.prompt?.trim();
-  const lead = agentTopic(s.title) || (prompt && !prompt.startsWith("<") ? prompt : null) || agent.kind;
+  const lead = agentLabel(s) || agent.kind;
   const trail = agent.state === "working" ? agent.tool_name : agent.state === "idle" ? agent.last_assistant_message : null;
   const when = agent.turn_ended_at ?? agent.updated_at;
   return (

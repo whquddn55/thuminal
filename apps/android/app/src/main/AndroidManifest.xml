@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 에이전트 알림 (안드로이드 13 부터 물어야 한다) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 앱 업데이트: GitHub Release 에서 받은 새 APK 를 설치 창으로 넘긴다 (Updater) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Tailscale 주소(100.x)는 TLS 없이 붙는다. 길은 Tailscale(WireGuard)이 암호화한다 -->
     <application

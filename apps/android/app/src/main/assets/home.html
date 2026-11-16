@@ -8,14 +8,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
+  /* 색은 웹 화면(packages/ui styles.css)의 기본 다크 테마와 같다. 웹 화면을 한 번 열면 그 테마 색을 받아 덮는다 (applyTheme) */
   :root {
-    --bg: #16161e;
-    --card: #1c1c26;
-    --line: #2a2a37;
-    --fg: #e6e6eb;
-    --muted: #8a8a99;
-    --dim: #5c5c6b;
-    --accent: #7aa2f7;
+    --bg: #0a0a0a;
+    --card: #171717;
+    --line: #ffffff1a;
+    --fg: #fafafa;
+    --muted: #a1a1a1;
+    --dim: color-mix(in oklab, var(--muted) 60%, var(--bg));
+    --accent: #e5e5e5;
+    --accent-fg: #171717;
+    --band: color-mix(in oklab, var(--fg) 9%, var(--bg));
     --attention: #f97316;
     --working: #eab308;
     --done: #10b981;
@@ -39,12 +42,13 @@
   .banner span { flex: 1; }
   .banner button { color: var(--accent); font-weight: 500; white-space: nowrap; }
 
-  h2 { margin: 18px 16px 8px; font-size: 12px; font-weight: 500; color: var(--muted); display: flex; gap: 6px; }
-  h2 .n { color: var(--dim); }
+  /* 묶음 머리: 데스크톱 사이드바의 워크스페이스 머리처럼 진한 띠 */
+  h2 { margin: 18px 8px 8px; padding: 0 12px; min-height: 40px; border-radius: 8px; background: var(--band); font-size: 14px; font-weight: 600; color: var(--fg); display: flex; align-items: center; gap: 6px; }
+  h2 .n { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
 
   /* 컴퓨터 카드 */
   .hosts { display: grid; gap: 8px; padding: 0 16px; }
-  .host { position: relative; display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 8px 12px 14px; }
+  .host { position: relative; display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 8px 12px 14px; }
   .host .top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
   .host .name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .host .more { width: 32px; height: 32px; margin: -4px 0; }
@@ -59,7 +63,7 @@
   .host .note { margin-top: 8px; font-size: 12px; color: var(--dim); padding-right: 6px; }
 
   /* 세션 줄 */
-  .list { margin: 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .list { margin: 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .row { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 12px; width: 100%; text-align: left; padding: 11px 14px; border-top: 1px solid var(--line); }
   .row:first-child { border-top: 0; }
   .row .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--dim); }
@@ -76,7 +80,7 @@
   .row .where .pc { color: var(--accent); }
   .row .msg { grid-column: 2 / 4; margin-top: 3px; font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
   .more-row { display: block; width: 100%; padding: 11px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); text-align: left; }
-  .empty { margin: 0 16px; padding: 18px 14px; border: 1px dashed var(--line); border-radius: 12px; font-size: 13px; color: var(--muted); text-align: center; }
+  .empty { margin: 0 16px; padding: 18px 14px; border: 1px dashed var(--line); border-radius: 10px; font-size: 13px; color: var(--muted); text-align: center; }
 
   /* 추가 · 메뉴 창 (아래에서 올라온다) */
   .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: none; }
@@ -90,7 +94,7 @@
   input:focus { border-color: var(--accent); }
   input.name { font-family: inherit; font-size: 15px; }
   .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 46px; border-radius: 10px; margin-top: 10px; font-weight: 500; border: 1px solid var(--line); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #16161e; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
   .btn.danger { color: var(--failed); }
   .btn svg { width: 20px; height: 20px; }
   .or { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 12px; color: var(--dim); }
@@ -117,6 +121,19 @@
 <script>
 const app = window.ThuminalHome;
 const $ = (id) => document.getElementById(id);
+
+/** 웹 화면이 남긴 테마 색으로 덮는다 (옛 앱 · 아직 웹 화면을 열지 않았으면 기본 색 그대로) */
+function applyTheme() {
+  let t;
+  try {
+    t = JSON.parse((app.theme && app.theme()) || "null");
+  } catch {}
+  if (!t) return;
+  const map = { bg: "background", fg: "foreground", card: "card", line: "border", muted: "muted-foreground", accent: "primary", "accent-fg": "primary-foreground",
+    working: "agent-working", attention: "agent-attention", done: "agent-done", failed: "agent-failed" };
+  for (const [k, v] of Object.entries(map)) if (t[v]) document.documentElement.style.setProperty(`--${k}`, t[v]);
+}
+applyTheme();
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const STATUS = {
@@ -142,6 +159,34 @@ let hosts = [];
 const sums = {};
 let restOpen = false;
 let error = null;
+/** 앱 업데이트: { current, latest } (latest 는 새 버전이 있을 때만). 옛 앱이면 null */
+let upd = null;
+/** 업데이트 진행: null · "downloading" · "installing" · "permission" · "error:<사유>" */
+let updState = null;
+try {
+  upd = app.update ? JSON.parse(app.update()) : null;
+} catch {}
+
+window.onUpdate = (info) => {
+  if (info) upd = JSON.parse(info);
+  render();
+};
+window.onUpdateStatus = (st) => {
+  updState = st;
+  render();
+};
+
+function updateBanner() {
+  if (!upd?.latest) return "";
+  const st =
+    updState === "downloading" ? "받는 중이에요…"
+    : updState === "installing" ? "설치 창에서 업데이트를 눌러 주세요."
+    : updState === "permission" ? "설치를 허용한 뒤 다시 눌러 주세요."
+    : updState?.startsWith("error:") ? `업데이트하지 못했어요: ${updState.slice(6)}`
+    : `지금 ${upd.current}`;
+  const busy = updState === "downloading" || updState === "installing";
+  return `<div class="banner info"><span>새 버전 ${esc(upd.latest)}이 있어요. ${esc(st)}</span>${busy ? "" : `<button data-act="update">업데이트</button>`}</div>`;
+}
 
 function load() {
   hosts = JSON.parse(app.hosts());
@@ -185,6 +230,7 @@ function render() {
   const b = [];
   if (error) b.push(`<div class="banner err"><span>${esc(error)}</span><button data-act="dismiss">닫기</button></div>`);
   const ns = app.notifyState();
+  b.push(updateBanner());
   if (hosts.length && ns === "off") b.push(`<div class="banner info"><span>알림이 꺼져 있어요. 켜면 에이전트가 묻거나 일을 마쳤을 때 알려 줘요.</span><button data-act="notify">켜기</button></div>`);
   $("banners").innerHTML = b.join("");
 
@@ -381,6 +427,9 @@ document.addEventListener("click", (e) => {
       break;
     case "notify":
       app.allowNotify();
+      break;
+    case "update":
+      app.installUpdate();
       break;
     case "scan":
       app.scan();

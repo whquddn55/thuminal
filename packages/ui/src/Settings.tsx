@@ -121,7 +121,7 @@ function ThemeList({ scheme, selected, onPick }: { scheme: "dark" | "light"; sel
 const Code = ({ children }: { children: React.ReactNode }) => <code className="rounded bg-muted px-1 font-mono text-[0.92em]">{children}</code>;
 
 /** 설정 묶음: 작은 제목 밑에 줄(Row)들을 가는 선으로 나눠 늘어놓는다. note 는 묶음 밑에 붙는 설명 */
-function Group({ title, note, children }: { title?: string; note?: React.ReactNode; children: React.ReactNode }) {
+export function Group({ title, note, children }: { title?: string; note?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="flex flex-col">
       {title && <h3 className="pb-1.5 text-xs font-medium text-muted-foreground">{title}</h3>}
@@ -132,7 +132,7 @@ function Group({ title, note, children }: { title?: string; note?: React.ReactNo
 }
 
 /** 설정 한 줄: 왼쪽 이름 · 설명, 오른쪽 조작 */
-function Row({ title, desc, children, className }: { title: React.ReactNode; desc?: React.ReactNode; children?: React.ReactNode; className?: string }) {
+export function Row({ title, desc, children, className }: { title: React.ReactNode; desc?: React.ReactNode; children?: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-h-11 items-center gap-6 py-2", className)}>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -155,9 +155,9 @@ function Toggle({ checked, onChange, title, children, disabled }: { checked: boo
 }
 
 const input = "h-7 rounded border bg-background px-2 text-xs outline-none focus:border-ring";
-const button = "h-7 rounded-md border px-2.5 text-xs hover:bg-accent disabled:opacity-50";
+export const button = "h-7 rounded-md border px-2.5 text-xs hover:bg-accent disabled:opacity-50";
 
-function ThemeSection() {
+export function ThemeSection() {
   const model = useModel();
   const theme = useApp((s) => s.theme);
   const systemDark = useApp((s) => s.systemDark);
@@ -220,7 +220,10 @@ const WEIGHTS: [number, string][] = [
 ];
 
 /** 터미널 글꼴 (이 앱에 남는다). 데스크톱 · 웹 · 폰 터미널이 같이 바뀐다 (폰은 글자 크기만 폰 화면 값을 쓴다) */
-function FontSection() {
+/**
+ * 터미널 글꼴. 폰은 글자 크기를 따로 두므로(`size`) 크기 줄을 그 값으로 바꾸고 단축키 안내를 뺀다
+ */
+export function FontSection({ size }: { size?: { value: number; min: number; max: number; set: (n: number) => void } } = {}) {
   const model = useModel();
   const font = useApp((s) => s.terminalFont);
   const zoom = useApp((s) => s.zoom);
@@ -273,24 +276,37 @@ function FontSection() {
             ))}
           </datalist>
         </Row>
-        <Row
-          title="크기"
-          desc={
-            <>
-              터미널에서 <Code>{shortcutLabel("zoomIn")}</Code> <Code>{shortcutLabel("zoomOut")}</Code>로 잠시 키우고 줄이고, <Code>{shortcutLabel("zoomReset")}</Code>로 되돌려요.
-              {zoom.terminal !== 0 && ` 지금 ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
-            </>
-          }
-        >
-          <input
-            className={cn(input, "w-16 font-mono")}
-            type="number"
-            min={FONT_SIZE_MIN}
-            max={FONT_SIZE_MAX}
-            value={font.size}
-            onChange={(e) => Number(e.target.value) && apply({ size: Number(e.target.value) })}
-          />
-        </Row>
+        {size ? (
+          <Row title="크기" desc="이 폰 터미널의 글자 크기예요. 터미널 화면 메뉴에서도 바꿔요.">
+            <input
+              className={cn(input, "w-16 font-mono")}
+              type="number"
+              min={size.min}
+              max={size.max}
+              value={size.value}
+              onChange={(e) => Number(e.target.value) && size.set(Math.min(size.max, Math.max(size.min, Number(e.target.value))))}
+            />
+          </Row>
+        ) : (
+          <Row
+            title="크기"
+            desc={
+              <>
+                터미널에서 <Code>{shortcutLabel("zoomIn")}</Code> <Code>{shortcutLabel("zoomOut")}</Code>로 잠시 키우고 줄이고, <Code>{shortcutLabel("zoomReset")}</Code>로 되돌려요.
+                {zoom.terminal !== 0 && ` 지금 ${zoom.terminal > 0 ? "+" : ""}${zoom.terminal}px (${font.size + zoom.terminal}px).`}
+              </>
+            }
+          >
+            <input
+              className={cn(input, "w-16 font-mono")}
+              type="number"
+              min={FONT_SIZE_MIN}
+              max={FONT_SIZE_MAX}
+              value={font.size}
+              onChange={(e) => Number(e.target.value) && apply({ size: Number(e.target.value) })}
+            />
+          </Row>
+        )}
         <Row title="굵기">{weightSelect(font.weight, (weight) => apply({ weight }))}</Row>
         <Row title="굵은 글자 굵기">{weightSelect(font.weightBold, (weightBold) => apply({ weightBold }))}</Row>
         <Row title="기본값" desc="SF Mono 14px · 굵기 500 (Orca와 같아요)">
@@ -299,7 +315,7 @@ function FontSection() {
           </button>
         </Row>
       </Group>
-      {zoom.ui !== 1 && <p className="text-xs text-muted-foreground">지금 앱 화면 배율은 {Math.round(zoom.ui * 100)}%예요. 터미널 밖에서 {shortcutLabel("zoomReset")}을 누르면 되돌아가요.</p>}
+      {!size && zoom.ui !== 1 && <p className="text-xs text-muted-foreground">지금 앱 화면 배율은 {Math.round(zoom.ui * 100)}%예요. 터미널 밖에서 {shortcutLabel("zoomReset")}을 누르면 되돌아가요.</p>}
     </>
   );
 }
