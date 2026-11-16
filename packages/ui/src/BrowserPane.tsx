@@ -12,28 +12,12 @@ import { useStore } from "zustand";
 import { BROWSER_PROXY_PROTOCOL_MINOR, type Bounds, type HostApi } from "@thuminal/term-core";
 
 import { pageKey, pageStore, setPage } from "./browser-state";
+import { toUrl } from "./browser-url";
 import { useDrag } from "./dnd";
 import { useDaemonSupports } from "./file-features";
 import { cn } from "./lib/utils";
 import { keyLabel } from "./platform";
 import { useApp, useModel } from "./store";
-
-/** 주소 칸에 친 글을 주소로 바꾼다. 주소처럼 보이지 않으면 검색한다 */
-export function toUrl(input: string): string {
-  const t = input.trim();
-  if (!t) return "about:blank";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !/^localhost:\d/i.test(t)) return t;
-  if (looksLikeUrl(t)) return `${/^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(t) ? "http" : "https"}://${t}`;
-  return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
-}
-
-/** localhost:3000, example.com/path, 192.168.0.1 같은 글인지 */
-export function looksLikeUrl(t: string): boolean {
-  const s = t.trim();
-  if (/\s/.test(s)) return false;
-  if (/^https?:\/\//i.test(s)) return true;
-  return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/.*)?$/i.test(s) || /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(s);
-}
 
 /** 화면 위에 메뉴·창이 떠 있는지 (Radix 가 body 에 붙인다). 툴팁은 치지 않는다 */
 function useOverlayOpen(): boolean {
