@@ -147,9 +147,13 @@ pub struct AgentInfo {
     /// 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다. 훅은 멈춤을 알리지 않는다). 다음 프롬프트에서 지운다
     #[serde(default)]
     pub interrupted: bool,
-    /// 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 기록을 읽어 센다. 기록이 바뀌면 0 부터)
+    /// 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 기록을 읽어 센다. 기록이 바뀌면 0 부터).
+    /// 입력창에 붙였지만 아직 보내지 않은 그림(`draft_images`)도 더한 수다
     #[serde(default)]
     pub image_count: u32,
+    /// `image_count` 가운데 입력창에 붙였지만 아직 보내지 않은 그림 수
+    #[serde(default)]
+    pub draft_images: u32,
 }
 
 /// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)
@@ -166,8 +170,11 @@ pub struct AgentImage {
     pub height: u32,
     /// 원본 바이트 수
     pub bytes: u64,
-    /// 보낸 때 (유닉스 시간 ms, 모르면 0)
+    /// 보낸 때 (유닉스 시간 ms, 모르면 0). 보내기 전 그림이면 붙인 때
     pub at: u64,
+    /// 입력창에 붙였지만 아직 보내지 않은 그림
+    #[serde(default)]
+    pub pending: bool,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다

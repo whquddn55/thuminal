@@ -51,8 +51,10 @@ export interface AgentInfo {
   cwd?: string | null;
   /** 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다). 다음 프롬프트에서 지운다 */
   interrupted?: boolean;
-  /** 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 센다. 기록이 바뀌면 0 부터) */
+  /** 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 센다. 기록이 바뀌면 0 부터). 보내기 전 그림도 더한 수 */
   image_count?: number;
+  /** image_count 가운데 입력창에 붙였지만 아직 보내지 않은 그림 수 */
+  draft_images?: number;
 }
 
 /** 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`agent_images` 요청) */
@@ -66,8 +68,10 @@ export interface AgentImage {
   width: number;
   height: number;
   bytes: number;
-  /** 보낸 때 (ms, 모르면 0) */
+  /** 보낸 때 (ms, 모르면 0). 보내기 전 그림이면 붙인 때 */
   at: number;
+  /** 입력창에 붙였지만 아직 보내지 않은 그림 */
+  pending?: boolean;
 }
 
 export interface CreateSession {

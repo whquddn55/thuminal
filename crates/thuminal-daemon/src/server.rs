@@ -675,7 +675,7 @@ fn save_paste_image(data: &str, ext: &str) -> Result<std::path::PathBuf, String>
         return Err(format!("그림 형식이 아니에요: {ext}"));
     }
     let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("base64 를 풀지 못했어요: {e}"))?;
-    let dir = std::env::temp_dir().join("thuminal-paste");
+    let dir = crate::images::paste_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
