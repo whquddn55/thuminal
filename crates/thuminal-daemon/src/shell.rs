@@ -95,7 +95,7 @@ if (-not $global:__thuminal_prompt) {
     $loc = $executionContext.SessionState.Path.CurrentLocation
     $osc = ''
     if ($loc.Provider.Name -eq 'FileSystem' -and $loc.ProviderPath -match '^[A-Za-z]:') {
-      $p = [uri]::EscapeDataString(($loc.ProviderPath -replace '\', '/')) -replace '%2F', '/' -replace '%3A', ':'
+      $p = [uri]::EscapeDataString($loc.ProviderPath.Replace('\', '/')) -replace '%2F', '/' -replace '%3A', ':'
       $osc = "$([char]27)]7;file://localhost/$p$([char]7)"
     }
     $osc + (& $global:__thuminal_prompt)
