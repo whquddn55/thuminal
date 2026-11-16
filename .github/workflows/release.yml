@@ -106,9 +106,19 @@ jobs:
           releaseDraft: true
           # Windows 업데이트는 NSIS 설치 파일로 한다
           updaterJsonPreferNsis: true
-          # 태그 없이 손으로 돌리면 Release 대신 워크플로 결과물로 올린다
-          uploadWorkflowArtifacts: true
           args: ${{ matrix.args }}
+      # 태그 없이 손으로 돌리면 tauri-action 은 아무 데도 올리지 않으므로, 설치본을 워크플로 결과물로 올린다
+      - name: 설치본을 워크플로 결과물로 올리기
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.os }}
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+          if-no-files-found: error
       - name: 안드로이드 앱을 Release 에 올리기
         if: runner.os == 'Linux' && github.ref_type == 'tag'
         env:
