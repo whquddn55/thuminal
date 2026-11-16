@@ -33,7 +33,7 @@ import { FramePane } from "./BrowserPane";
 import { AGENTS } from "./agents";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { groupKey, normalizeGroups } from "./groups";
-import { panesOf } from "./layout";
+import { paneOfSession, panesOf } from "./layout";
 import { RepoMark } from "./repo-icon";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
 import { cn } from "./lib/utils";
@@ -74,11 +74,14 @@ export function MobileApp({
   services,
   conn,
   onForget,
+  openSession,
 }: {
   services: Services;
   conn: RemoteConnection;
   /** 이 브라우저에 남긴 토큰을 지운다 */
   onForget: () => void;
+  /** 처음 열 세션 (안드로이드 앱 알림 · 컴퓨터 목록에서 골랐다) */
+  openSession?: SessionId;
 }) {
   const model = useMemo(() => new AppModel(services), [services]);
   useEffect(() => {
@@ -87,7 +90,7 @@ export function MobileApp({
   }, [model]);
   return (
     <ModelContext.Provider value={model}>
-      <Phone conn={conn} onForget={onForget} />
+      <Phone conn={conn} onForget={onForget} openSession={openSession} />
     </ModelContext.Provider>
   );
 }
@@ -109,8 +112,21 @@ function useNav(): [Screen, (s: Screen) => void, () => void] {
   return [screen, go, back];
 }
 
-function Phone({ conn, onForget }: { conn: RemoteConnection; onForget: () => void }) {
+function Phone({ conn, onForget, openSession }: { conn: RemoteConnection; onForget: () => void; openSession?: SessionId }) {
   const [screen, go, back] = useNav();
+  // 안드로이드 앱이 고른 세션: 시작할 때 주소로 받거나, 이미 열려 있으면 window.thuminalOpen 으로 받는다. 배치를 읽으면 그 터미널로 간다
+  const [want, setWant] = useState<SessionId | null>(openSession ?? null);
+  useEffect(() => {
+    const w = window as unknown as { thuminalOpen?: (id: SessionId) => void };
+    w.thuminalOpen = setWant;
+    return () => void delete w.thuminalOpen;
+  }, []);
+  const wantWs = useApp((s) => (want === null ? null : (paneOfSession(Object.values(s.layouts), want)?.layout.workspace ?? null)));
+  useEffect(() => {
+    if (want === null || wantWs === null) return;
+    if (screen.kind !== "term" || screen.session !== want) go({ kind: "term", ws: wantWs, session: want });
+    setWant(null);
+  }, [want, wantWs]); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState(conn.state);
   useEffect(() => conn.onState(setState), [conn]);
   const error = useApp((s) => s.error);

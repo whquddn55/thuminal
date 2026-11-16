@@ -9,12 +9,16 @@
 //!
 //! 기록은 뒤에 덧붙기만 하므로 세션마다 읽은 자리를 기억해 늘어난 부분만 읽는다. 경로가 바뀌거나(/clear) 파일이
 //! 줄면 처음부터 다시 읽는다. 목록에는 줄 위치만 두고, 그림을 달라고 할 때 그 줄 하나만 다시 읽는다.
+//!
+//! 보내기 전 그림: 기록에는 보낸 뒤에야 남으므로, 앱이 붙여 넣은 그림 파일(`paste_dir`)과 claude 입력창의
+//! `[Image #N]` 을 짝지어 따로 센다 ([`Drafts`]). 입력창에서 지우면 화면에서 사라지므로 빼고, 보내면 기록 쪽으로 넘어간다.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use base64::Engine as _;
 use serde_json::Value;
@@ -28,6 +32,11 @@ const THUMB_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LINE: usize = 64 * 1024 * 1024;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
+/// 붙여 넣은 파일이 이 안에 입력창의 `[Image #N]` 으로 나타나지 않으면 버린다 (claude 가 아니거나 글로 남았다)
+const DRAFT_WAIT: Duration = Duration::from_secs(10);
+/// 화면에서 이만큼 안 보인 보내기 전 그림은 잊는다. 권한 묻기 창 등이 입력창을 가렸다 돌아와도 남게 넉넉히 둔다
+const DRAFT_FORGET: Duration = Duration::from_secs(30 * 60);
 
 /// 기록 파일 하나를 읽은 상태
 #[derive(Debug, Default)]
@@ -161,7 +170,7 @@ fn images_in_line(line: &[u8]) -> Vec<(usize, AgentImage)> {
         let pad = data.bytes().rev().take_while(|&b| b == b'=').count();
         let bytes = (data.len() / 4 * 3).saturating_sub(pad) as u64;
         let n = ids.get(out.len()).copied().unwrap_or(0);
-        out.push((index, AgentImage { id: String::new(), n, media_type, width, height, bytes, at }));
+        out.push((index, AgentImage { id: String::new(), n, media_type, width, height, bytes, at, pending: false }));
     }
     out
 }
@@ -257,10 +266,129 @@ pub fn thumbnail(bytes: &[u8]) -> Result<(String, Vec<u8>), String> {
     }
 }
 
+/// 앱이 붙여넣은 그림을 쓰는 폴더 (server `save_paste_image`)
+pub fn paste_dir() -> PathBuf {
+    std::env::temp_dir().join("thuminal-paste")
+}
+
+/// 입력에 든 붙여넣은 그림 파일 경로들. 앱은 그림을 [`paste_dir`] 에 쓰고 그 경로를 붙여 넣는다
+pub fn pasted_paths(input: &[u8]) -> Vec<PathBuf> {
+    const DIR: &str = "thuminal-paste";
+    let text = String::from_utf8_lossy(input);
+    let dir = paste_dir();
+    let mut out = Vec::new();
+    for (i, _) in text.match_indices(DIR) {
+        let Some(rest) = text[i + DIR.len()..].strip_prefix(['/', '\\']) else { continue };
+        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')).collect();
+        let path = dir.join(&name);
+        if name.starts_with("paste-") && path.is_file() {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// 화면 글에 나온 `[Image #N]` 번호들
+fn image_refs(screen: &str) -> BTreeSet<u32> {
+    const HEAD: &str = "[Image #";
+    let mut out = BTreeSet::new();
+    for (i, _) in screen.match_indices(HEAD) {
+        let rest = &screen[i + HEAD.len()..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && rest[digits..].starts_with(']') && let Ok(n) = rest[..digits].parse() {
+            out.insert(n);
+        }
+    }
+    out
+}
+
+/// 세션 하나의 보내기 전 그림. claude 는 붙인 그림에 세션 안에서 늘기만 하는 번호를 매기므로(지운 번호를 다시 쓰지 않는다),
+/// 붙여 넣은 뒤 화면에 새로 나온 번호를 붙여 넣은 차례대로 파일과 짝짓는다
+#[derive(Debug, Default)]
+struct Drafts {
+    /// 붙여 넣었지만 아직 번호를 모르는 파일 (붙인 때)
+    waiting: VecDeque<(PathBuf, Instant)>,
+    /// 번호를 안 파일
+    known: BTreeMap<u32, Draft>,
+    /// 지금까지 화면에서 본 가장 큰 번호. 이보다 큰 번호만 새로 붙인 그림이다
+    seen_max: u32,
+}
+
+#[derive(Debug)]
+struct Draft {
+    path: PathBuf,
+    /// 마지막으로 화면에서 본 때
+    seen: Instant,
+    /// 지금 화면(입력창)에 있다
+    visible: bool,
+}
+
+impl Drafts {
+    fn is_empty(&self) -> bool {
+        self.waiting.is_empty() && self.known.is_empty()
+    }
+
+    /// 화면 글로 고친다. `sent_max` 이하 번호는 이미 보내 기록에 있는 그림이다
+    fn update(&mut self, screen: &str, sent_max: u32, now: Instant) {
+        let refs: BTreeSet<u32> = image_refs(screen).into_iter().filter(|&n| n > sent_max).collect();
+        self.waiting.retain(|(_, at)| now.duration_since(*at) < DRAFT_WAIT);
+        let fresh: Vec<u32> = refs.iter().copied().filter(|&n| n > self.seen_max && !self.known.contains_key(&n)).collect();
+        for n in fresh {
+            let Some((path, _)) = self.waiting.pop_front() else { break };
+            self.known.insert(n, Draft { path, seen: now, visible: true });
+        }
+        self.seen_max = self.seen_max.max(refs.last().copied().unwrap_or(0));
+        self.known.retain(|&n, d| {
+            d.visible = refs.contains(&n);
+            if d.visible {
+                d.seen = now;
+            }
+            n > sent_max && now.duration_since(d.seen) < DRAFT_FORGET
+        });
+    }
+
+    fn visible(&self) -> impl Iterator<Item = (u32, &Draft)> {
+        self.known.iter().filter(|(_, d)| d.visible).map(|(&n, d)| (n, d))
+    }
+}
+
+fn draft_id(n: u32, path: &Path) -> String {
+    format!("draft:{n}:{}", path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default())
+}
+
+fn media_type_of(path: &Path) -> &'static str {
+    match path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref() {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("tiff") => "image/tiff",
+        Some("heic") => "image/heic",
+        _ => "image/png",
+    }
+}
+
+fn draft_info(n: u32, d: &Draft) -> AgentImage {
+    let meta = std::fs::metadata(&d.path).ok();
+    let at = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_millis() as u64);
+    let (width, height) = image::image_dimensions(&d.path).unwrap_or((0, 0));
+    AgentImage {
+        id: draft_id(n, &d.path),
+        n,
+        media_type: media_type_of(&d.path).into(),
+        width,
+        height,
+        bytes: meta.map_or(0, |m| m.len()),
+        at,
+        pending: true,
+    }
+}
+
 /// 세션마다 읽은 기록과 썸네일 캐시
 #[derive(Default)]
 pub struct Images {
     scans: Mutex<HashMap<SessionId, Scan>>,
+    drafts: Mutex<HashMap<SessionId, Drafts>>,
     thumbs: Mutex<ThumbCache>,
 }
 
@@ -280,11 +408,64 @@ impl Images {
 
     pub fn list(&self, session: SessionId, path: &str) -> Vec<AgentImage> {
         self.refresh(session, path);
-        self.scans.lock().unwrap().get(&session).map(Scan::images).unwrap_or_default()
+        let mut out = self.scans.lock().unwrap().get(&session).map(Scan::images).unwrap_or_default();
+        if let Some(d) = self.drafts.lock().unwrap().get(&session) {
+            out.extend(d.visible().map(|(n, d)| draft_info(n, d)));
+        }
+        out
+    }
+
+    /// 세션 입력에 붙여 넣은 그림 파일들을 적어 둔다. 입력창에 `[Image #N]` 으로 나타나면 보내기 전 그림이 된다
+    pub fn note_paste(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let now = Instant::now();
+        self.drafts.lock().unwrap().entry(session).or_default().waiting.extend(paths.into_iter().map(|p| (p, now)));
+    }
+
+    /// 보내기 전 그림을 지켜보는 중이다 (그럴 때만 화면을 읽는다)
+    pub fn has_drafts(&self, session: SessionId) -> bool {
+        self.drafts.lock().unwrap().get(&session).is_some_and(|d| !d.is_empty())
+    }
+
+    /// 화면 글로 보내기 전 그림을 고치고, 화면(입력창)에 있는 수를 돌려준다. 기록은 먼저 `refresh` 해 둔다
+    pub fn update_drafts(&self, session: SessionId, screen: &str) -> usize {
+        let sent_max = self.scans.lock().unwrap().get(&session).and_then(|s| s.images.last().map(|f| f.info.n)).unwrap_or(0);
+        let mut drafts = self.drafts.lock().unwrap();
+        let Some(d) = drafts.get_mut(&session) else { return 0 };
+        d.update(screen, sent_max, Instant::now());
+        let n = d.visible().count();
+        if d.is_empty() {
+            drafts.remove(&session);
+        }
+        n
+    }
+
+    /// 보내기 전 그림 하나 (형식, 바이트)
+    fn draft_image(&self, session: SessionId, id: &str) -> Result<(String, Vec<u8>, PathBuf), String> {
+        let path = {
+            let drafts = self.drafts.lock().unwrap();
+            let found = drafts.get(&session).and_then(|d| d.known.iter().find(|(n, d)| draft_id(**n, &d.path) == id));
+            let Some((_, d)) = found else { return Err(format!("그림을 찾지 못했어요: {id}")) };
+            d.path.clone()
+        };
+        let bytes = std::fs::read(&path).map_err(|e| format!("붙인 그림을 읽지 못했어요: {e}"))?;
+        Ok((media_type_of(&path).into(), bytes, path))
     }
 
     /// 그림 하나 (형식, 바이트). 썸네일은 캐시에서 먼저 찾는다
     pub fn image(&self, session: SessionId, path: &str, id: &str, thumb: bool) -> Result<(String, Vec<u8>), String> {
+        if id.starts_with("draft:") {
+            let (media_type, bytes, file) = self.draft_image(session, id)?;
+            if !thumb {
+                return Ok((media_type, bytes));
+            }
+            let key = (file.to_string_lossy().into_owned(), id.to_string());
+            if let Some(hit) = self.thumbs.lock().unwrap().get(&key) {
+                return Ok(hit);
+            }
+            let small = thumbnail(&bytes)?;
+            self.thumbs.lock().unwrap().put(key, small.clone());
+            return Ok(small);
+        }
         let key = (path.to_string(), id.to_string());
         if thumb && let Some(hit) = self.thumbs.lock().unwrap().get(&key) {
             return Ok(hit);
@@ -312,6 +493,7 @@ impl Images {
     /// 없어진 세션의 기록 상태를 지운다
     pub fn retain(&self, alive: impl Fn(SessionId) -> bool) {
         self.scans.lock().unwrap().retain(|&id, _| alive(id));
+        self.drafts.lock().unwrap().retain(|&id, _| alive(id));
     }
 }
 
@@ -499,5 +681,64 @@ mod tests {
             c.put((i.to_string(), String::new()), ("x".into(), vec![0; THUMB_CACHE_BYTES / 3]));
         }
         assert!(c.bytes <= THUMB_CACHE_BYTES && c.get(&("0".into(), String::new())).is_none() && c.get(&("4".into(), String::new())).is_some());
+    }
+
+    #[test]
+    fn reads_image_refs_from_screen() {
+        let refs = image_refs("❯ [Image #1] [Image #12]x [Image #] [Image #3 [Image #4]");
+        assert_eq!(refs.into_iter().collect::<Vec<_>>(), vec![1, 4, 12]);
+    }
+
+    #[test]
+    fn finds_pasted_paths_in_input() {
+        let dir = paste_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join(format!("paste-test-{}-a.png", std::process::id()));
+        std::fs::write(&a, b"x").unwrap();
+        let input = format!("\x1b[200~{} {}\x1b[201~", a.display(), dir.join("paste-none.png").display());
+        assert_eq!(pasted_paths(input.as_bytes()), vec![a.clone()]);
+        assert!(pasted_paths(b"thuminal-paste/other.png").is_empty());
+        std::fs::remove_file(a).unwrap();
+    }
+
+    #[test]
+    fn drafts_follow_input_box() {
+        let t0 = Instant::now();
+        let mut d = Drafts::default();
+        d.waiting.extend([(PathBuf::from("/a.png"), t0), (PathBuf::from("/b.png"), t0)]);
+        // 붙여 넣은 두 파일이 차례대로 #1 · #2 가 된다
+        d.update("❯ [Image #1] [Image #2] ", 0, t0);
+        assert_eq!(d.visible().map(|(n, d)| (n, d.path.clone())).collect::<Vec<_>>(), vec![(1, "/a.png".into()), (2, "/b.png".into())]);
+        // 입력창에서 지우면 빠진다
+        d.update("❯ [Image #1] ", 0, t0);
+        assert_eq!(d.visible().map(|(n, _)| n).collect::<Vec<_>>(), vec![1]);
+        // 권한 창 등으로 잠깐 가려졌다 돌아오면 다시 보인다
+        d.update("Do you want to proceed?", 0, t0);
+        assert_eq!(d.visible().count(), 0);
+        d.update("❯ [Image #1] ", 0, t0);
+        assert_eq!(d.visible().count(), 1);
+        // 보내면(기록에 #1 이 남으면) 화면에 남아 있어도 보내기 전 그림이 아니다
+        d.update("❯ [Image #1] 이것 봐", 1, t0);
+        assert_eq!(d.visible().count(), 0);
+        // 지운 #2 는 한동안 남아 있다가 잊는다
+        d.update("", 1, t0 + DRAFT_FORGET);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn drafts_ignore_old_numbers_and_stale_pastes() {
+        let t0 = Instant::now();
+        let mut d = Drafts::default();
+        d.waiting.push_back((PathBuf::from("/a.png"), t0));
+        d.update("❯ [Image #1] ", 0, t0);
+        // ⌃V 로 붙인 #2 (파일 없음) 뒤에 붙여 넣은 파일은 그다음 새 번호 #3 과 짝짓는다
+        d.update("❯ [Image #1] [Image #2] ", 0, t0);
+        d.waiting.push_back((PathBuf::from("/c.png"), t0));
+        d.update("❯ [Image #1] [Image #2] [Image #3] ", 0, t0);
+        assert_eq!(d.visible().map(|(n, d)| (n, d.path.clone())).collect::<Vec<_>>(), vec![(1, "/a.png".into()), (3, "/c.png".into())]);
+        // 번호로 나타나지 않은 파일(글로 남았다)은 시간이 지나면 버린다
+        d.waiting.push_back((PathBuf::from("/d.png"), t0));
+        d.update("❯ [Image #1] [Image #2] [Image #3] ", 0, t0 + DRAFT_WAIT);
+        assert!(d.waiting.is_empty());
     }
 }

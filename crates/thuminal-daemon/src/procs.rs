@@ -508,8 +508,9 @@ pub fn report(snap: &Snapshot, roots: &[SessionRoot], worktrees: &[String], me: 
     ProcessReport { daemon, sessions, ports, ports_truncated, ports_error: snap.ports_error.clone() }
 }
 
-/// 포트를 연 프로세스를 멈춘다 (SIGTERM). 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고 세션 · 워크트리 것일 때만
-pub fn stop_port_process(pid: u32, port: u16, roots: &[SessionRoot], worktrees: &[String]) -> Result<(), String> {
+/// 포트를 연 프로세스를 멈춘다 (SIGTERM, `force` 면 SIGKILL). 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고 세션 · 워크트리 것일 때만.
+/// 이미 그 포트를 닫았으면 앞서 보낸 SIGTERM 으로 끝난 것이므로 아무것도 하지 않고 Ok 다
+pub fn stop_port_process(pid: u32, port: u16, force: bool, roots: &[SessionRoot], worktrees: &[String]) -> Result<(), String> {
     let me = std::process::id();
     if pid == me {
         return Err("thuminal 데몬 자신은 멈출 수 없어요".into());
@@ -519,7 +520,7 @@ pub fn stop_port_process(pid: u32, port: u16, roots: &[SessionRoot], worktrees: 
         return Err(e);
     }
     let Some(p) = r.ports.iter().find(|p| p.pid == pid && p.port == port) else {
-        return Err(format!("pid {pid} 는 이제 포트 {port} 를 열고 있지 않아요"));
+        return Ok(());
     };
     if p.via == PortVia::External {
         return Err(format!("포트 {port} 는 세션이나 워크트리 밖 프로세스라 멈출 수 없어요"));
@@ -531,7 +532,8 @@ pub fn stop_port_process(pid: u32, port: u16, roots: &[SessionRoot], worktrees: 
     if pid <= 1 {
         return Err("pid 가 올바르지 않아요".into());
     }
-    crate::sys::terminate(pid).map_err(|e| format!("pid {pid} 를 멈추지 못했어요: {e}"))
+    let r = if force { crate::sys::kill(pid) } else { crate::sys::terminate(pid) };
+    r.map_err(|e| format!("pid {pid} 를 멈추지 못했어요: {e}"))
 }
 
 #[cfg(test)]
@@ -669,6 +671,6 @@ mod tests {
 
     #[test]
     fn refuses_to_stop_daemon() {
-        assert!(stop_port_process(std::process::id(), 1, &[], &[]).is_err());
+        assert!(stop_port_process(std::process::id(), 1, false, &[], &[]).is_err());
     }
 }

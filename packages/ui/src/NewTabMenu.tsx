@@ -12,7 +12,7 @@ import { isWorktreeWorkspace, type WorkspaceId } from "@thuminal/term-core";
 import { AgentIcon } from "./agent-icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { AGENTS } from "./agents";
-import { looksLikeUrl, toUrl } from "./BrowserPane";
+import { looksLikeUrl, toUrl } from "./browser-url";
 import { baseName, dirName, matchFiles } from "./file-match";
 import { panesOf } from "./layout";
 import { cn } from "./lib/utils";

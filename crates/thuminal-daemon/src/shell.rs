@@ -88,6 +88,19 @@ const PWSH_PROFILE: &str = r#"# thuminal 셸 통합 (데몬이 만든 파일이�
 if ($env:THUMINAL_CLAUDE_LAUNCH -and (Test-Path -LiteralPath $env:THUMINAL_CLAUDE_LAUNCH)) {
   function global:claude { & $env:THUMINAL_CLAUDE_LAUNCH @args }
 }
+# 프롬프트마다 작업 폴더를 OSC 7 로 알린다 (데몬이 세션 폴더 · 워크트리를 안다). 사용자 프롬프트(oh-my-posh 등)는 감싸서 그대로 쓴다
+if (-not $global:__thuminal_prompt) {
+  $global:__thuminal_prompt = $function:prompt
+  function global:prompt {
+    $loc = $executionContext.SessionState.Path.CurrentLocation
+    $osc = ''
+    if ($loc.Provider.Name -eq 'FileSystem' -and $loc.ProviderPath -match '^[A-Za-z]:') {
+      $p = [uri]::EscapeDataString($loc.ProviderPath.Replace('\', '/')) -replace '%2F', '/' -replace '%3A', ':'
+      $osc = "$([char]27)]7;file://localhost/$p$([char]7)"
+    }
+    $osc + (& $global:__thuminal_prompt)
+  }
+}
 "#;
 
 const TMUX_SHIM: &str = r#"#!/bin/sh
@@ -181,20 +194,36 @@ fi
         out
     }
 
-    /// claude 실행기 (PowerShell). 에이전트 팀은 Windows 에서 아직 켜지 않는다
+    /// claude 실행기 (PowerShell). 에이전트 팀은 유닉스와 같게 가짜 tmux(`teams-bin\tmux.exe`)를 쓴다
     #[cfg(windows)]
     fn launcher(&self) -> String {
         let s = self.settings.lock().unwrap();
-        let mut out = String::from("# thuminal 이 에이전트 설정(agent-settings.json)으로 만든 claude 실행기 (데몬이 만든 파일이다. 고치지 않는다)\n$a = @($args)\n");
+        // Windows PowerShell 5.1 은 BOM 없는 .ps1 을 시스템 코드 페이지(CP949 등)로 읽어 한글이 깨지고 따옴표까지 어긋난다
+        let mut out = String::from("\u{feff}# thuminal 이 에이전트 설정(agent-settings.json)으로 만든 claude 실행기 (데몬이 만든 파일이다. 고치지 않는다)\n$a = @($args)\n");
         if s.claude.skip_permissions {
             out.push_str("$a = @('--dangerously-skip-permissions') + $a\n");
+        }
+        if s.claude.teams {
+            // 진짜 tmux 안이면 그 tmux 를 쓰게 둔다. 여기서 바꾼 환경은 아래에서 띄우는 claude 가 물려받는다
+            out.push_str(&format!(
+                r#"$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
+if (-not $env:TMUX -and $env:THUMINAL_SESSION_ID -and $env:THUMINAL_CLI) {{
+  $env:TMUX = {tmux} + ",$PID,0"
+  $env:TMUX_PANE = '%' + $env:THUMINAL_SESSION_ID
+  $env:PATH = {bin} + ';' + $env:PATH
+  $a = @('--teammate-mode', 'auto') + $a
+}}
+"#,
+                tmux = ps_quote(&self.dir.join("tmux").to_string_lossy()),
+                bin = ps_quote(&self.teams_bin().to_string_lossy()),
+            ));
         }
         if let Some(p) = self.plugin_dir() {
             out.push_str(&format!("if (Test-Path -LiteralPath {p}) {{ $a = @('--plugin-dir', {p}) + $a }}\n", p = ps_quote(&p.to_string_lossy())));
         }
         // 셸의 claude 함수(이 실행기를 부른다)를 다시 부르지 않게 실행 파일만 찾는다
         out.push_str("$claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1\n");
-        out.push_str("if (-not $claude) { Write-Error 'claude 를 찾지 못했다'; exit 127 }\n");
+        out.push_str("if (-not $claude) { Write-Error 'claude 를 찾지 못했어요'; exit 127 }\n");
         out.push_str("& $claude.Source @a\nexit $LASTEXITCODE\n");
         out
     }
@@ -331,6 +360,8 @@ fi
             if let Some(parent) = p.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
+            // .ps1 은 BOM 을 붙여야 Windows PowerShell 5.1 이 UTF-8 로 읽는다 (launcher 와 같다)
+            let body = if rel.ends_with(".ps1") { format!("\u{feff}{body}") } else { body.to_string() };
             if let Err(e) = std::fs::write(&p, body) {
                 warn!(event = "shell_integration_write_failed", path = %p.display(), error = %e);
             }
@@ -340,8 +371,26 @@ fi
         write("pwsh/profile.ps1", PWSH_PROFILE);
         write("teams-bin/tmux", TMUX_SHIM);
         let _ = set_exec(&self.teams_bin().join("tmux"));
+        #[cfg(windows)]
+        self.install_tmux_exe();
         self.write_launcher();
         info!(event = "shell_integration_ready", claude_plugin = ?self.claude_plugin);
+    }
+
+    /// Windows 가짜 tmux: claude 는 `tmux` 를 실행 파일로 찾으므로(sh 스크립트 · .cmd 는 인자가 cmd 를 거치며 깨진다)
+    /// CLI 사본을 `teams-bin\tmux.exe` 로 둔다. CLI 는 자기 이름이 tmux 면 `thuminal tmux` 로 동작한다.
+    /// 크기와 바뀐 때가 같으면 다시 쓰지 않는다 (팀원이 쓰는 중이면 잠겨 있어 덮어쓰지 못한다)
+    #[cfg(windows)]
+    fn install_tmux_exe(&self) {
+        let Some(cli) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("thuminal.exe"))).filter(|p| p.is_file()) else { return };
+        let dest = self.teams_bin().join("tmux.exe");
+        let stamp = |p: &Path| std::fs::metadata(p).ok().map(|m| (m.len(), m.modified().ok()));
+        if stamp(&cli).is_some_and(|a| stamp(&dest).is_some_and(|b| a.0 == b.0 && a.1 <= b.1)) {
+            return;
+        }
+        if let Err(e) = std::fs::copy(&cli, &dest) {
+            warn!(event = "tmux_shim_copy_failed", path = %dest.display(), error = %e);
+        }
     }
 
     /// 새 세션에 넣을 환경 변수와, 기본 셸이면 셸 명령을 정한다.

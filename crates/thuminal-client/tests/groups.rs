@@ -55,7 +55,10 @@ async fn next_workspace_changed(events: &mut tokio::sync::broadcast::Receiver<Ev
 #[tokio::test]
 async fn groups_start_with_default_holding_every_repo() {
     let (_dir, c, [a, b]) = start().await;
-    assert_eq!(c.groups().await.unwrap(), [group(DEFAULT_GROUP, "기본", &[&a, &b])]);
+    let got = c.groups().await.unwrap();
+    // 기본 워크스페이스 이름은 이 컴퓨터 이름이다
+    assert_eq!(got, [group(DEFAULT_GROUP, &got[0].name, &[&a, &b])]);
+    assert!(!got[0].name.is_empty() && got[0].name != "기본");
 }
 
 #[tokio::test]

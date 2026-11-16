@@ -155,6 +155,7 @@ impl Server {
                 }
                 Frame::Input { session, data } => {
                     if hello {
+                        self.remote.push.note_input(&client);
                         let _ = self.manager.input(session, data);
                     }
                 }
@@ -183,6 +184,7 @@ impl Server {
                 protocol_minor: PROTOCOL_MINOR,
                 pid: std::process::id(),
                 engine: m.engine_name().into(),
+                daemon_build: thuminal_protocol::DAEMON_BUILD.into(),
             }),
             Request::Status => Ok(Response::Status {
                 daemon_version: env!("CARGO_PKG_VERSION").into(),
@@ -340,11 +342,11 @@ impl Server {
                 .map(|report| Response::Processes { report: Box::new(report) })
                 .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
             }
-            Request::StopProcess { pid, port } => {
+            Request::StopProcess { pid, port, force } => {
                 let (roots, ws) = (self.process_roots(), self.workspace.clone());
-                match tokio::task::spawn_blocking(move || crate::procs::stop_port_process(pid, port, &roots, &all_worktrees(&ws, &roots))).await {
+                match tokio::task::spawn_blocking(move || crate::procs::stop_port_process(pid, port, force, &roots, &all_worktrees(&ws, &roots))).await {
                     Ok(Ok(())) => {
-                        info!(event = "process_stopped", pid, port);
+                        info!(event = "process_stopped", pid, port, force);
                         Ok(Response::Ok)
                     }
                     Ok(Err(message)) => Err(ErrorBody { code: ErrorCode::InvalidRequest, message }),
@@ -673,7 +675,7 @@ fn save_paste_image(data: &str, ext: &str) -> Result<std::path::PathBuf, String>
         return Err(format!("그림 형식이 아니에요: {ext}"));
     }
     let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| format!("base64 를 풀지 못했어요: {e}"))?;
-    let dir = std::env::temp_dir().join("thuminal-paste");
+    let dir = crate::images::paste_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {

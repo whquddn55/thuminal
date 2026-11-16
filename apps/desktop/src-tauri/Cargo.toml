@@ -28,6 +28,8 @@ fontdb = "0.24.0"
 base64 = "0.22"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# 터미널 프로그램이 OSC 52 로 보낸 글을 클립보드에 쓴다 (원격 claude 복사)
+tauri-plugin-clipboard-manager = "2"
 # 앱 업데이트 (update.rs)
 tauri-plugin-updater = "2"
 

@@ -198,6 +198,8 @@ export interface RemoteHostsApi {
   /** 짝짓기 주소(`http://100.x.y.z:6780/#token=…`)로 등록한다. Tailscale 주소만 받고, 붙어 보고 되면 남긴다. 같은 주소면 이름·토큰을 바꾼다 */
   add(url: string, name?: string): Promise<RemoteHost>;
   remove(id: string): Promise<void>;
+  /** 이 앱에 남긴 이름을 바꾼다. 그 컴퓨터 이름(기본 워크스페이스 이름)이 바뀐 것을 보면 화면이 맞춘다 */
+  rename?(id: string, name: string): Promise<void>;
   /** 기다리는 중이면 바로 다시 붙어 본다 */
   reconnect(id: string): Promise<void>;
   /** 목록이나 연결 상태가 바뀔 때마다 목록 전체. 구독하자마자 지금 목록을 한 번 준다 */
@@ -284,15 +286,20 @@ export interface HostApi {
   agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
   savePasteImage(data: string, ext: string): Promise<string>;
+  /**
+   * 이 컴퓨터 클립보드에 글을 쓴다 (터미널 프로그램이 OSC 52 로 보낸 복사). 누름 없이 와도 써야 해서 껍데기가 직접 쓴다.
+   * 없으면 화면이 `navigator.clipboard` 로 쓴다
+   */
+  writeClipboard?(text: string): Promise<void>;
   /** 세션 셸 밑에서 이름이 names 에 든 프로세스(에이전트)가 도는 세션들 */
   runningAgents(sessions: SessionId[], names: string[]): Promise<{ session: SessionId; name: string }[]>;
   /** 세션마다 셸 밑 프로세스 · CPU · 메모리와 LISTEN 포트 (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터) */
   listProcesses(): Promise<ProcessReport>;
   /**
    * 포트를 연 프로세스 하나에 SIGTERM 을 보낸다. 데몬이 다시 읽어 아직 그 포트에서 LISTEN 이고 세션 · 워크트리 것일 때만 보낸다
-   * (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터)
+   * (데몬 부 판 `PROCESSES_PROTOCOL_MINOR` 부터). `force` 면 SIGKILL (`FORCE_STOP_PROTOCOL_MINOR` 부터, 옛 데몬은 SIGTERM)
    */
-  stopProcess(pid: number, port: number): Promise<void>;
+  stopProcess(pid: number, port: number, force?: boolean): Promise<void>;
   /** 브라우저 칸을 지원하는 껍데기만 둔다 */
   readonly browser?: BrowserHost;
   /**
@@ -368,6 +375,8 @@ export interface AppUpdate {
 
 /** 앱 업데이트: GitHub Release 의 latest.json 을 보고, 서명을 확인해 설치한다 */
 export interface UpdatesApi {
+  /** 지금 앱 버전 */
+  version(): Promise<string>;
   /** 새 버전이 있으면 그것, 없으면 null */
   check(): Promise<AppUpdate | null>;
   /** 확인한 새 버전을 내려받아 설치하고 앱을 다시 시작한다. 그 전에 데몬을 세션을 남긴 채 내린다 */

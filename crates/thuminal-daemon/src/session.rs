@@ -44,6 +44,29 @@ pub struct SessionHandle {
     pub cmd: mpsc::Sender<Cmd>,
 }
 
+/// OSC 7 로 알린 작업 폴더를 경로로 바꾼다. `file://호스트/경로` 면 호스트를 떼고 `%XX` 를 푼다.
+/// Windows 는 `file://localhost/C:/Users/x` 꼴로 오므로 앞 `/` 를 떼고 `\` 로 바꾼다 (pwsh/profile.ps1)
+fn osc7_path(raw: &str, windows: bool) -> String {
+    let Some(rest) = raw.strip_prefix("file://") else { return raw.to_string() };
+    let path = rest.find('/').map_or(rest, |s| &rest[s..]);
+    let b = path.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        if b[i] == b'%' && i + 2 < b.len() && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    let path = String::from_utf8_lossy(&out).into_owned();
+    let drive = path.as_bytes().get(1..3).is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
+    if windows && path.starts_with('/') && drive { path[1..].replace('/', "\\") } else { path }
+}
+
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -312,9 +335,9 @@ impl Actor {
                 i.title = title;
                 changed = true;
             }
-            let pwd = pwd.strip_prefix("file://").map(|p| p.find('/').map_or(p, |s| &p[s..])).unwrap_or(&pwd);
+            let pwd = osc7_path(&pwd, cfg!(windows));
             if !pwd.is_empty() && i.cwd != pwd {
-                i.cwd = pwd.to_string();
+                i.cwd = pwd;
                 changed = true;
             }
             changed.then(|| i.clone())
@@ -435,5 +458,20 @@ impl Actor {
         let mut i = self.info.lock().unwrap();
         i.attached = self.subscribers.len() as u32;
         i.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::osc7_path;
+
+    #[test]
+    fn reads_osc7_paths() {
+        assert_eq!(osc7_path("file://mac/Users/a/b%20c", false), "/Users/a/b c");
+        assert_eq!(osc7_path("file:///tmp/%ED%95%9C", false), "/tmp/한");
+        assert_eq!(osc7_path("/plain/path", false), "/plain/path");
+        assert_eq!(osc7_path("file://localhost/C:/Program%20Files", true), r"C:\Program Files");
+        assert_eq!(osc7_path("file://localhost/C:/Users/x", false), "/C:/Users/x");
+        assert_eq!(osc7_path("file://h/a%2", false), "/a%2");
     }
 }

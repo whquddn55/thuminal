@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-start-dragging",
     "dialog:default",
+    "clipboard-manager:allow-write-text",
     "opener:default",
     "opener:allow-reveal-item-in-dir",
     "opener:allow-open-url",

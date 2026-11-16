@@ -15,6 +15,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   baseName,
   type DaemonEvent,
+  DEFAULT_GROUP,
   FLOATING_WORKSPACE,
   type GitStatus,
   isAbsolutePath,
@@ -41,7 +42,7 @@ import type { AppUpdate } from "@thuminal/term-core";
 import { AGENTS } from "./agents";
 import { bootFinish, bootTrack } from "./boot";
 import { pageKey, setPage } from "./browser-state";
-import { moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
+import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
@@ -82,7 +83,7 @@ export interface NewWorktree {
 }
 
 /** 설정창의 칸. remote 는 이 컴퓨터 원격 접속, hosts 는 내가 붙는 원격 컴퓨터 */
-export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "remote" | "hosts";
+export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "remote" | "hosts" | "about";
 
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }
@@ -592,10 +593,24 @@ export class AppModel {
   /** 워크스페이스 목록. 옛 데몬이라 모르면 빈 목록(모두 기본)으로 본다 */
   private loadGroups(): Promise<RepoGroup[]> {
     if (this.groupsUnsupported) return Promise.resolve([]);
-    return this.services.host.listGroups().catch(() => {
-      this.groupsUnsupported = true;
-      return [];
-    });
+    return this.services.host.listGroups().then(
+      (groups) => (this.syncHostName(groups), groups),
+      () => {
+        this.groupsUnsupported = true;
+        return [];
+      },
+    );
+  }
+
+  /**
+   * 원격 호스트 모델: 그 컴퓨터 이름(기본 워크스페이스 이름)이 이 앱에 남긴 이름과 다르면 맞춘다. 끊겨 있어도 마지막 이름이 보이게 남긴다.
+   * 옛 데몬은 컴퓨터 이름 대신 "기본" 을 주므로 맞추지 않는다
+   */
+  private syncHostName(groups: RepoGroup[]) {
+    if (this.isRoot) return;
+    const name = groups.find((g) => g.id === DEFAULT_GROUP)?.name;
+    const known = this.root.get().remoteHosts.find((h) => h.id === this.hostKey);
+    if (name && name !== DEFAULT_GROUP_NAME && known && known.name !== name) void this.root.services.host.hosts?.rename?.(this.hostKey, name).catch(() => undefined);
   }
 
   /** git 상태를 다시 읽는다. `only` 를 주면 그 워크트리만 */
@@ -731,17 +746,18 @@ export class AppModel {
 
   // ---- 앱 업데이트 ----
 
-  /** 새 앱 버전이 있는지 본다. quiet 가 아니면(설정에서 누른 것) 결과를 알린다 */
-  checkUpdate = async (quiet = true) => {
+  /** 새 앱 버전이 있는지 보고 돌려준다. quiet 가 아니면(설정에서 누른 것) 실패를 던진다 */
+  checkUpdate = async (quiet = true): Promise<AppUpdate | null> => {
     const updates = this.services.host.updates;
-    if (!updates) return;
+    if (!updates) return null;
     try {
       const found = await updates.check();
       this.set({ update: found });
-      if (!quiet && !found) this.notice("최신 버전이에요");
+      return found;
     } catch (e) {
-      if (quiet) console.warn("[thuminal] 업데이트 확인", e);
-      else this.fail(e);
+      if (!quiet) throw e;
+      console.warn("[thuminal] 업데이트 확인", e);
+      return null;
     }
   };
 
@@ -1533,6 +1549,7 @@ export class AppModel {
     try {
       const groups = await this.services.host.setGroups(next);
       this.set({ groups });
+      this.syncHostName(groups);
       return groups;
     } catch (e) {
       this.set({ groups: prev });

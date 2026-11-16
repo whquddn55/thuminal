@@ -73,6 +73,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         cwd: None,
         interrupted: false,
         image_count: 0,
+        draft_images: 0,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -82,6 +83,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         // 새 기록(/clear 등)이면 그림도 새로 센다 (데몬이 1초 안에 다시 센다)
         if r.transcript != a.transcript {
             a.image_count = 0;
+            a.draft_images = 0;
         }
         a.transcript = r.transcript;
     }
@@ -326,6 +328,13 @@ impl Manager {
     }
 
     pub fn input(&self, id: SessionId, data: Vec<u8>) -> Result<(), ErrorBody> {
+        // 앱이 붙여넣은 그림 경로면 적어 두었다가 입력창의 `[Image #N]` 과 짝짓는다 (보내기 전 그림, images.rs)
+        if memchr::memmem::find(&data, b"thuminal-paste").is_some() {
+            let paths = crate::images::pasted_paths(&data);
+            if !paths.is_empty() {
+                self.images.note_paste(id, paths);
+            }
+        }
         self.send(id, Cmd::Input(data))
     }
 
@@ -412,20 +421,29 @@ impl Manager {
         }
     }
 
-    /// 에이전트 대화 기록이 자랐으면 늘어난 부분에서 붙인 그림을 세고, 수가 바뀐 세션을 알린다 (1초마다 부른다)
+    /// 에이전트 대화 기록이 자랐으면 늘어난 부분에서 붙인 그림을 세고, 수가 바뀐 세션을 알린다 (1초마다 부른다).
+    /// 붙여 넣은 그림을 지켜보는 세션은 화면도 읽어 입력창의 보내기 전 그림을 센다. 블로킹 스레드에서 부른다
     pub fn check_images(&self) {
-        let watched: BTreeMap<SessionId, (String, u32)> = self
+        let watched: BTreeMap<SessionId, (String, u32, u32)> = self
             .list()
             .into_iter()
             .filter_map(|i| {
                 let a = i.agent?;
-                Some((i.id, (a.transcript?, a.image_count)))
+                Some((i.id, (a.transcript?, a.image_count, a.draft_images)))
             })
             .collect();
         self.images.retain(|id| watched.contains_key(&id));
-        for (id, (transcript, count)) in watched {
-            let n = self.images.refresh(id, &transcript) as u32;
-            if n == count {
+        for (id, (transcript, count, drafts)) in watched {
+            let sent = self.images.refresh(id, &transcript) as u32;
+            let draft = if !self.images.has_drafts(id) {
+                0
+            } else {
+                match self.read_screen_blocking(id) {
+                    Ok(screen) => self.images.update_drafts(id, &screen) as u32,
+                    Err(_) => drafts,
+                }
+            };
+            if sent + draft == count && draft == drafts {
                 continue;
             }
             let Ok(h) = self.handle(id) else { continue };
@@ -433,11 +451,19 @@ impl Manager {
                 let mut i = h.info.lock().unwrap();
                 // 세는 사이에 기록이 바뀌었으면 다음 번에 센다
                 let Some(a) = i.agent.as_mut().filter(|a| a.transcript.as_deref() == Some(transcript.as_str())) else { continue };
-                a.image_count = n;
+                a.image_count = sent + draft;
+                a.draft_images = draft;
                 i.clone()
             };
             let _ = self.events.send(Event::SessionUpdated { session: info });
         }
+    }
+
+    /// 화면 글 (블로킹 스레드에서 부른다)
+    fn read_screen_blocking(&self, id: SessionId) -> Result<String, ErrorBody> {
+        let (reply, rx) = oneshot::channel();
+        self.send(id, Cmd::ReadScreen { format: ScreenFormat::Plain, scrollback: false, reply })?;
+        rx.blocking_recv().map_err(internal)?.map_err(internal)
     }
 
     fn transcript_of(&self, id: SessionId) -> Result<Option<String>, ErrorBody> {

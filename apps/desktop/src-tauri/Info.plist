@@ -5,5 +5,11 @@
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
   <string>원격 접속을 켜면 폰이나 다른 컴퓨터가 Tailscale·같은 Wi‑Fi 로 이 컴퓨터의 터미널에 붙습니다.</string>
+  <!-- 브라우저 칸이 http 주소를 열게 한다. 없으면 ATS 가 localhost·IP 밖의 http(예: wire-broker.localhost)를 막는다 -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
 </dict>
 </plist>

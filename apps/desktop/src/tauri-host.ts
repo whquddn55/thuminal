@@ -5,9 +5,11 @@
 // 기능이라 원격 HostApi 에서도 로컬 것과 같다. 브라우저 칸은 칸 번호가 호스트마다 따로라 호스트를 실어 가른다.
 // Finder·기본 앱·폴더 고르기처럼 로컬 경로를 쓰는 것은 원격이면 오류다.
 
+import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
@@ -81,6 +83,10 @@ class TauriHosts implements RemoteHostsApi {
     return invoke("hosts_remove", { id });
   }
 
+  rename(id: string, name: string): Promise<void> {
+    return invoke("hosts_rename", { id, name });
+  }
+
   reconnect(id: string): Promise<void> {
     return invoke("hosts_reconnect", { id });
   }
@@ -124,6 +130,7 @@ export class TauriHostApi implements HostApi {
     if (!this.isRemote) {
       this.hosts = new TauriHosts();
       this.updates = {
+        version: getVersion,
         check: () => invoke<AppUpdate | null>("update_check"),
         install: () => invoke<void>("update_install"),
       };
@@ -450,6 +457,10 @@ export class TauriHostApi implements HostApi {
     return this.req({ type: "agent_image", session, id, thumb }, (r) => ({ mediaType: String(r.media_type), data: String(r.data) }));
   }
 
+  writeClipboard(text: string): Promise<void> {
+    return writeText(text);
+  }
+
   savePasteImage(data: string, ext: string): Promise<string> {
     return this.req({ type: "save_paste_image", data, ext }, (r) => String(r.path));
   }
@@ -462,8 +473,8 @@ export class TauriHostApi implements HostApi {
     return this.req({ type: "list_processes" }, (r) => r.report);
   }
 
-  async stopProcess(pid: number, port: number): Promise<void> {
-    await this.req({ type: "stop_process", pid, port });
+  async stopProcess(pid: number, port: number, force = false): Promise<void> {
+    await this.req({ type: "stop_process", pid, port, force });
   }
 
   findCommands(names: string[]): Promise<string[]> {

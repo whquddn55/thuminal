@@ -80,8 +80,10 @@ export interface TerminalEngine {
   /** 뷰포트를 줄 단위로 움직인다. 음수면 스크롤백 쪽(위)으로 */
   scroll(lines: number): void;
   scrollToBottom(): void;
-  /** 화면 칸 좌표로 선택한다 (from 과 to 순서는 상관없다) */
-  select(from: CellPoint, to: CellPoint): void;
+  /** 스크롤백 맨 위에서 화면 맨 위 줄까지의 줄 수. 화면 칸 y 에 더하면 스크롤해도 바뀌지 않는 줄 번호가 된다 */
+  viewportTop(): number;
+  /** 화면 칸 좌표로 선택한다 (from 과 to 순서는 상관없다). `screen` 이면 y 는 `viewportTop()` 을 더한 줄 번호다 */
+  select(from: CellPoint, to: CellPoint, screen?: boolean): void;
   /** 그 칸의 단어를 선택한다 */
   selectWord(at: CellPoint): void;
   /** 그 칸의 줄을 선택한다 (세 번 누르기) */

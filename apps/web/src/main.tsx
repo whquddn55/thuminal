@@ -14,6 +14,9 @@ import { WebHostApi } from "./web-host";
 const TOKEN_KEY = "thuminal.remoteToken";
 const UI_KEY = "thuminal.remoteUi";
 
+/** 안드로이드 앱이 열 세션 (`#token=…&open=12`). 토큰과 함께 주소에서 지운다 */
+const openSession = Number(location.hash.match(/open=(\d+)/)?.[1]) || undefined;
+
 function takeToken(): string | null {
   const m = location.hash.match(/token=([0-9a-f]+)/);
   if (m) {
@@ -55,7 +58,7 @@ async function boot() {
   };
   root.render(
     mobile ? (
-      <MobileApp services={services} conn={host} onForget={forget} />
+      <MobileApp services={services} conn={host} onForget={forget} openSession={openSession} />
     ) : (
       <App services={services} />
     ),

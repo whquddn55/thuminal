@@ -5,13 +5,14 @@
 
 import { CopyIcon, GlobeIcon, PlugIcon, StopCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
 
 import type { ListenPort, SessionId } from "@thuminal/term-core";
 
 import { Popover, PopoverAnchor, PopoverContent } from "./components/ui/popover";
 import { cn } from "./lib/utils";
 import { keyLabel, primaryMod } from "./platform";
-import { BACKGROUND_POLL_MS, portsOfSessions, portsOfWorktree, portUrl, processesOf, programName, strayPortsOfWorktree, useProcesses } from "./processes";
+import { BACKGROUND_POLL_MS, FORCE_STOP_AFTER_MS, portsOfSessions, portsOfWorktree, portUrl, processesOf, programName, stopKey, strayPortsOfWorktree, useProcesses } from "./processes";
 import { type AppModel, FLOATING_WORKSPACE, OTHER_WORKSPACE, useApp, useModel } from "./store";
 
 /** 원격 컴퓨터 포트면 그 컴퓨터 이름 (주소에 쓴다). 이 컴퓨터면 null */
@@ -148,44 +149,84 @@ function PortsPopover({ ports, stray, className, click, children }: { ports: Lis
   );
 }
 
-/** 포트 한 줄: 포트 · 프로세스 · pid, [브라우저로 열기] · [주소 복사] · [프로세스 멈추기] */
+/**
+ * 포트 한 줄: 포트 · 프로세스 · pid, [브라우저로 열기] · [주소 복사] · [프로세스 멈추기].
+ * 멈추기는 그 줄에서 한 번 더 묻는다. 보낸 뒤에는 포트가 실제로 닫힐 때까지 "멈추는 중" 으로 두고(수에도 그대로 든다),
+ * `FORCE_STOP_AFTER_MS` 가 지나도 남아 있으면 [강제 종료](SIGKILL)를 보인다
+ */
 export function PortRow({ p }: { p: ListenPort }) {
   const model = useModel();
-  const host = model.services.host;
-  const [stopping, setStopping] = useState(false);
-  const stop = () => {
-    setStopping(true);
-    const poller = processesOf(host);
-    void host
-      .stopProcess(p.pid, p.port)
-      .then(
-        () => {
-          void poller.refresh();
-          setTimeout(() => void poller.refresh(), 500);
-        },
-        (e) => model.fail(e),
-      )
-      .finally(() => setStopping(false));
+  const poller = processesOf(model.services.host);
+  const since = useStore(poller.store, (s) => s.stopping[stopKey(p)]);
+  const forceStop = useStore(poller.store, (s) => s.forceStop);
+  // 멈추는 중이면 다시 읽을 때마다 그려 강제 종료 단추를 제때 보인다
+  useStore(poller.store, (s) => s.at);
+  const [ask, setAsk] = useState<"stop" | "kill" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const stopping = since !== undefined;
+  const canKill = stopping && forceStop && Date.now() - since >= FORCE_STOP_AFTER_MS;
+  const send = (force: boolean) => {
+    setAsk(null);
+    setBusy(true);
+    void poller
+      .stopPort(p, force)
+      .catch((e) => model.fail(e))
+      .finally(() => setBusy(false));
   };
   return (
     <div className="group flex h-6 items-center gap-1.5 rounded px-1.5 text-xs hover:bg-accent/60" title={`${portAddress(model, p)}\n${p.command}${p.cwd ? `\n폴더: ${p.cwd}` : ""}`}>
-      <span className="w-14 shrink-0 font-mono tabular-nums">:{p.port}</span>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+      <span className={cn("w-14 shrink-0 font-mono tabular-nums", stopping && "opacity-50")}>:{p.port}</span>
+      <span className={cn("min-w-0 flex-1 truncate text-muted-foreground", stopping && "opacity-50")}>
         {p.process}
         <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{p.pid}</span>
       </span>
-      <PortButton title={`브라우저로 열기 (${keyLabel("⇧⌘")}클릭은 시스템 브라우저)`} onClick={(e) => openPort(model, p, primaryMod(e) && e.shiftKey)}>
-        <GlobeIcon className="size-3.5" />
-      </PortButton>
-      <PortButton title="주소 복사" onClick={() => copyPort(model, p)}>
-        <CopyIcon className="size-3.5" />
-      </PortButton>
-      {!isDaemon(p) && (
-        <PortButton title="프로세스 멈추기 (SIGTERM)" onClick={stop} disabled={stopping} danger>
-          <StopCircleIcon className="size-3.5" />
-        </PortButton>
+      {ask ? (
+        <>
+          <span className="shrink-0 text-2xs text-muted-foreground">{ask === "kill" ? "강제 종료할까요?" : "멈출까요?"}</span>
+          <TextButton onClick={() => send(ask === "kill")} danger>
+            {ask === "kill" ? "강제 종료" : "멈추기"}
+          </TextButton>
+          <TextButton onClick={() => setAsk(null)}>취소</TextButton>
+        </>
+      ) : (
+        <>
+          {stopping && <span className="shrink-0 text-2xs text-muted-foreground">멈추는 중</span>}
+          {canKill && (
+            <TextButton onClick={() => setAsk("kill")} disabled={busy} danger title="SIGKILL 로 바로 끝내요">
+              강제 종료
+            </TextButton>
+          )}
+          <PortButton title={`브라우저로 열기 (${keyLabel("⇧⌘")}클릭은 시스템 브라우저)`} onClick={(e) => openPort(model, p, primaryMod(e) && e.shiftKey)}>
+            <GlobeIcon className="size-3.5" />
+          </PortButton>
+          <PortButton title="주소 복사" onClick={() => copyPort(model, p)}>
+            <CopyIcon className="size-3.5" />
+          </PortButton>
+          {!isDaemon(p) && !stopping && (
+            <PortButton title="프로세스 멈추기 (SIGTERM)" onClick={() => setAsk("stop")} disabled={busy} danger>
+              <StopCircleIcon className="size-3.5" />
+            </PortButton>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+function TextButton({ onClick, disabled, danger, title, children }: { onClick: () => void; disabled?: boolean; danger?: boolean; title?: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "shrink-0 rounded px-1 text-2xs leading-4 hover:bg-foreground/10 disabled:opacity-40",
+        danger ? "text-destructive hover:bg-destructive/15" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

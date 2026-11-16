@@ -60,6 +60,8 @@ struct AppState {
     events: Mutex<HashMap<HostKey, EventSink>>,
     /// 업데이트를 설치하려고 로컬 데몬을 내렸다. 이때는 옛 데몬을 다시 띄우지 않는다
     updating: std::sync::atomic::AtomicBool,
+    /// 로컬 데몬 버전을 이미 봤다 (`replace_stale_daemon`)
+    daemon_checked: std::sync::atomic::AtomicBool,
     /// 원격 호스트 목록이 바뀌거나 연결 상태가 바뀌면 목록을 통째로 보내는 채널들
     host_watchers: std::sync::Mutex<Vec<Channel<Vec<hosts::HostView>>>>,
 }
@@ -94,6 +96,7 @@ impl AppState {
         }
         let reconnect = slot.is_some();
         let c = Arc::new(Client::connect_or_spawn(&Paths::default_home(), "desktop", &default_daemon_bin()).await.map_err(err)?);
+        let c = self.replace_stale_daemon(c).await.map_err(err)?;
         *slot = Some(c.clone());
         drop(slot);
         if reconnect {
@@ -101,6 +104,32 @@ impl AppState {
             self.reconnected(&None, &c, 0).await;
         }
         Ok(c)
+    }
+
+    /// 떠 있는 로컬 데몬이 이 앱과 빌드 id(`DAEMON_BUILD`, 데몬 소스의 해시)가 다르면 세션을 남긴 채 내리고 이 앱의 데몬을 새로 띄운다.
+    /// 앱 버전만 바뀌고 데몬 코드는 그대로인 릴리스에서는 데몬을 그대로 둔다 (다시 시작하면 터미널에서 돌던 프로그램이 끝난다).
+    /// 앱 안 업데이트(macOS)와 .dmg · 설치 스크립트로 덮어 깐 경우 모두 여기서 고른다. 옛 데몬은 빌드 id 를 보내지 않아 늘 바꾼다.
+    /// 앱이 뜬 뒤 처음 붙을 때 한 번만 본다. 개발 빌드는 보지 않는다 (작업 중인 개발 데몬을 내리지 않는다)
+    async fn replace_stale_daemon(&self, c: Arc<Client>) -> Result<Arc<Client>, ClientError> {
+        if cfg!(debug_assertions) || self.daemon_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(c);
+        }
+        let app = env!("CARGO_PKG_VERSION");
+        let Some((daemon, ..)) = c.hello() else { return Ok(c) };
+        if c.daemon_build() == thuminal_protocol::DAEMON_BUILD {
+            if daemon != app {
+                tracing::info!(event = "daemon_kept", daemon, app, build = thuminal_protocol::DAEMON_BUILD);
+            }
+            return Ok(c);
+        }
+        tracing::info!(event = "stale_daemon", daemon, app, build = c.daemon_build(), want = thuminal_protocol::DAEMON_BUILD);
+        if c.restart_daemon().await.is_err() {
+            return Ok(c);
+        }
+        let paths = Paths::default_home();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), c.closed()).await;
+        thuminal_client::wait_daemon_exit(&paths, std::time::Duration::from_secs(10)).await;
+        Ok(Arc::new(Client::connect_or_spawn(&paths, "desktop", &default_daemon_bin()).await?))
     }
 
     /// 업데이트 전에 로컬 데몬을 세션을 남긴 채 내리고, 내려갈 때까지(최대 10초) 기다린다. 그 뒤로는 다시 띄우지 않는다
@@ -457,8 +486,13 @@ async fn hosts_add(app: AppHandle, state: State<'_, AppState>, url: String, name
     let pair = thuminal_client::ws::parse_pair_url(&url)?;
     // 붙어 본다 (토큰, 판). 확인용 연결은 바로 놓고, 남긴 뒤 Link 가 새로 붙는다
     let probe = Client::connect_ws(&pair.base, &pair.token, "desktop").await.map_err(err)?;
+    // 이름을 주지 않으면 그 컴퓨터가 정한 이름(기본 워크스페이스 이름)을 쓴다. 옛 데몬("기본")이면 주소
+    let own = match name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(_) => None,
+        None => probe.groups().await.ok().and_then(|g| g.into_iter().find(|g| g.id == thuminal_protocol::DEFAULT_GROUP)).map(|g| g.name).filter(|n| n != "기본"),
+    };
     drop(probe);
-    let name = name.map(|n| n.trim().chars().take(60).collect::<String>()).filter(|n| !n.is_empty()).unwrap_or_else(|| pair.ip.to_string());
+    let name = name.or(own).map(|n| n.trim().chars().take(60).collect::<String>()).filter(|n| !n.is_empty()).unwrap_or_else(|| pair.ip.to_string());
     let mut events = state.events.lock().await;
     let id = {
         let mut remotes = state.remotes.lock().unwrap();
@@ -498,6 +532,26 @@ async fn hosts_remove(state: State<'_, AppState>, id: String) -> CmdResult<()> {
         keep
     });
     state.events.lock().await.remove(&key);
+    state.save_hosts()?;
+    state.notify_hosts();
+    Ok(())
+}
+
+/// 원격 호스트 이름을 바꿔 남긴다. 화면이 그 컴퓨터 이름(기본 워크스페이스 이름)이 바뀐 것을 보면 부른다
+#[tauri::command]
+fn hosts_rename(state: State<'_, AppState>, id: String, name: String) -> CmdResult<()> {
+    let name: String = name.trim().chars().take(60).collect();
+    if name.is_empty() {
+        return Err("이름이 비어 있어요".into());
+    }
+    {
+        let mut remotes = state.remotes.lock().unwrap();
+        let r = remotes.get_mut(&id).ok_or_else(|| format!("등록하지 않은 원격 컴퓨터예요: {id}"))?;
+        if r.record.name == name {
+            return Ok(());
+        }
+        r.record.name = name;
+    }
     state.save_hosts()?;
     state.notify_hosts();
     Ok(())
@@ -610,6 +664,7 @@ pub fn run() {
         // 화면이 가져갈 때까지 쌓아 두는 경로. macOS 는 setup 전에 `Opened` 가 올 수 있어 빌더에서 단다
         .manage(open_files::Pending::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol(media::SCHEME, |ctx, req, responder| {
@@ -687,6 +742,7 @@ pub fn run() {
             hosts_subscribe,
             hosts_add,
             hosts_remove,
+            hosts_rename,
             hosts_reconnect,
             notify::notify,
             notify::set_badge,

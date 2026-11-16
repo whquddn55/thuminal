@@ -1,7 +1,8 @@
-// 붙인 그림: 이 칸 claude 대화(지금 기록)에서 사용자가 붙여 보낸 그림(`[Image #N]`)을 칸 위 팝업으로 모아 본다.
+// 붙인 그림: 이 칸 claude 대화(지금 기록)에서 사용자가 붙인 그림(`[Image #N]`)을 칸 위 팝업으로 모아 본다.
 //
-// 그림은 데몬이 대화 기록 안 base64 에서 꺼낸다 (daemon images.rs). 단추의 수는 `AgentInfo.image_count` 이고,
-// 기록이 자라면 데몬이 1초 안에 세어 알린다. /clear 로 새 기록이 되면 0 이 되어 단추가 사라진다.
+// 보낸 그림은 데몬이 대화 기록 안 base64 에서 꺼낸다 (daemon images.rs). 입력창에 붙였지만 아직 보내지 않은 그림은
+// 데몬이 붙여 넣은 파일과 화면의 `[Image #N]` 을 짝지어 더한다 (`pending`). 입력창에서 지우면 빠진다.
+// 단추의 수는 `AgentInfo.image_count` 이고, 데몬이 1초 안에 세어 알린다. /clear 로 새 기록이 되면 0 이 되어 단추가 사라진다.
 // 팝업은 썸네일 바둑판(보이는 것만 받는다, 데몬이 줄여 보낸다), 누르면 원본을 크게 보는 라이트박스다.
 // 라이트박스는 Radix Dialog 라 브라우저 칸 위에 그대로 그려진다 (웹뷰가 메인 웹뷰 밑에 깔린다, browser-layer.tsx).
 
@@ -34,7 +35,7 @@ export function GalleryButton({ session, floating }: { session: SessionId; float
           ? "flex h-5 items-center gap-1 rounded-md border bg-popover/90 px-1.5 text-[10px] text-popover-foreground shadow-sm hover:bg-accent"
           : "flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
       }
-      title={`claude 에 붙여 보낸 그림 ${count}장. 눌러서 ${open ? "닫기" : "보기"}`}
+      title={`claude 에 붙인 그림 ${count}장. 눌러서 ${open ? "닫기" : "보기"}`}
       onClick={() => model.toggleGallery(session)}
     >
       <ImageIcon className="size-3" />
@@ -75,7 +76,8 @@ function describe(img: AgentImage): string {
   const parts = [`#${img.n}`];
   if (img.width && img.height) parts.push(`${img.width}×${img.height}`);
   parts.push(img.bytes >= 1024 * 1024 ? `${(img.bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(img.bytes / 1024))}KB`);
-  if (img.at) parts.push(dateFmt.format(img.at));
+  if (img.pending) parts.push("보내기 전");
+  else if (img.at) parts.push(dateFmt.format(img.at));
   return parts.join(" · ");
 }
 
@@ -84,6 +86,8 @@ export function ImageGallery({ session }: { session: SessionId }) {
   const model = useModel();
   const host = model.services.host;
   const count = useApp((s) => s.sessions[session]?.agent?.image_count ?? 0);
+  // 보내면 보내기 전 그림이 보낸 그림으로 바뀌어 수가 그대로일 수 있다. 그때도 목록을 다시 받는다
+  const drafts = useApp((s) => s.sessions[session]?.agent?.draft_images ?? 0);
   const transcript = useApp((s) => s.sessions[session]?.agent?.transcript ?? "");
   const [list, setList] = useState<AgentImage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export function ImageGallery({ session }: { session: SessionId }) {
     return () => {
       live = false;
     };
-  }, [host, session, count, transcript]);
+  }, [host, session, count, drafts, transcript]);
 
   // 새 그림이 아래에 붙으므로 처음 열 때와 늘었을 때 맨 아래로
   useLayoutEffect(() => {
@@ -168,7 +172,10 @@ function Thumb({ host, session, transcript, img, onOpen }: { host: HostApi; sess
       ) : (
         <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">{failed ? "읽기 실패" : ""}</span>
       )}
-      <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">#{img.n}</span>
+      <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">
+        #{img.n}
+        {img.pending && " · 보내기 전"}
+      </span>
     </button>
   );
 }

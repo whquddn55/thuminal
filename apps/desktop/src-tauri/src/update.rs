@@ -42,7 +42,12 @@ pub async fn update_check(app: AppHandle, pending: State<'_, Pending>) -> CmdRes
 pub async fn update_install(app: AppHandle, pending: State<'_, Pending>, state: State<'_, AppState>) -> CmdResult<()> {
     let update = pending.0.lock().await.take().ok_or("확인한 업데이트가 없어요")?;
     let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| format!("업데이트를 내려받지 못했어요: {e}"))?;
-    state.stop_local_daemon().await;
+    // macOS 는 데몬을 그대로 둔다: 번들을 바꿔 끼워도 떠 있는 데몬은 옛 파일로 계속 돈다. 새 앱이 뜬 뒤 빌드 id 가 다를 때만
+    // 다시 시작한다 (`replace_stale_daemon`). Windows 는 설치 프로그램이 떠 있는 thuminald.exe 를 덮어쓰지 못하고,
+    // Linux AppImage 는 앱이 끝나면 데몬이 돌던 마운트가 사라지므로 설치 전에 내린다
+    if !cfg!(target_os = "macos") {
+        state.stop_local_daemon().await;
+    }
     tracing::info!(event = "update_install", version = %update.version);
     // Windows 는 설치 프로그램을 띄우고 앱이 끝난다. 설치 프로그램이 끝나면 앱을 다시 띄운다
     update.install(bytes).map_err(|e| format!("업데이트를 설치하지 못했어요: {e}"))?;

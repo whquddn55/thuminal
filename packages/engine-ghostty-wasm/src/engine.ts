@@ -58,6 +58,8 @@ const ROW_DIRTY = 1;
 const ROW_CELLS = 3;
 const ROW_SELECTION = 4;
 const POINT_VIEWPORT = 1;
+const POINT_SCREEN = 2;
+const TERM_DATA_SCROLLBAR = 9;
 const SCROLL_BOTTOM = 1;
 const SCROLL_DELTA = 2;
 const FORMAT_PLAIN = 0;
@@ -395,6 +397,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
         if (len > 0 && len <= 32) {
           ex.ghostty_render_state_row_cells_get(cells, CELL_GRAPHEMES_BUF, tmp + T_GRAPHEME);
           cp = w.dv().getUint32(tmp + T_GRAPHEME, true);
+          if (len > 1 && isChoseong(cp)) cp = composeJamo(w.dv(), tmp + T_GRAPHEME, len);
         }
         sink.cell(x, y, cp, fg, bg, flags);
       }
@@ -419,22 +422,30 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.w.ex.ghostty_terminal_scroll_viewport(this.term, p);
   }
 
-  /** 화면 칸 좌표를 grid ref 로 바꿔 out 에 쓴다 */
-  private gridRef(at: CellPoint, out: number): boolean {
+  viewportTop(): number {
+    const { w } = this;
+    const p = w.tmp + T_STRUCT;
+    // GhosttyTerminalScrollbar: total, offset, len (u64)
+    if (w.ex.ghostty_terminal_get(this.term, TERM_DATA_SCROLLBAR, p) !== SUCCESS) return 0;
+    return Number(w.dv().getBigUint64(p + 8, true));
+  }
+
+  /** 화면 칸 좌표(`screen` 이면 스크롤백 맨 위부터 센 줄)를 grid ref 로 바꿔 out 에 쓴다 */
+  private gridRef(at: CellPoint, out: number, screen = false): boolean {
     const { w } = this;
     const p = w.tmp + T_STRUCT;
     const dv = w.dv();
-    dv.setUint32(p, POINT_VIEWPORT, true);
+    dv.setUint32(p, screen ? POINT_SCREEN : POINT_VIEWPORT, true);
     dv.setUint16(p + 8, Math.max(0, Math.min(this.cols - 1, at.x)), true);
-    dv.setUint32(p + 12, Math.max(0, Math.min(this.rows - 1, at.y)), true);
+    dv.setUint32(p + 12, Math.max(0, screen ? at.y : Math.min(this.rows - 1, at.y)), true);
     dv.setUint32(out, 12, true);
     return w.ex.ghostty_terminal_grid_ref(this.term, p, out) === SUCCESS;
   }
 
-  select(from: CellPoint, to: CellPoint): void {
+  select(from: CellPoint, to: CellPoint, screen = false): void {
     const { w } = this;
     const sel = w.tmp + T_SEL;
-    if (!this.gridRef(from, w.tmp + T_REF_A) || !this.gridRef(to, w.tmp + T_REF_B)) return;
+    if (!this.gridRef(from, w.tmp + T_REF_A, screen) || !this.gridRef(to, w.tmp + T_REF_B, screen)) return;
     const u = w.u8();
     u.copyWithin(sel + 4, w.tmp + T_REF_A, w.tmp + T_REF_A + 12);
     u.copyWithin(sel + 16, w.tmp + T_REF_B, w.tmp + T_REF_B + 12);
@@ -564,7 +575,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
     if (!ptr || !len) return null;
     const text = new TextDecoder().decode(w.u8().slice(ptr, ptr + len));
     w.ex.ghostty_free(0, ptr, len);
-    return text;
+    return composeHangul(text);
   }
 
   private encodeKey(k: KeyInput): Uint8Array | null {
@@ -757,4 +768,32 @@ export function ghosttyWasmEngine(opts: GhosttyWasmOptions): EngineFactory {
       }
     },
   };
+}
+
+/** 첫소리 하나와 그 뒤 가운뎃소리 · 끝소리 자모 */
+const JAMO_SYLLABLE = /[\u1100-\u115F\uA960-\uA97C][\u1160-\u11FF\uD7B0-\uD7FF]+/g;
+
+/**
+ * 글 안의 자모로 나뉜 한글만 완성형으로 묶는다 (복사할 때). 글 전체를 NFC 로 바꾸면 CJK 호환 한자 같은 다른 글자도
+ * 바뀌므로 자모 묶음에만 쓴다
+ */
+export function composeHangul(text: string): string {
+  return text.replace(JAMO_SYLLABLE, (m) => m.normalize("NFC"));
+}
+
+/** 한글 첫소리 자모 (옛 한글 첫소리 확장 포함) */
+function isChoseong(cp: number): boolean {
+  return (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0xa960 && cp <= 0xa97c);
+}
+
+/**
+ * 첫소리 · 가운뎃소리 · 끝소리 자모로 나뉜 한 칸(macOS 파일 이름 등 NFD)을 완성형 한 글자로 묶는다.
+ * 렌더러는 칸마다 글자 하나만 그리므로, 묶지 않으면 첫소리만 보인다. 한 글자로 묶이지 않으면(옛 한글 등) 첫소리를 그대로 둔다
+ */
+function composeJamo(dv: DataView, at: number, len: number): number {
+  let text = "";
+  for (let i = 0; i < len; i++) text += String.fromCodePoint(dv.getUint32(at + i * 4, true));
+  const nfc = text.normalize("NFC");
+  const cp = nfc.codePointAt(0) ?? 0;
+  return nfc.length === String.fromCodePoint(cp).length ? cp : dv.getUint32(at, true);
 }

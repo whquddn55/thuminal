@@ -8,6 +8,7 @@
 import type { Attachment, CellPoint, EngineColors, Renderer, SessionId, SessionInfo, TerminalEngine } from "@thuminal/term-core";
 
 import { HangulComposer, isJamo } from "./hangul";
+import { Osc52Scanner } from "./osc52";
 import { IS_MAC, PRIMARY_KEY, primaryMod } from "./platform";
 import type { Services } from "./services";
 import { type LinkHandler, LinkHover } from "./terminal-link-hover";
@@ -44,6 +45,7 @@ export class TerminalController {
   /** 프로그램에 누름을 보낸 버튼 (떼기·끌기도 프로그램에 보낸다) */
   private mouseButton: 0 | 1 | null = null;
   private lastMouseCell: CellPoint | null = null;
+  /** 끌어 고르기 시작한 칸. y 는 스크롤해도 바뀌지 않는 줄 번호(`viewportTop` 을 더한 것)다 */
   private dragFrom: CellPoint | null = null;
   private dragged = false;
   private cleanup: (() => void)[] = [];
@@ -66,6 +68,7 @@ export class TerminalController {
     const { host, engines, scrollback } = this.s;
     const daemon = await host.daemon();
     const onOutput = (bytes: Uint8Array) => {
+      for (const text of this.osc52.scan(bytes)) this.writeClipboard(text);
       if (this.engine) this.engine.feed(bytes);
       else this.pending.push(bytes);
       // 앞 글자가 확정되어 커서가 움직였다. IME 후보 창 자리도 옮긴다 (커서 자리는 다음 그리기 때 바뀐다)
@@ -340,6 +343,8 @@ export class TerminalController {
     on(host, "wheel", (ev) => {
       ev.preventDefault();
       this.onWheel(ev);
+      // 끌어 고르는 중에 스크롤하면 고른 곳을 마우스 자리까지 이어서 넓힌다
+      if (this.dragFrom && ev.buttons & 1) this.dragTo(ev);
     });
     // ⌘ 를 누른 채 올린 링크 (⌘+클릭 기본 앱, ⌘⇧+클릭 thuminal 안)
     const links = new LinkHover(host, () => this.engine, () => this.links);
@@ -418,7 +423,7 @@ export class TerminalController {
         this.engine.selectWord(at);
         this.dragFrom = null;
       } else {
-        this.dragFrom = at;
+        this.dragFrom = { x: at.x, y: at.y + this.engine.viewportTop() };
         this.dragged = false;
       }
       this.onActivate?.();
@@ -435,11 +440,8 @@ export class TerminalController {
         }
         if (this.mouseButton !== null) return;
       }
-      if (!this.dragFrom || !this.engine || !(ev.buttons & 1)) return;
-      const at = this.cellAt(ev);
-      if (!at) return;
-      this.dragged = true;
-      this.engine.select(this.dragFrom, at);
+      if (!this.dragFrom || !(ev.buttons & 1)) return;
+      this.dragTo(ev);
     });
     on(window, "mouseup", (ev) => {
       if (this.mouseButton !== null) {
@@ -450,6 +452,15 @@ export class TerminalController {
       if (this.dragFrom && !this.dragged) this.engine?.clearSelection();
       this.dragFrom = null;
     });
+  }
+
+  /** 끌어 고르기를 마우스 자리까지 넓힌다. 고르기 시작한 줄이 스크롤로 화면 밖에 나가도 그 줄에서 이어 간다 */
+  private dragTo(ev: MouseEvent) {
+    const at = this.cellAt(ev);
+    if (!at || !this.dragFrom || !this.engine) return;
+    this.dragged = true;
+    const y = Math.max(0, Math.min(this.engine.rows - 1, at.y));
+    this.engine.select(this.dragFrom, { x: at.x, y: y + this.engine.viewportTop() }, true);
   }
 
   /** 직접 묶던 한글 글자를 확정해 보낸다 */
@@ -675,6 +686,15 @@ export class TerminalController {
       }
     }
     if (paths.length) this.paste(paths.join(" "));
+  }
+
+  /** 프로그램이 OSC 52 로 맡긴 복사 (원격 claude 에서 끌어 고른 글 등) */
+  private readonly osc52 = new Osc52Scanner();
+
+  private writeClipboard(text: string) {
+    const host = this.s.host;
+    const write = host.writeClipboard ? host.writeClipboard(text) : navigator.clipboard.writeText(text);
+    void write.catch((e) => console.warn("OSC 52 복사를 클립보드에 쓰지 못했다", e));
   }
 
   hasSelection(): boolean {

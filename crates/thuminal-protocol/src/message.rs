@@ -147,9 +147,13 @@ pub struct AgentInfo {
     /// 사용자가 Esc · ⌃C 로 턴을 멈췄다 (데몬이 추론한다. 훅은 멈춤을 알리지 않는다). 다음 프롬프트에서 지운다
     #[serde(default)]
     pub interrupted: bool,
-    /// 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 기록을 읽어 센다. 기록이 바뀌면 0 부터)
+    /// 이 대화 기록에서 사용자가 붙여 보낸 그림 수 (데몬이 기록을 읽어 센다. 기록이 바뀌면 0 부터).
+    /// 입력창에 붙였지만 아직 보내지 않은 그림(`draft_images`)도 더한 수다
     #[serde(default)]
     pub image_count: u32,
+    /// `image_count` 가운데 입력창에 붙였지만 아직 보내지 않은 그림 수
+    #[serde(default)]
+    pub draft_images: u32,
 }
 
 /// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)
@@ -166,8 +170,11 @@ pub struct AgentImage {
     pub height: u32,
     /// 원본 바이트 수
     pub bytes: u64,
-    /// 보낸 때 (유닉스 시간 ms, 모르면 0)
+    /// 보낸 때 (유닉스 시간 ms, 모르면 0). 보내기 전 그림이면 붙인 때
     pub at: u64,
+    /// 입력창에 붙였지만 아직 보내지 않은 그림
+    #[serde(default)]
+    pub pending: bool,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다
@@ -598,9 +605,16 @@ pub enum Request {
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
     ListProcesses,
-    /// 포트를 연 프로세스 하나를 멈춘다 (SIGTERM). 데몬이 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고
-    /// 세션 · 워크트리 소유일 때만 보낸다. 밖(external) 프로세스와 데몬 자신은 거절한다 (minor 6)
-    StopProcess { pid: u32, port: u16 },
+    /// 포트를 연 프로세스 하나를 멈춘다 (SIGTERM, `force` 면 SIGKILL). 데몬이 다시 읽어 그 pid 가 아직 그 포트에서 LISTEN 이고
+    /// 세션 · 워크트리 소유일 때만 보낸다. 밖(external) 프로세스와 데몬 자신은 거절한다 (minor 6).
+    /// 이미 그 포트를 닫았으면 멈춘 것으로 보고 Ok 다 (minor 10, 그 전에는 오류)
+    StopProcess {
+        pid: u32,
+        port: u16,
+        /// SIGTERM 을 받고도 끝나지 않는 프로세스를 바로 끝낸다 (minor 10)
+        #[serde(default)]
+        force: bool,
+    },
     Tmux {
         /// 부른 프로세스가 든 세션 (`THUMINAL_SESSION_ID`)
         session: SessionId,
@@ -619,7 +633,16 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Response {
-    Hello { daemon_version: String, protocol_major: u32, protocol_minor: u32, pid: u32, engine: String },
+    Hello {
+        daemon_version: String,
+        protocol_major: u32,
+        protocol_minor: u32,
+        pid: u32,
+        engine: String,
+        /// [`crate::DAEMON_BUILD`]. 옛 데몬은 보내지 않는다 (빈 글)
+        #[serde(default)]
+        daemon_build: String,
+    },
     Status { daemon_version: String, pid: u32, started_at: u64, sessions: usize, engine: String },
     Session { session: SessionInfo },
     Sessions { sessions: Vec<SessionInfo> },

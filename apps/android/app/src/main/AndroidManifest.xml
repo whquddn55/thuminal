@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 에이전트 알림 (안드로이드 13 부터 물어야 한다) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Tailscale 주소(100.x)는 TLS 없이 붙는다. 길은 Tailscale(WireGuard)이 암호화한다 -->
     <application
@@ -33,5 +35,14 @@
                 <data android:scheme="thuminal" />
             </intent-filter>
         </activity>
+
+        <!-- 데몬이 FCM 으로 보낸 알림을 받아 그린다 -->
+        <service
+            android:name=".PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

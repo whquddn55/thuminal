@@ -12,6 +12,7 @@ pub mod manager;
 pub mod orca;
 pub mod persist;
 pub mod procs;
+pub mod push;
 pub mod remote;
 pub mod repo_icon;
 pub mod server;
@@ -87,6 +88,7 @@ impl Daemon {
         server.layouts.restore(&server.manager);
         let teams = tokio::spawn(server.teams.clone().watch());
         let remote = tokio::spawn(remote::watch(server.clone()));
+        let push = tokio::spawn(push::watch(server.clone()));
         let worktrees = tokio::spawn(worktree_watch::watch(server.clone()));
         let saver = tokio::spawn(save_loop(server.manager.clone(), server.layouts.clone(), persist.clone()));
 
@@ -94,6 +96,7 @@ impl Daemon {
         saver.abort();
         teams.abort();
         remote.abort();
+        push.abort();
         worktrees.abort();
         // 저장 작업이 다른 스레드에서 쓰는 중일 수 있다. 끝난 뒤에 지우거나 남긴다
         let _ = saver.await;
