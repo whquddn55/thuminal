@@ -76,7 +76,8 @@ export function GroupSection({
     <section
       data-drop-group={droppable ? id : undefined}
       data-count={count}
-      className={cn("mt-1 rounded-lg pb-1 transition-colors first:mt-0", dropHere && "bg-drop/10 ring-1 ring-drop/50")}
+      // 워크스페이스끼리 갈리게 하나씩 테두리 상자로 감싼다
+      className={cn("mt-1.5 rounded-lg border border-sidebar-foreground/20 pb-0.5 transition-colors first:mt-0", dropHere && "bg-drop/10 ring-1 ring-drop/50")}
     >
       <div
         role="button"
@@ -110,7 +111,7 @@ export function GroupSection({
           />
         ) : (
           <span
-            className="min-w-0 truncate text-xs font-semibold tracking-wide text-muted-foreground group-hover:text-foreground"
+            className="min-w-0 truncate text-xs font-semibold tracking-wide text-sidebar-foreground"
             onDoubleClick={(e) => {
               if (!onStartRename) return;
               e.stopPropagation();

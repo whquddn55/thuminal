@@ -462,7 +462,8 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             </Button>
           </div>
         )}
-        {header && !focused && <div className="pointer-events-none absolute inset-0 z-[6] bg-background/15" />}
+        {/* 칸이 여럿이면 포커스 안 된 칸을 흐리게 덮어 지금 쓰는 칸이 드러나게 한다 */}
+        {header && !focused && <div className="pointer-events-none absolute inset-0 z-[6] bg-background/55" />}
         {drop && (
           <div className="pointer-events-none absolute inset-0 z-[9]">
             <div
@@ -474,6 +475,8 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           </div>
         )}
       </div>
+      {/* 칸이 여럿이면 포커스된 칸을 초록 테두리로 감싼다 (머리 줄까지) */}
+      {header && focused && <div className="pointer-events-none absolute inset-0 z-[9] border-2 border-pane-focus" />}
     </div>
   );
 }

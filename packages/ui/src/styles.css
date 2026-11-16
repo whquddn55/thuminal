@@ -54,6 +54,7 @@
   --color-agent-done: var(--agent-done);
   --color-agent-failed: var(--agent-failed);
   --color-drop: var(--drop);
+  --color-pane-focus: var(--pane-focus);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -95,6 +96,8 @@
   --agent-done: #10b981;
   --agent-failed: #ef4444;
   --drop: #3b82f6;
+  /* 칸이 여럿일 때 포커스된 칸 테두리 */
+  --pane-focus: #22c55e;
   color-scheme: dark;
 }
 
@@ -138,13 +141,13 @@
   background: color-mix(in srgb, var(--sidebar-accent) 40%, transparent);
 }
 [data-card-active] {
-  border-color: color-mix(in srgb, var(--sidebar-border) 40%, transparent);
-  background: color-mix(in srgb, var(--sidebar-foreground) 8%, transparent);
+  border-color: color-mix(in srgb, var(--sidebar-foreground) 30%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 12%, transparent);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--sidebar-foreground) 4%, transparent);
 }
 .dark [data-card-active] {
-  border-color: color-mix(in srgb, var(--sidebar-foreground) 18%, var(--sidebar-border));
-  background: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+  border-color: color-mix(in srgb, var(--sidebar-foreground) 40%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 18%, transparent);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--sidebar-foreground) 3%, transparent);
 }
 .thm-agent-row:hover {
