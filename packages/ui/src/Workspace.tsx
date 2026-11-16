@@ -475,8 +475,8 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           </div>
         )}
       </div>
-      {/* 칸이 여럿이면 포커스된 칸을 초록 테두리로 감싼다 (머리 줄까지) */}
-      {header && focused && <div className="pointer-events-none absolute inset-0 z-[9] border-2 border-pane-focus" />}
+      {/* 포커스된 칸을 초록 테두리로 감싼다 (머리 줄이 있으면 머리 줄까지) */}
+      {focused && <div className="pointer-events-none absolute inset-0 z-[9] border-2 border-pane-focus" />}
     </div>
   );
 }

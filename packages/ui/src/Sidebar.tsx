@@ -549,7 +549,7 @@ function Group({
   const line = useDrag((d) => (drag && d.target?.kind === "group" && d.target.line?.repo === drag.repo ? (d.target.line.after ? "after" : "before") : null));
   const dragging = useDrag((d) => !!drag && d.source?.kind === "project" && d.source.repo === drag.repo);
   return (
-    <div className={cn("border-t border-sidebar-foreground/20 pt-1.5 pb-1 first:border-t-0 first:pt-1", dragging && "opacity-50")}>
+    <div className={cn("pt-2 pb-1 first:pt-1", dragging && "opacity-50")}>
       <div
         role="button"
         tabIndex={0}

@@ -76,15 +76,15 @@ export function GroupSection({
     <section
       data-drop-group={droppable ? id : undefined}
       data-count={count}
-      // 워크스페이스끼리 갈리게 하나씩 테두리 상자로 감싼다
-      className={cn("mt-1.5 rounded-lg border border-sidebar-foreground/20 pb-0.5 transition-colors first:mt-0", dropHere && "bg-drop/10 ring-1 ring-drop/50")}
+      className={cn("mt-2.5 rounded-lg pb-1 transition-colors first:mt-0", dropHere && "bg-drop/10 ring-1 ring-drop/50")}
     >
       <div
         role="button"
         tabIndex={0}
         title={remote?.title}
-        // 스크롤해도 맨 위에 붙어 있고, 그 밑에 프로젝트 머리가 쌓인다 (Sidebar Group 의 nested). 밑 글자가 비치지 않게 바탕을 칠한다
-        className="group sticky top-0 z-[3] flex h-7 cursor-pointer items-center gap-1 rounded-md bg-[color-mix(in_oklab,var(--sidebar-accent)_50%,var(--sidebar))] pr-1 pl-1.5 select-none hover:bg-sidebar-accent"
+        // 스크롤해도 맨 위에 붙어 있고, 그 밑에 프로젝트 머리가 쌓인다 (Sidebar Group 의 nested). 워크스페이스끼리 갈리게 진한 띠로 칠하고,
+        // 밑 글자가 비치지 않게 사이드바 바탕과 섞어 불투명하게 한다
+        className="group sticky top-0 z-[3] flex h-7 cursor-pointer items-center gap-1 rounded-md bg-[color-mix(in_oklab,var(--sidebar-foreground)_9%,var(--sidebar))] pr-1 pl-1.5 select-none hover:bg-[color-mix(in_oklab,var(--sidebar-foreground)_14%,var(--sidebar))]"
         onClick={() => !renaming && onToggle()}
         onKeyDown={(e) => {
           if (!renaming && (e.key === "Enter" || e.key === " ")) {
