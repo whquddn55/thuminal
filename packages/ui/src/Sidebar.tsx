@@ -25,7 +25,7 @@ import {
   TerminalWindowIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import {
@@ -795,15 +795,22 @@ function WorkspaceCard({
   const dropHere = useDrag((d) => d.target?.kind === "workspace" && d.target.workspace === ws);
   const status = statusOf(sessions);
   const agents = sessions.filter((s) => s.agent);
+  const card = useRef<HTMLDivElement>(null);
+  // 고른 워크트리가 목록 밖에 있으면 (알림 누르기 · ⌘1~9 로 옮겨 갔다) 보이는 데까지 스크롤한다
+  useEffect(() => {
+    if (active) card.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
 
   return (
     <div
+      ref={card}
       data-drop-workspace={ws}
       data-card-active={active || undefined}
       tabIndex={0}
       title={isWorktreeWorkspace(ws) ? ws : undefined}
       className={cn(
-        "relative ml-1 flex cursor-pointer flex-col rounded-lg border border-transparent pt-1.25 pr-1.5 pb-1.5 pl-0.5 outline-none transition-[background-color,border-color] duration-200 select-none",
+        // scroll-mt: 위에 붙는 묶음 · 프로젝트 머리(각 h-7)에 가리지 않게
+        "relative ml-1 flex scroll-mt-16 cursor-pointer flex-col rounded-lg border border-transparent pt-1.25 pr-1.5 pb-1.5 pl-0.5 outline-none transition-[background-color,border-color] duration-200 select-none",
         !active && "thm-card-hover",
         dropHere && "border-drop/60 bg-drop/15",
       )}
