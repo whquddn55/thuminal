@@ -45,6 +45,10 @@ pub struct Scan {
     /// 여기까지 읽었다 (마지막으로 다 읽은 줄 끝 다음 바이트)
     offset: u64,
     images: Vec<Found>,
+    /// 아직 끝나지 않은 백그라운드 작업 (번호 → 시작한 줄 위치, background.rs)
+    pending: HashMap<String, u64>,
+    /// 이 위치 앞에서 시작한 백그라운드 작업은 세지 않는다 (claude 가 다시 떠서 앞 프로세스의 작업은 이미 없다)
+    background_from: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +62,7 @@ struct Found {
 
 impl Scan {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), offset: 0, images: Vec::new() }
+        Self { path: path.into(), offset: 0, images: Vec::new(), pending: HashMap::new(), background_from: 0 }
     }
 
     pub fn path(&self) -> &Path {
@@ -73,6 +77,17 @@ impl Scan {
         self.images.len()
     }
 
+    /// 아직 끝나지 않은 백그라운드 작업 수
+    pub fn background(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// 지금까지 쓰인 줄에서 시작한 백그라운드 작업을 잊는다 (claude 가 새로 떴다). 파일 크기만 본다
+    pub fn forget_background(&mut self) {
+        self.background_from = std::fs::metadata(&self.path).map_or(0, |m| m.len());
+        self.pending.clear();
+    }
+
     /// 파일에서 늘어난 부분을 읽는다. 파일이 줄었으면 처음부터 다시 읽는다. 없으면 빈 목록이 된다
     pub fn update(&mut self) -> std::io::Result<()> {
         let len = match std::fs::metadata(&self.path) {
@@ -80,6 +95,7 @@ impl Scan {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 self.offset = 0;
                 self.images.clear();
+                self.pending.clear();
                 return Ok(());
             }
             Err(e) => return Err(e),
@@ -87,6 +103,8 @@ impl Scan {
         if len < self.offset {
             self.offset = 0;
             self.images.clear();
+            self.pending.clear();
+            self.background_from = 0;
         }
         if len == self.offset {
             return Ok(());
@@ -112,6 +130,17 @@ impl Scan {
                     next_n = info.n + 1;
                     info.id = format!("{pos}:{index}");
                     self.images.push(Found { line: pos, index, info });
+                }
+                for t in crate::background::tasks_in_line(&buf) {
+                    match t {
+                        crate::background::Task::Start(id) if pos >= self.background_from => {
+                            self.pending.insert(id, pos);
+                        }
+                        crate::background::Task::Start(_) => {}
+                        crate::background::Task::End(id) => {
+                            self.pending.remove(&id);
+                        }
+                    }
                 }
             }
             pos += n as u64;
@@ -393,8 +422,8 @@ pub struct Images {
 }
 
 impl Images {
-    /// 세션 기록을 늘어난 만큼 읽고 그림 수를 돌려준다. 경로가 바뀌었으면 처음부터 읽는다
-    pub fn refresh(&self, session: SessionId, path: &str) -> usize {
+    /// 세션 기록을 늘어난 만큼 읽고 (그림 수, 끝나지 않은 백그라운드 작업 수) 를 돌려준다. 경로가 바뀌었으면 처음부터 읽는다
+    pub fn refresh(&self, session: SessionId, path: &str) -> (usize, usize) {
         let mut scans = self.scans.lock().unwrap();
         let scan = scans.entry(session).or_insert_with(|| Scan::new(path));
         if scan.path() != Path::new(path) {
@@ -403,7 +432,17 @@ impl Images {
         if let Err(e) = scan.update() {
             tracing::warn!(event = "transcript_images_read_failed", session = session.0, error = %e);
         }
-        scan.count()
+        (scan.count(), scan.background())
+    }
+
+    /// claude 가 새로 떴다: 기록에 지금까지 남은 백그라운드 작업은 앞 프로세스 것이라 잊는다
+    pub fn forget_background(&self, session: SessionId, path: &str) {
+        let mut scans = self.scans.lock().unwrap();
+        let scan = scans.entry(session).or_insert_with(|| Scan::new(path));
+        if scan.path() != Path::new(path) {
+            *scan = Scan::new(path);
+        }
+        scan.forget_background();
     }
 
     pub fn list(&self, session: SessionId, path: &str) -> Vec<AgentImage> {
@@ -652,7 +691,7 @@ mod tests {
         let images = Images::default();
         let s = SessionId(1);
         let (p1s, p2s) = (p1.to_str().unwrap(), p2.to_str().unwrap());
-        assert_eq!(images.refresh(s, p1s), 1);
+        assert_eq!(images.refresh(s, p1s).0, 1);
         let id = images.list(s, p1s)[0].id.clone();
         let (mt, thumb) = images.image(s, p1s, &id, true).unwrap();
         let t = image::load_from_memory(&thumb).unwrap();
@@ -662,10 +701,34 @@ mod tests {
         // 투명이 있으면 PNG 로 줄인다
         assert_eq!(thumbnail(&B64.decode(png(300, 300, true)).unwrap()).unwrap().0, "image/png");
         // /clear: 새 기록으로 바뀌면 빈다
-        assert_eq!(images.refresh(s, p2s), 0);
+        assert_eq!(images.refresh(s, p2s).0, 0);
         assert!(images.image(s, p2s, &id, false).is_err());
         // 없는 파일은 빈 목록
-        assert_eq!(images.refresh(s, "/nonexistent/t.jsonl"), 0);
+        assert_eq!(images.refresh(s, "/nonexistent/t.jsonl").0, 0);
+    }
+
+    #[test]
+    fn counts_background_tasks_until_notified() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.jsonl");
+        let ps = p.to_str().unwrap();
+        let start = |id: &str| format!(r#"{{"type":"user","message":{{"content":[]}},"toolUseResult":{{"backgroundTaskId":"{id}"}}}}"#);
+        let end = |id: &str| format!(r#"{{"type":"queue-operation","operation":"enqueue","content":"<task-notification><task-id>{id}</task-id><status>completed</status></task-notification>"}}"#);
+        let append = |line: String| writeln!(std::fs::OpenOptions::new().append(true).create(true).open(&p).unwrap(), "{line}").unwrap();
+        let images = Images::default();
+        let s = SessionId(1);
+        append(start("b1"));
+        append(start("b2"));
+        append(end("b1"));
+        assert_eq!(images.refresh(s, ps).1, 1);
+        // claude 가 다시 떴다: 앞 프로세스의 작업은 잊고, 그 뒤에 시작한 것만 센다
+        images.forget_background(s, ps);
+        assert_eq!(images.refresh(s, ps).1, 0);
+        append(start("b3"));
+        assert_eq!(images.refresh(s, ps).1, 1);
+        append(end("b3"));
+        assert_eq!(images.refresh(s, ps).1, 0);
     }
 
     #[test]

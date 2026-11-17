@@ -56,7 +56,8 @@ export function noticeFor(prev: SessionInfo | undefined, next: SessionInfo): Not
       return { kind: "attention", subtitle: `${name} 턴이 오류로 끝났어요`, body: clip(a.last_assistant_message || a.prompt || "") };
     }
     // 사용자가 멈춘 턴은 알리지 않는다
-    if (a.state === "idle" && !a.interrupted && a.turn_ended_at && a.turn_ended_at !== p?.turn_ended_at) {
+    // 백그라운드 작업을 기다리며 끝낸 턴은 아직 일을 마친 것이 아니다
+    if (a.state === "idle" && !a.interrupted && !a.background_tasks && a.turn_ended_at && a.turn_ended_at !== p?.turn_ended_at) {
       return { kind: "done", subtitle: `${name}가 일을 마쳤어요`, body: clip(a.last_assistant_message || a.prompt || "") };
     }
   }

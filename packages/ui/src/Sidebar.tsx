@@ -100,9 +100,9 @@ function ago(t: number, now: number): string {
   return `${Math.floor(s / 86400)}일`;
 }
 
-export type Status = "attention" | "working" | "error" | "interrupted" | "done" | "ready" | "active" | "failed" | "inactive";
+export type Status = "attention" | "working" | "background" | "error" | "interrupted" | "done" | "ready" | "active" | "failed" | "inactive";
 
-/** 에이전트 하나의 상태: 부름, 일하는 중, 오류로 끝남, 턴을 끝냄, 막 떠서 기다림 */
+/** 에이전트 하나의 상태: 부름, 일하는 중, 백그라운드 작업을 기다림, 오류로 끝남, 턴을 끝냄, 막 떠서 기다림 */
 export function agentStatus(a: AgentInfo): Status {
   switch (a.state) {
     case "needs_attention":
@@ -112,14 +112,14 @@ export function agentStatus(a: AgentInfo): Status {
     case "failed":
       return "error";
     default:
-      // 사용자가 멈춘 턴은 "끝남" 이 아니다 (Orca 처럼 흐린 점)
-      return a.interrupted ? "interrupted" : a.turn_ended_at ? "done" : "ready";
+      // 사용자가 멈춘 턴은 "끝남" 이 아니다 (Orca 처럼 흐린 점). 백그라운드로 돌려 둔 작업이 남았으면 아직 기다리는 중이다
+      return a.interrupted ? "interrupted" : a.background_tasks ? "background" : a.turn_ended_at ? "done" : "ready";
   }
 }
 
-const RANK: Status[] = ["attention", "error", "working", "interrupted", "done", "ready"];
+const RANK: Status[] = ["attention", "error", "working", "background", "interrupted", "done", "ready"];
 
-/** 워크스페이스 상태: 부름 > 오류 > 일하는 중 > 끝낸 에이전트 > 막 뜬 에이전트 > 열린 터미널 > 없음 */
+/** 워크스페이스 상태: 부름 > 오류 > 일하는 중 > 백그라운드 작업을 기다리는 에이전트 > 끝낸 에이전트 > 막 뜬 에이전트 > 열린 터미널 > 없음 */
 export function statusOf(sessions: SessionInfo[]): Status {
   const agents = sessions.flatMap((s) => (s.agent ? [agentStatus(s.agent)] : []));
   const top = RANK.find((r) => agents.includes(r));
@@ -132,6 +132,7 @@ export function statusOf(sessions: SessionInfo[]): Status {
 const STATUS_LABEL: Record<Status, string> = {
   attention: "에이전트가 묻고 있어요",
   working: "에이전트가 일하는 중이에요",
+  background: "에이전트가 백그라운드 작업을 기다려요",
   error: "에이전트 턴이 오류로 끝났어요",
   interrupted: "에이전트를 멈췄어요",
   done: "에이전트가 일을 마쳤어요",
@@ -147,6 +148,8 @@ export function StatusIndicator({ status, className }: { status: Status; classNa
     <span className={cn("inline-flex size-3 shrink-0 items-center justify-center", className)} title={STATUS_LABEL[s]}>
       {s === "working" ? (
         <span className="thm-spinner block size-2 rounded-full border-2 border-agent-working border-t-transparent" />
+      ) : s === "background" ? (
+        <span className="thm-spinner block size-2 rounded-full border-2 border-muted-foreground border-t-transparent" />
       ) : s === "attention" ? (
         <ChatCircleDotsIcon weight="fill" className="size-3 text-agent-attention" />
       ) : s === "error" || s === "failed" ? (
@@ -893,7 +896,8 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
   const model = useModel();
   const agent = s.agent!;
   const lead = agentLabel(s) || agent.kind;
-  const trail = agent.state === "working" ? agent.tool_name : agent.state === "idle" ? agent.last_assistant_message : null;
+  const bg = agent.state === "idle" && !agent.interrupted ? (agent.background_tasks ?? 0) : 0;
+  const trail = agent.state === "working" ? agent.tool_name : bg ? `백그라운드 작업 ${bg}개` : agent.state === "idle" ? agent.last_assistant_message : null;
   const when = agent.turn_ended_at ?? agent.updated_at;
   return (
     <div

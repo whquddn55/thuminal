@@ -83,7 +83,7 @@ type Screen =
   | { kind: "web"; ws: WorkspaceId; pane: number }
   | { kind: "settings"; page?: SettingsPage };
 
-const RANK: Status[] = ["attention", "error", "working", "done", "ready"];
+const RANK: Status[] = ["attention", "error", "working", "background", "done", "ready"];
 
 export function MobileApp({
   services,
@@ -278,7 +278,7 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px]">{agentLabel(s) || sessionLabel(s)}</div>
                   <div className="truncate text-[11px] text-muted-foreground">
-                    {wsTitle(ws!, worktrees)} · {s.agent?.last_assistant_message || statusText(status)}
+                    {wsTitle(ws!, worktrees)} · {status === "background" ? `백그라운드 작업 ${s.agent?.background_tasks}개` : s.agent?.last_assistant_message || statusText(status)}
                   </div>
                 </div>
               </Row>
@@ -430,7 +430,7 @@ function LineageToggle({ paths, count, open, onToggle, nested }: { paths: string
 }
 
 function statusText(s: Status): string {
-  return { attention: "응답 대기", error: "오류로 끝남", working: "일하는 중", interrupted: "멈춤", done: "끝남", ready: "기다리는 중" }[s as string] ?? "";
+  return { attention: "응답 대기", error: "오류로 끝남", working: "일하는 중", background: "백그라운드 대기", interrupted: "멈춤", done: "끝남", ready: "기다리는 중" }[s as string] ?? "";
 }
 
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {

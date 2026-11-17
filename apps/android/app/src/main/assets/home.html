@@ -140,6 +140,7 @@ const STATUS = {
   attention: "응답 대기",
   error: "오류",
   working: "작업 중",
+  background: "백그라운드 대기",
   done: "끝남",
   interrupted: "멈춤",
   ready: "입력 대기",
@@ -149,7 +150,7 @@ const STATUS = {
 // 위에 보일 차례. 묶음 하나에 여러 상태가 들어간다
 const GROUPS = [
   { key: "attention", title: "응답 대기", has: ["attention", "error"] },
-  { key: "working", title: "작업 중", has: ["working"] },
+  { key: "working", title: "작업 중", has: ["working", "background"] },
   { key: "done", title: "끝남", has: ["done"] },
   { key: "rest", title: "그 밖", has: ["interrupted", "ready", "active", "exited"], fold: true },
 ];

@@ -322,8 +322,8 @@ pub fn notice_for(prev: Option<&SessionInfo>, next: &SessionInfo) -> Option<Noti
                 body: said(),
             });
         }
-        // 사용자가 멈춘 턴은 알리지 않는다
-        if a.state == AgentState::Idle && !a.interrupted && ended {
+        // 사용자가 멈춘 턴, 백그라운드 작업을 기다리며 끝낸 턴은 알리지 않는다
+        if a.state == AgentState::Idle && !a.interrupted && a.background_tasks == 0 && ended {
             return Some(Notice {
                 kind: "done",
                 subtitle: format!("{name}가 일을 마쳤어요"),
@@ -393,6 +393,7 @@ pub fn status_of(s: &SessionInfo) -> &'static str {
             AgentState::Working => "working",
             AgentState::Failed => "error",
             _ if a.interrupted => "interrupted",
+            _ if a.background_tasks > 0 => "background",
             _ if a.turn_ended_at.is_some() => "done",
             _ => "ready",
         };

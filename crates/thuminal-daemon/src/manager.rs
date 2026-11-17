@@ -74,6 +74,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         interrupted: false,
         image_count: 0,
         draft_images: 0,
+        background_tasks: 0,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -105,6 +106,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         "SessionStart" if r.source.as_deref() == Some("compact") => None,
         "SessionStart" => {
             a.prompt = None;
+            a.background_tasks = 0;
             a.last_assistant_message = None;
             a.tool_name = None;
             a.turn_ended_at = None;
@@ -373,6 +375,8 @@ impl Manager {
     /// 에이전트 훅 알림으로 세션의 에이전트 상태를 바꾼다. 바뀐 것이 있을 때만 알린다
     pub fn report_agent(&self, id: SessionId, report: AgentReport) -> Result<SessionInfo, ErrorBody> {
         let hook = report.event.clone();
+        // claude 가 새로 떴으면 기록에 남은 앞 프로세스의 백그라운드 작업은 이미 없다
+        let fresh = hook == "SessionStart" && report.source.as_deref() != Some("compact");
         let (info, changed) = {
             let h = self.handle(id)?;
             let mut i = h.info.lock().unwrap();
@@ -381,6 +385,9 @@ impl Manager {
             i.agent = next;
             (i.clone(), changed)
         };
+        if fresh && let Some(t) = info.agent.as_ref().and_then(|a| a.transcript.as_deref()) {
+            self.images.forget_background(id, t);
+        }
         info!(event = "agent_report", session = id.0, hook, agent = ?info.agent.as_ref().map(|a| a.state), changed);
         if changed {
             let _ = self.events.send(Event::SessionUpdated { session: info.clone() });
@@ -421,20 +428,21 @@ impl Manager {
         }
     }
 
-    /// 에이전트 대화 기록이 자랐으면 늘어난 부분에서 붙인 그림을 세고, 수가 바뀐 세션을 알린다 (1초마다 부른다).
+    /// 에이전트 대화 기록이 자랐으면 늘어난 부분에서 붙인 그림과 끝나지 않은 백그라운드 작업을 세고, 수가 바뀐 세션을 알린다 (1초마다 부른다).
     /// 붙여 넣은 그림을 지켜보는 세션은 화면도 읽어 입력창의 보내기 전 그림을 센다. 블로킹 스레드에서 부른다
     pub fn check_images(&self) {
-        let watched: BTreeMap<SessionId, (String, u32, u32)> = self
+        let watched: BTreeMap<SessionId, (String, u32, u32, u32)> = self
             .list()
             .into_iter()
             .filter_map(|i| {
                 let a = i.agent?;
-                Some((i.id, (a.transcript?, a.image_count, a.draft_images)))
+                Some((i.id, (a.transcript?, a.image_count, a.draft_images, a.background_tasks)))
             })
             .collect();
         self.images.retain(|id| watched.contains_key(&id));
-        for (id, (transcript, count, drafts)) in watched {
-            let sent = self.images.refresh(id, &transcript) as u32;
+        for (id, (transcript, count, drafts, background)) in watched {
+            let (sent, bg) = self.images.refresh(id, &transcript);
+            let (sent, bg) = (sent as u32, bg as u32);
             let draft = if !self.images.has_drafts(id) {
                 0
             } else {
@@ -443,7 +451,7 @@ impl Manager {
                     Err(_) => drafts,
                 }
             };
-            if sent + draft == count && draft == drafts {
+            if sent + draft == count && draft == drafts && bg == background {
                 continue;
             }
             let Ok(h) = self.handle(id) else { continue };
@@ -453,6 +461,7 @@ impl Manager {
                 let Some(a) = i.agent.as_mut().filter(|a| a.transcript.as_deref() == Some(transcript.as_str())) else { continue };
                 a.image_count = sent + draft;
                 a.draft_images = draft;
+                a.background_tasks = bg;
                 i.clone()
             };
             let _ = self.events.send(Event::SessionUpdated { session: info });

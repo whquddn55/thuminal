@@ -154,6 +154,10 @@ pub struct AgentInfo {
     /// `image_count` 가운데 입력창에 붙였지만 아직 보내지 않은 그림 수
     #[serde(default)]
     pub draft_images: u32,
+    /// 에이전트가 백그라운드로 돌려 두고 아직 끝나지 않은 작업 수 (셸 명령 · Monitor · 서브에이전트. 데몬이 기록을 읽어 센다).
+    /// 턴을 끝내 idle 이어도 이것이 있으면 작업을 기다리는 중이다
+    #[serde(default)]
+    pub background_tasks: u32,
 }
 
 /// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)

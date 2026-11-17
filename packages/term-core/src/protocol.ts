@@ -55,6 +55,8 @@ export interface AgentInfo {
   image_count?: number;
   /** image_count 가운데 입력창에 붙였지만 아직 보내지 않은 그림 수 */
   draft_images?: number;
+  /** 에이전트가 백그라운드로 돌려 두고 아직 끝나지 않은 작업 수 (데몬이 센다). idle 이어도 있으면 작업을 기다리는 중 */
+  background_tasks?: number;
 }
 
 /** 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`agent_images` 요청) */

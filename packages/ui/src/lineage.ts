@@ -48,7 +48,7 @@ export function lineageKey(path: string): string {
 }
 
 /** 접힌 "N개 하위" 단추에 보일 상태 */
-const LINEAGE_SHOWN: Status[] = ["attention", "error", "working", "done"];
+const LINEAGE_SHOWN: Status[] = ["attention", "error", "working", "background", "done"];
 
 /** 하위 워크트리 상태들을 단추에 보일 상태별 개수로 센다 (없는 상태는 뺀다) */
 export function lineageCounts(statuses: Status[]): [Status, number][] {
