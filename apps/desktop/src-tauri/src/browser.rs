@@ -42,7 +42,8 @@ enum BrowserEvent {
     Title { id: u64, title: String },
     Load { id: u64, url: String, loading: bool },
     /// 페이지 안에서 누른 앱 단축키
-    Key { id: u64, key: String, code: String, alt: bool, shift: bool, ctrl: bool },
+    /// meta: ⌘ 를 눌렀다 (macOS 만 본다. ⌃1~9 · ⌃` 처럼 ⌘ 없는 앱 단축키도 넘긴다)
+    Key { id: u64, key: String, code: String, alt: bool, shift: bool, ctrl: bool, meta: bool },
     /// 페이지가 키보드를 받기 시작했다
     Focus { id: u64 },
     /// 페이지가 새 창을 열려 했다 (앱이 새 브라우저 탭으로 연다)
@@ -64,6 +65,7 @@ fn bridge_event(id: u64, u: &tauri::Url) -> Option<BrowserEvent> {
             alt: flag("alt"),
             shift: flag("shift"),
             ctrl: flag("ctrl"),
+            meta: flag("meta"),
         }),
         Some("focus") => Some(BrowserEvent::Focus { id }),
         _ => None,
@@ -71,7 +73,8 @@ fn bridge_event(id: u64, u: &tauri::Url) -> Option<BrowserEvent> {
 }
 
 /// 페이지마다 넣는 스크립트: 앱 단축키를 메인 웹뷰로 넘기고, 키보드를 받기 시작하면 알린다.
-/// 편집 키(⌘C ⌘V ⌘X ⌘A ⌘Z ⌘F)와 시스템 키(⌘Q ⌘H ⌘M)는 페이지가 그대로 쓴다. Windows · Linux 는 Ctrl 이 같은 자리다
+/// 편집 키(⌘C ⌘V ⌘X ⌘A ⌘Z ⌘F)와 시스템 키(⌘Q ⌘H ⌘M)는 페이지가 그대로 쓴다. Windows · Linux 는 Ctrl 이 같은 자리다.
+/// ⌘(Ctrl) 없는 앱 단축키도 넘긴다: macOS ⌃1~9(탭) · ⌃`(플로팅), Linux Alt+1~9 · Alt+←→ (Windows 는 win.rs 가 페이지보다 먼저 받는다)
 const BRIDGE: &str = r#"
 (() => {
   if (window.top !== window || window.__thuminalBridge) return;
@@ -84,14 +87,22 @@ const BRIDGE: &str = r#"
   // 앱 단축키 수정키는 macOS 는 ⌘, Windows · Linux 는 Ctrl 이다
   const mac = /Mac/.test(navigator.platform);
   const pageKeys = new Set(mac ? ['c', 'v', 'x', 'a', 'z', 'f', 'q', 'h', 'm', 'g'] : ['c', 'v', 'x', 'a', 'z', 'y', 'f']);
+  // ⇧ 를 더한 것 가운데 페이지 몫: macOS ⌘⇧Z 다시 하기 · ⌘⇧V 서식 없이 붙이기 · ⌘⇧G 앞 찾기. 그 밖(⌘⇧A 등)은 앱 단축키다
+  const pageShiftKeys = new Set(mac ? ['z', 'v', 'g'] : []);
+  const webview2 = !!(window.chrome && window.chrome.webview);
   addEventListener('keydown', (e) => {
-    if (!(mac ? e.metaKey : e.ctrlKey) || e.isComposing) return;
+    if (e.isComposing) return;
+    const cmd = mac ? e.metaKey : e.ctrlKey;
+    const bare = mac
+      ? e.ctrlKey && !e.metaKey && !e.altKey && /^(Digit[1-9]|Backquote)$/.test(e.code)
+      : !webview2 && e.altKey && !e.ctrlKey && /^(Digit[1-9]|ArrowLeft|ArrowRight)$/.test(e.code);
+    if (!cmd && !bare) return;
     const k = (e.key || '').toLowerCase();
-    if (!e.altKey && !(mac && e.ctrlKey) && !(!mac && e.shiftKey) && pageKeys.has(k)) return;
+    if (cmd && !e.altKey && !(mac && e.ctrlKey) && (e.shiftKey ? pageShiftKeys : pageKeys).has(k)) return;
     if (k === 'meta' || k === 'shift' || k === 'alt' || k === 'control') return;
     e.preventDefault();
     e.stopPropagation();
-    send('key', { key: e.key, code: e.code, alt: +e.altKey, shift: +e.shiftKey, ctrl: +e.ctrlKey });
+    send('key', { key: e.key, code: e.code, alt: +e.altKey, shift: +e.shiftKey, ctrl: +e.ctrlKey, meta: +e.metaKey });
   }, true);
   addEventListener('focus', () => send('focus', {}), true);
   addEventListener('pointerdown', () => { if (!document.hasFocus()) send('focus', {}); }, true);

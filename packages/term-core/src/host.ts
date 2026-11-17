@@ -44,7 +44,7 @@ export type BrowserEvent =
   | { type: "title"; id: number; title: string }
   | { type: "load"; id: number; url: string; loading: boolean }
   /** 페이지가 키보드를 잡고 있을 때 누른 앱 단축키 (⌘ 조합) */
-  | { type: "key"; id: number; key: string; code: string; alt: boolean; shift: boolean; ctrl: boolean }
+  | { type: "key"; id: number; key: string; code: string; alt: boolean; shift: boolean; ctrl: boolean; meta?: boolean }
   /** 페이지가 키보드를 받기 시작했다 */
   | { type: "focus"; id: number }
   /** 페이지가 새 창을 열려 했다 */

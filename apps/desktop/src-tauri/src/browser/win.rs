@@ -369,7 +369,7 @@ unsafe fn attach(app: &AppHandle, webview: &ICoreWebView2, comp: &ICoreWebView2C
                 let (ctrl, alt, shift) = (held(VK_CONTROL.0), held(VK_MENU.0), held(VK_SHIFT.0));
                 if let Some((key, code)) = app_key(vk, ctrl, alt, shift) {
                     args.SetHandled(true)?;
-                    s(BrowserEvent::Key { id, key, code, alt, shift, ctrl });
+                    s(BrowserEvent::Key { id, key, code, alt, shift, ctrl, meta: false });
                 }
                 Ok(())
             })),
