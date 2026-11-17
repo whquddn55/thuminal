@@ -296,16 +296,7 @@ export class GhosttyWasmEngine implements TerminalEngine {
     this.colors = { fg: defFg, bg: defBg };
     this.lastCursorColor = cursorBg;
 
-    ex.ghostty_render_state_get(this.rs, RS_DIRTY, tmp + T_A);
-    const dirty = w.dv().getUint32(tmp + T_A, true);
-    if (dirty === 0 && !this.forceFull) return false;
-    const full = dirty === DIRTY_FULL || this.forceFull;
-    this.forceFull = false;
-
-    const cursorFg = theme ? theme.cursorText : defBg;
-    const selBg = theme ? theme.selectionBg : FALLBACK_SELECTION_BG;
-    const minContrast = theme?.minimumContrast ?? 1;
-
+    // 커서: 같은 줄 안에서 옮기기만 하면(←→, \b, CR) 엔진이 바뀜 표시를 하지 않아서 직접 비교한다
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VISIBLE, tmp + T_A);
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VIEWPORT_HAS_VALUE, tmp + T_A + 1);
     ex.ghostty_render_state_get(this.rs, RS_CURSOR_VIEWPORT_X, tmp + T_A + 2);
@@ -313,8 +304,20 @@ export class GhosttyWasmEngine implements TerminalEngine {
     let dv = w.dv();
     const inView = dv.getUint8(tmp + T_A + 1) !== 0;
     const visible = dv.getUint8(tmp + T_A) !== 0 && inView;
+    const prev = this.cursorState;
     this.cursorState = { x: dv.getUint16(tmp + T_A + 2, true), y: dv.getUint16(tmp + T_A + 4, true), visible };
+    const moved = prev.x !== this.cursorState.x || prev.y !== this.cursorState.y || prev.visible !== visible;
     const cursorY = visible ? this.cursorState.y : -1;
+
+    ex.ghostty_render_state_get(this.rs, RS_DIRTY, tmp + T_A);
+    const dirty = w.dv().getUint32(tmp + T_A, true);
+    if (dirty === 0 && !this.forceFull && !moved) return false;
+    const full = dirty === DIRTY_FULL || this.forceFull;
+    this.forceFull = false;
+
+    const cursorFg = theme ? theme.cursorText : defBg;
+    const selBg = theme ? theme.selectionBg : FALLBACK_SELECTION_BG;
+    const minContrast = theme?.minimumContrast ?? 1;
     // 조합 중인 글자는 커서를 숨겨도 커서 자리에 그린다. claude 같은 TUI 는 커서를 숨기고 제 커서를 그리지만
     // 입력기를 위해 숨긴 커서를 입력 자리에 옮겨 둔다
     const preY = this.preedit.length && inView ? this.cursorState.y : -1;

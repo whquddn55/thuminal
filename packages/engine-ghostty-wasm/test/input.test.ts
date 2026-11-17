@@ -100,6 +100,25 @@ describe("입력과 고르기", () => {
     expect(r[3].flags & CellFlags.Underline).toBeFalsy();
   });
 
+  it("같은 줄 안에서 커서만 옮겨도 다시 그린다 (←→ · \\b · CR 은 엔진이 바뀜 표시를 하지 않는다)", () => {
+    const e = factory.create({ cols: 20, rows: 2, scrollback: 100 });
+    const sink: CellSink = { cell: () => {} };
+    e.feed(enc("$ hello"));
+    e.scan(sink);
+    for (const [s, x] of [["\b", 6], ["\x1b[D", 5], ["\x1b[C", 6], ["\r", 0]] as const) {
+      e.feed(enc(s));
+      expect(e.scan(sink)).toBe(true);
+      expect(e.cursor().x).toBe(x);
+    }
+    // 그 줄을 다시 넘겨 옛 커서 칸은 커서 색을 벗고 새 칸이 커서 색을 입는다
+    e.feed(enc("\x1b[3C"));
+    const bg = new Map<number, number>();
+    e.scan({ cell: (x, y, _cp, _fg, b) => y === 0 && bg.set(x, b) });
+    expect(bg.get(3)).not.toBe(bg.get(0));
+    expect(bg.get(0)).toBe(bg.get(1));
+    expect(e.scan(sink)).toBe(false);
+  });
+
   it("동기 출력(모드 2026) 중에는 반쪽 화면을 넘기지 않고, 끝나면 넘긴다", () => {
     const e = factory.create({ cols: 10, rows: 2, scrollback: 100 });
     const sink: CellSink = { cell: () => {} };
