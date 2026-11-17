@@ -45,6 +45,7 @@ import { pageKey, setPage } from "./browser-state";
 import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
+import { logNotice } from "./notice-log";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
 import type { ResolvedLink } from "./terminal-link-hover";
@@ -1035,8 +1036,33 @@ export class AppModel {
     const at = paneOfSession(Object.values(s.layouts), session);
     if (!at) return;
     const id = this.root.noticeId(this.hostKey, session);
-    void notify({ title: this.workspaceTitle(at.layout.workspace), subtitle: n.subtitle, body: n.body, session: id, sound: s.notify.sound }).catch(() => undefined);
+    const title = this.workspaceTitle(at.layout.workspace);
+    void notify({ title, subtitle: n.subtitle, body: n.body, session: id, sound: s.notify.sound }).then(
+      () => logNotice({ at: Date.now(), host: this.hostKey, session, kind: n.kind, title, subtitle: n.subtitle, body: n.body }),
+      () => undefined,
+    );
   }
+
+  /** 시험 알림을 띄운다 (알림 목록 [시험 알림]). 운영체제 알림 권한 · 소리를 확인한다 */
+  testNotify = async () => {
+    const notify = this.root.services.host.notify;
+    if (!notify) return this.notice("이 화면에서는 알림을 보낼 수 없어요");
+    const n = { title: "thuminal", subtitle: "시험 알림", body: "알림이 이렇게 와요" };
+    try {
+      await notify({ ...n, session: 0, sound: this.root.get().notify.sound });
+      logNotice({ at: Date.now(), host: "", session: 0, kind: "test", ...n });
+    } catch (e) {
+      this.fail(e);
+    }
+  };
+
+  /** 알림 목록에서 고른 알림의 칸으로 간다. 그 칸이 이미 없으면 false */
+  revealNotice = (host: string, session: SessionId): boolean => {
+    const m = this.root.hostModel(host);
+    if (!m || !paneOfSession(Object.values(m.get().layouts), session)) return false;
+    m.revealSession(session);
+    return true;
+  };
 
   /** 원격 호스트 알림 번호 → (호스트, 세션). 로컬 세션은 세션 번호를 그대로 쓴다 (root 만 든다) */
   private readonly notices = new Map<number, { host: string; session: SessionId }>();

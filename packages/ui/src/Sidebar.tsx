@@ -66,6 +66,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { beginDrag, useDrag } from "./dnd";
 import { agentLabel } from "./agent-title";
+import { NoticeButton } from "./NoticeLog";
 import { GroupSection } from "./GroupSection";
 import { groupKey, NEW_GROUP_NAME, normalizeGroups } from "./groups";
 import { paneOfSession, sessionsOf } from "./layout";
@@ -207,6 +208,7 @@ export function Sidebar() {
     <aside className="relative flex min-h-0 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }}>
       {/* 창 단추(신호등) 자리를 비운 머리. 끌어서 창을 옮긴다. macOS 밖은 OS 제목 표시줄이 따로 있어 비우지 않는다 */}
       <div className={cn("flex h-10 shrink-0 items-center justify-end gap-0.5 pr-2", IS_MAC ? "pl-20" : "pl-2")} data-tauri-drag-region>
+        <NoticeButton />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" className="size-7 text-muted-foreground" onClick={() => model.setDialog({ kind: "jump" })}>
