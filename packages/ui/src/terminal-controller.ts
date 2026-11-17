@@ -346,7 +346,7 @@ export class TerminalController {
       // 끌어 고르는 중에 스크롤하면 고른 곳을 마우스 자리까지 이어서 넓힌다
       if (this.dragFrom && ev.buttons & 1) this.dragTo(ev);
     });
-    // ⌘ 를 누른 채 올린 링크 (⌘+클릭 기본 앱, ⌘⇧+클릭 thuminal 안)
+    // ⌘ 를 누른 채 올린 링크 (⌘+클릭 thuminal 안, ⌘⇧+클릭 기본 앱)
     const links = new LinkHover(host, () => this.engine, () => this.links);
     this.linkHover = links;
     this.cleanup.push(() => {

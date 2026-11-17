@@ -814,7 +814,7 @@ export class AppModel {
     return [...new Set(all.filter((p): p is string => !!p && isAbsolutePath(p)))];
   }
 
-  /** 링크를 연다. system: 기본 앱(⌘+클릭), app: thuminal 안(⌘⇧+클릭) */
+  /** 링크를 연다. app: thuminal 안(⌘+클릭), system: 기본 앱(⌘⇧+클릭) */
   openLink = (id: SessionId, link: ResolvedLink, mode: "system" | "app") => {
     const host = this.services.host;
     const fail = (e: unknown) => this.fail(e);

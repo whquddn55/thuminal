@@ -1,4 +1,4 @@
-// 터미널 링크: ⌘ 를 누른 채 올리면 밑줄 · 손가락 커서 · 칸 왼쪽 아래 주소를 보이고, ⌘+클릭은 기본 앱, ⌘⇧+클릭은 thuminal 안에서 연다.
+// 터미널 링크: ⌘ 를 누른 채 올리면 밑줄 · 손가락 커서 · 칸 왼쪽 아래 주소를 보이고, ⌘+클릭은 thuminal 안, ⌘⇧+클릭은 기본 앱으로 연다.
 //
 // 1. 칸에 OSC 8 주소가 붙어 있으면 그것을 쓴다 (claude 는 FORCE_HYPERLINK 로 URL 에 붙인다. 줄이 잘려도 주소가 온전하다).
 // 2. 없으면 화면 글자에서 찾는다 (links.ts). 파일은 데몬에 있는지 물어 있는 것만 링크로 본다.
@@ -6,7 +6,7 @@
 import type { CellPoint, CellRange, LineText, TerminalEngine } from "@thuminal/term-core";
 
 import { type FoundLink, type LinkTarget, linkCandidatesAt, parseHyperlink } from "./links";
-import { primaryMod } from "./platform";
+import { keyLabel, primaryMod } from "./platform";
 
 /** 열 수 있게 푼 링크 (파일은 절대 경로) */
 export type ResolvedLink = { kind: "url"; url: string } | { kind: "path"; path: string; isDir: boolean; line?: number; col?: number };
@@ -14,7 +14,7 @@ export type ResolvedLink = { kind: "url"; url: string } | { kind: "path"; path: 
 export interface LinkHandler {
   /** 파일 경로가 있는지 본다 (세션 폴더 · claude 폴더 · 워크트리 기준) */
   resolve(path: string): Promise<{ path: string; isDir: boolean } | null>;
-  /** system: 기본 앱(⌘+클릭), app: thuminal 안(⌘⇧+클릭) */
+  /** app: thuminal 안(⌘+클릭), system: 기본 앱(⌘⇧+클릭) */
   open(link: ResolvedLink, mode: "system" | "app"): void;
 }
 
@@ -65,7 +65,7 @@ export class LinkHover {
     const h = this.hovered;
     // 링크가 아닌 것으로 끝났으면 보통 클릭으로 둔다
     if (!h || (h.settled && !h.done)) return false;
-    const mode = ev.shiftKey ? "app" : "system";
+    const mode = ev.shiftKey ? "system" : "app";
     // 아직 파일 확인 중이면 끝난 뒤 연다
     void h.link.then((found) => found && handler.open(found.link, mode));
     return true;
@@ -94,7 +94,7 @@ export class LinkHover {
       this.tip.className = "thm-link-tip";
       this.host.appendChild(this.tip);
     }
-    this.tip.textContent = `${found.label} · ⌘+클릭 기본 앱으로 열기, ⌘⇧+클릭 thuminal에서 열기`;
+    this.tip.textContent = `${found.label} · ${modLabel("⌘")}+클릭 thuminal에서 열기, ${modLabel("⌘⇧")}+클릭 기본 앱으로 열기`;
     this.tip.style.display = "";
   }
 
@@ -170,4 +170,9 @@ export class LinkHover {
 function labelOf(path: string, t: LinkTarget): string {
   if (t.kind !== "path") return path;
   return `${path}${t.line ? `:${t.line}` : ""}${t.col ? `:${t.col}` : ""}`;
+}
+
+/** 보조 키만의 이름 (Windows · Linux 는 "Ctrl+Shift") */
+function modLabel(mac: string): string {
+  return keyLabel(mac).replace(/\+$/, "");
 }
