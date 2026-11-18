@@ -394,6 +394,7 @@ impl Server {
             | Request::CreateWorktree { .. }
             | Request::RemoveWorktree { .. }
             | Request::UpdateWorktree { .. }
+            | Request::SetWorktreeGroups { .. }
             | Request::GitStatus { .. }
             | Request::GitDiff { .. }
             | Request::GitStage { .. }
@@ -458,6 +459,7 @@ impl Server {
                 | Request::CreateWorktree { .. }
                 | Request::RemoveWorktree { .. }
                 | Request::UpdateWorktree { .. }
+                | Request::SetWorktreeGroups { .. }
         );
         let removed_worktree = match &req {
             Request::RemoveWorktree { path, .. } => Some(path.clone()),
@@ -476,10 +478,11 @@ impl Server {
             Ok(match req {
                 Request::AddRepo { path } => Response::Repo { repo: ws.add_repo(std::path::Path::new(&path))? },
                 Request::AddRepos { path } => Response::Repos { repos: ws.add_repos(std::path::Path::new(&path))? },
-                Request::UpdateWorktree { path, name, pinned, parent } => {
-                    ws.update_worktree(&path, name, pinned, parent)?;
+                Request::UpdateWorktree { path, name, pinned, parent, group } => {
+                    ws.update_worktree(&path, name, pinned, parent, group)?;
                     Response::Ok
                 }
+                Request::SetWorktreeGroups { repo, groups } => Response::Repo { repo: ws.set_worktree_groups(&repo, groups)? },
                 Request::GitStatus { worktree } => Response::GitStatus { status: ws.status(&worktree)? },
                 Request::GitDiff { worktree, file, staged } => Response::Text { text: ws.diff(&worktree, &file, staged)? },
                 Request::GitStage { worktree, files } => {
@@ -580,6 +583,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::AddRepo { .. } => "add_repo",
         Request::AddRepos { .. } => "add_repos",
         Request::UpdateWorktree { .. } => "update_worktree",
+        Request::SetWorktreeGroups { .. } => "set_worktree_groups",
         Request::GitStatus { .. } => "git_status",
         Request::GitDiff { .. } => "git_diff",
         Request::GitStage { .. } => "git_stage",

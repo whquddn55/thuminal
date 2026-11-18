@@ -35,6 +35,7 @@ import {
   type Spawn,
   type WorkspaceId,
   type WorkspaceLayout,
+  type WorktreeGroup,
   type WorktreeInfo,
 } from "@thuminal/term-core";
 
@@ -62,6 +63,7 @@ import {
   type Zoom,
 } from "./terminal-font";
 import { applyTheme, loadThemeSettings, saveThemeSettings, type ThemeSettings } from "./theme";
+import { effectiveGroup, repoGroups, shiftWorktreeGroup } from "./worktree-groups";
 import { IS_MAC } from "./platform";
 
 export { FLOATING_WORKSPACE, OTHER_WORKSPACE };
@@ -89,6 +91,8 @@ export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }
   | { kind: "delete-worktree"; worktree: WorktreeInfo }
+  /** 워크트리 그룹 만들기(`add` 워크트리를 넣는다) · 이름과 색 바꾸기(`group`) */
+  | { kind: "worktree-group"; repo: string; group?: WorktreeGroup; add?: string }
   | { kind: "jump" }
   /** section 이 있으면 그 칸을 펴서 연다 */
   | { kind: "settings"; section?: SettingsSection }
@@ -1647,6 +1651,64 @@ export class AppModel {
   /** 부모 워크트리를 바꾼다 (null 이면 부모에서 뗀다) */
   setWorktreeParent = async (w: WorktreeInfo, parent: string | null) => {
     await this.services.host.updateWorktree(w.path, { parent }).catch(this.fail);
+  };
+
+  /** 프로젝트의 워크트리 그룹 목록을 통째로 바꾼다. 데몬이 맞춘 목록을 돌려준다 (실패하면 null) */
+  private saveWorktreeGroups = async (repo: string, groups: WorktreeGroup[]): Promise<WorktreeGroup[] | null> => {
+    try {
+      const r = await this.services.host.setWorktreeGroups(repo, groups);
+      this.set((s) => ({ repos: s.repos.map((x) => (x.id === r.id ? r : x)) }));
+      return r.groups ?? [];
+    } catch (e) {
+      this.fail(`워크트리 그룹을 바꾸지 못했어요: ${e}`);
+      return null;
+    }
+  };
+
+  /** 새 워크트리 그룹을 끝에 만들고, `add` 워크트리를 넣는다 */
+  createWorktreeGroup = async (repo: string, name: string, color: string, add?: string) => {
+    const cur = repoGroups(this.get().repos, repo);
+    const got = await this.saveWorktreeGroups(repo, [...cur, { id: "", name: name.trim(), color }]);
+    const id = got?.find((g) => !cur.some((c) => c.id === g.id))?.id;
+    if (id && add) await this.services.host.updateWorktree(add, { group: id }).catch(this.fail);
+    await this.refreshWorkspace();
+  };
+
+  editWorktreeGroup = (repo: string, id: string, change: { name: string; color: string }) =>
+    void this.saveWorktreeGroups(
+      repo,
+      repoGroups(this.get().repos, repo).map((g) => (g.id === id ? { ...g, name: change.name.trim() || g.name, color: change.color } : g)),
+    );
+
+  /** 그룹 차례를 `delta` 칸 옮긴다 */
+  shiftWorktreeGroup = (repo: string, id: string, delta: number) => void this.saveWorktreeGroups(repo, shiftWorktreeGroup(repoGroups(this.get().repos, repo), id, delta));
+
+  /** 그룹을 푼다. 든 워크트리는 그룹 밖으로 나온다 */
+  ungroupWorktreeGroup = async (repo: string, id: string) => {
+    await this.saveWorktreeGroups(
+      repo,
+      repoGroups(this.get().repos, repo).filter((g) => g.id !== id),
+    );
+    await this.refreshWorkspace();
+  };
+
+  /**
+   * 워크트리를 그룹에 넣는다 (null 이면 뺀다). 빼서 그 그룹에 든 워크트리가 하나도 남지 않으면 그룹도 지운다 (크롬 탭 그룹처럼).
+   * 하위 워크트리는 부모를 따라가므로 맨 위 워크트리만 넣고 뺀다
+   */
+  setWorktreeGroup = async (w: WorktreeInfo, group: string | null) => {
+    const before = this.get().worktrees.filter((x) => x.repo === w.repo);
+    const groups = repoGroups(this.get().repos, w.repo);
+    const left = effectiveGroup(w, before, groups);
+    try {
+      await this.services.host.updateWorktree(w.path, { group });
+    } catch (e) {
+      this.fail(e);
+      return;
+    }
+    const empty = left && left !== group && !before.some((x) => x.path !== w.path && effectiveGroup(x, before, groups) === left);
+    if (empty) await this.saveWorktreeGroups(w.repo, groups.filter((g) => g.id !== left));
+    await this.refreshWorkspace();
   };
 }
 

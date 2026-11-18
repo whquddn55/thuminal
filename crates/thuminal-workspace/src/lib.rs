@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 /// 어댑터가 쓰는 프로토콜 타입 (어댑터가 프로토콜 크레이트에 직접 기대지 않게 다시 내보낸다)
 pub use thuminal_protocol as protocol;
-use thuminal_protocol::{BranchList, DEFAULT_GROUP, DirEntry, FileContent, GitStatus, LineCount, RepoGroup, RepoInfo, SearchHit, WorktreeInfo};
+use thuminal_protocol::{BranchList, DEFAULT_GROUP, DirEntry, FileContent, GitStatus, LineCount, RepoGroup, RepoInfo, SearchHit, WorktreeGroup, WorktreeInfo};
 use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
@@ -89,6 +89,9 @@ struct Saved {
     /// 사이드바 워크스페이스 (옛 파일에는 없다. 없으면 기본 하나에 모든 프로젝트)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     groups: Vec<RepoGroup>,
+    /// 프로젝트(메인 워크트리 경로)마다 워크트리 그룹, 사이드바 차례
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    worktree_groups: std::collections::BTreeMap<PathBuf, Vec<WorktreeGroup>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,11 +103,14 @@ struct WorktreeMeta {
     /// 부모 워크트리 (하위 워크트리면)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent: Option<PathBuf>,
+    /// 든 워크트리 그룹 id (그 프로젝트의 `worktree_groups`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
 }
 
 impl WorktreeMeta {
     fn is_empty(&self) -> bool {
-        self.name.is_none() && !self.pinned && self.parent.is_none()
+        self.name.is_none() && !self.pinned && self.parent.is_none() && self.group.is_none()
     }
 }
 
@@ -132,6 +138,8 @@ pub struct Workspace {
     meta: Mutex<std::collections::BTreeMap<PathBuf, WorktreeMeta>>,
     /// 남긴 그대로의 워크스페이스. 읽을 때마다 [`normalize_groups`] 로 지금 저장소 목록에 맞춘다
     groups: Mutex<Vec<RepoGroup>>,
+    /// 프로젝트(메인 워크트리 경로)마다 워크트리 그룹
+    worktree_groups: Mutex<std::collections::BTreeMap<PathBuf, Vec<WorktreeGroup>>>,
     /// 기본 워크스페이스 이름을 정하지 않았을 때 쓰는 이름 (OS 의 컴퓨터 이름, [`system_computer_name`])
     system_name: String,
     /// 마지막으로 확인한 워크트리 목록과 그때 (`known_worktree`)
@@ -143,6 +151,8 @@ const OLD_DEFAULT_GROUP_NAME: &str = "기본";
 
 /// 워크스페이스 이름 최대 글자 수
 const MAX_GROUP_NAME: usize = 80;
+/// 워크트리 그룹 색 이름 최대 길이 (화면이 `blue` 같은 이름을 쓴다)
+const MAX_COLOR_NAME: usize = 24;
 
 /// 워크스페이스 목록을 저장소 목록에 맞춘다: 같은 id 는 앞 것만, 없는 저장소와 두 번째로 나온 저장소는 빼고,
 /// 기본 워크스페이스가 없으면 맨 앞에 넣고(이름이 비었으면 `default_name`), 어디에도 없는 저장소는 등록한 차례대로 기본 끝에 붙인다
@@ -233,6 +243,7 @@ impl Workspace {
             repos: Mutex::new(saved.repos),
             meta: Mutex::new(saved.worktrees),
             groups: Mutex::new(saved.groups),
+            worktree_groups: Mutex::new(saved.worktree_groups),
             system_name,
             known: Mutex::new(None),
         }
@@ -253,21 +264,23 @@ impl Workspace {
         let tmp = self.file.with_extension("json.tmp");
         let worktrees = self.meta.lock().unwrap().clone();
         let groups = self.groups.lock().unwrap().clone();
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&Saved { repos: repos.to_vec(), worktrees, groups }).unwrap())?;
+        let worktree_groups = self.worktree_groups.lock().unwrap().clone();
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&Saved { repos: repos.to_vec(), worktrees, groups, worktree_groups }).unwrap())?;
         std::fs::rename(tmp, &self.file)?;
         Ok(())
     }
 
-    fn info(path: &Path) -> RepoInfo {
+    fn info(&self, path: &Path) -> RepoInfo {
         RepoInfo {
             id: repo_id(path),
             name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
             path: path.to_string_lossy().into_owned(),
+            groups: self.worktree_groups.lock().unwrap().get(path).cloned().unwrap_or_default(),
         }
     }
 
     pub fn repos(&self) -> Vec<RepoInfo> {
-        self.repos.lock().unwrap().iter().map(|r| Self::info(&r.path)).collect()
+        self.repos.lock().unwrap().iter().map(|r| self.info(&r.path)).collect()
     }
 
     fn repo_path(&self, id: &str) -> Result<PathBuf, WorkspaceError> {
@@ -297,7 +310,7 @@ impl Workspace {
             self.save(&repos)?;
             info!(event = "repo_added", path = %main.display());
         }
-        Ok(Self::info(&main))
+        Ok(self.info(&main))
     }
 
     pub fn remove_repo(&self, id: &str) -> Result<(), WorkspaceError> {
@@ -307,10 +320,11 @@ impl Workspace {
         if repos.len() == before {
             return Err(WorkspaceError::UnknownRepo(id.into()));
         }
-        // 워크스페이스에서도 뺀다 (다시 등록하면 옛 워크스페이스가 아니라 기본에 든다)
+        // 워크스페이스에서도 뺀다 (다시 등록하면 옛 워크스페이스가 아니라 기본에 든다). 워크트리 그룹도 지운다
         for g in self.groups.lock().unwrap().iter_mut() {
             g.repos.retain(|r| r != id);
         }
+        self.worktree_groups.lock().unwrap().retain(|p, _| repo_id(p) != id);
         self.save(&repos)?;
         Ok(())
     }
@@ -367,6 +381,62 @@ impl Workspace {
         Ok(normalized)
     }
 
+    /// 프로젝트 하나의 워크트리 그룹을 통째로 바꾼다. id 가 빈 것은 새 id 를 붙이고, 이름이 비었거나 id 가 겹치면 거절한다.
+    /// 빠진 그룹에 들었던 워크트리 기록에서 그 그룹을 지운다 (그룹 밖으로 나온다). 맞춘 저장소를 돌려준다
+    pub fn set_worktree_groups(&self, repo: &str, groups: Vec<WorktreeGroup>) -> Result<RepoInfo, WorkspaceError> {
+        let root = self.repo_path(repo)?;
+        let mut seen = std::collections::HashSet::new();
+        for g in &groups {
+            if g.name.trim().is_empty() {
+                return Err(WorkspaceError::Invalid("그룹 이름이 비어 있어요".into()));
+            }
+            if !g.id.is_empty() && !seen.insert(g.id.as_str()) {
+                return Err(WorkspaceError::Invalid(format!("그룹 id 가 겹쳐요: {}", g.id)));
+            }
+        }
+        {
+            let mut all = self.worktree_groups.lock().unwrap();
+            // 새 id 는 모든 프로젝트에서 겹치지 않게 붙인다 (워크트리 기록은 경로만 보고 그룹 id 를 든다)
+            let mut used: std::collections::HashSet<String> = all.values().flatten().map(|g| g.id.clone()).chain(groups.iter().map(|g| g.id.clone())).collect();
+            let mut next = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            let groups: Vec<WorktreeGroup> = groups
+                .into_iter()
+                .map(|g| {
+                    let id = if g.id.is_empty() {
+                        let mut id = format!("w{next:x}");
+                        while used.contains(&id) {
+                            next += 1;
+                            id = format!("w{next:x}");
+                        }
+                        used.insert(id.clone());
+                        id
+                    } else {
+                        g.id
+                    };
+                    WorktreeGroup { id, name: g.name.trim().chars().take(MAX_GROUP_NAME).collect(), color: g.color.trim().chars().take(MAX_COLOR_NAME).collect() }
+                })
+                .collect();
+            let kept: std::collections::HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
+            let before: Vec<String> = all.get(&root).map(|gs| gs.iter().map(|g| g.id.clone()).filter(|id| !kept.contains(id.as_str())).collect()).unwrap_or_default();
+            if !before.is_empty() {
+                let mut meta = self.meta.lock().unwrap();
+                for m in meta.values_mut().filter(|m| m.group.as_ref().is_some_and(|g| before.contains(g))) {
+                    m.group = None;
+                }
+                meta.retain(|_, m| !m.is_empty());
+            }
+            info!(event = "worktree_groups_set", repo, groups = groups.len());
+            if groups.is_empty() {
+                all.remove(&root);
+            } else {
+                all.insert(root.clone(), groups);
+            }
+        }
+        let repos = self.repos.lock().unwrap().clone();
+        self.save(&repos)?;
+        Ok(self.info(&root))
+    }
+
     pub fn worktrees(&self, repo: Option<&str>) -> Result<Vec<WorktreeInfo>, WorkspaceError> {
         let repos: Vec<PathBuf> = match repo {
             Some(id) => vec![self.repo_path(id)?],
@@ -375,6 +445,7 @@ impl Workspace {
         let mut out = Vec::new();
         for path in repos {
             let id = repo_id(&path);
+            let group_ids: Vec<String> = self.worktree_groups.lock().unwrap().get(&path).map(|gs| gs.iter().map(|g| g.id.clone()).collect()).unwrap_or_default();
             let meta = self.meta.lock().unwrap();
             // 폴더를 지웠는데 git 이 아직 기억하는 것(prunable)은 쓸 수 없으니 뺀다
             for w in self.vcs.list_worktrees(&path)?.into_iter().filter(|w| w.path.exists()) {
@@ -388,6 +459,8 @@ impl Workspace {
                     name: m.name,
                     pinned: m.pinned,
                     parent: m.parent.map(|p| p.to_string_lossy().into_owned()),
+                    // 지운 그룹이나 다른 프로젝트의 그룹이면 그룹 밖으로 본다
+                    group: m.group.filter(|g| group_ids.contains(g)),
                 });
             }
         }
@@ -412,7 +485,7 @@ impl Workspace {
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
         if name.is_some() || parent.is_some() {
             let canonical = dunce::canonicalize(&path).unwrap_or(path.clone());
-            self.meta.lock().unwrap().insert(canonical, WorktreeMeta { name, pinned: false, parent });
+            self.meta.lock().unwrap().insert(canonical, WorktreeMeta { name, pinned: false, parent, group: None });
             let repos = self.repos.lock().unwrap().clone();
             self.save(&repos)?;
         }
@@ -519,8 +592,27 @@ impl Workspace {
         }
     }
 
-    pub fn update_worktree(&self, path: &str, name: Option<String>, pinned: Option<bool>, parent: Option<String>) -> Result<(), WorkspaceError> {
+    pub fn update_worktree(
+        &self,
+        path: &str,
+        name: Option<String>,
+        pinned: Option<bool>,
+        parent: Option<String>,
+        group: Option<String>,
+    ) -> Result<(), WorkspaceError> {
         let p = self.known_worktree(path)?;
+        // 그룹: 빈 글이면 뺀다. 그 워크트리 프로젝트의 그룹이어야 한다
+        let group = match group {
+            Some(g) if g.is_empty() => Some(None),
+            Some(g) => {
+                let main = self.vcs.main_worktree(&p)?;
+                if !self.worktree_groups.lock().unwrap().get(&main).is_some_and(|gs| gs.iter().any(|x| x.id == g)) {
+                    return Err(WorkspaceError::Invalid(format!("이 프로젝트에 없는 그룹이에요: {g}")));
+                }
+                Some(Some(g))
+            }
+            None => None,
+        };
         // 부모: 빈 글이면 뗀다. 자기 자신이나 자기 밑의 워크트리는 부모로 삼지 못한다
         let parent = match parent {
             Some(s) if s.is_empty() => Some(None),
@@ -549,6 +641,9 @@ impl Workspace {
             }
             if let Some(par) = parent {
                 m.parent = par;
+            }
+            if let Some(g) = group {
+                m.group = g;
             }
             if m.is_empty() {
                 meta.remove(&p);

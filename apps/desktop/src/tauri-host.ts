@@ -53,6 +53,7 @@ import type {
   TerminalColors,
   UpdatesApi,
   WorkspaceLayout,
+  WorktreeGroup,
   WorktreeInfo,
 } from "@thuminal/term-core";
 
@@ -396,10 +397,15 @@ export class TauriHostApi implements HostApi {
     return this.req<RepoInfo[]>({ type: "add_repos", path }, (r) => r.repos);
   }
 
-  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void> {
-    // 데몬은 빈 글을 "부모에서 떼기" 로 받는다
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null; group?: string | null }): Promise<void> {
+    // 데몬은 빈 글을 "부모에서 떼기" · "그룹에서 빼기" 로 받는다. 그룹은 줄 때만 싣는다 (옛 데몬도 받게)
     const parent = change.parent === undefined ? null : (change.parent ?? "");
-    return this.req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent });
+    const group = change.group === undefined ? {} : { group: change.group ?? "" };
+    return this.req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent, ...group });
+  }
+
+  setWorktreeGroups(repo: string, groups: WorktreeGroup[]): Promise<RepoInfo> {
+    return this.req<RepoInfo>({ type: "set_worktree_groups", repo, groups }, (r) => r.repo);
   }
 
   getLayout(workspace?: string): Promise<WorkspaceLayout[]> {

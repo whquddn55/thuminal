@@ -36,6 +36,7 @@ import type {
   SnapshotFormat,
   TerminalColors,
   WorkspaceLayout,
+  WorktreeGroup,
   WorktreeInfo,
 } from "@thuminal/term-core";
 
@@ -336,9 +337,14 @@ export class WebHostApi implements HostApi {
     );
   }
 
-  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void> {
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null; group?: string | null }): Promise<void> {
     const parent = change.parent === undefined ? null : (change.parent ?? "");
-    return this.req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent });
+    const group = change.group === undefined ? {} : { group: change.group ?? "" };
+    return this.req({ type: "update_worktree", path, name: change.name ?? null, pinned: change.pinned ?? null, parent, ...group });
+  }
+
+  setWorktreeGroups(repo: string, groups: WorktreeGroup[]): Promise<RepoInfo> {
+    return this.req({ type: "set_worktree_groups", repo, groups }, (r) => r.repo);
   }
 
   removeWorktree(repo: string, path: string, opts: { force: boolean; deleteBranch: boolean; forceBranch?: boolean }): Promise<string> {

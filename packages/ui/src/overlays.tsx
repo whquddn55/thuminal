@@ -3,7 +3,7 @@
 import { CaretDownIcon, CaretRightIcon, FileTextIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { BranchList, OrcaScan, OrcaSession, WorktreeInfo } from "@thuminal/term-core";
+import type { BranchList, OrcaScan, OrcaSession, WorktreeGroup, WorktreeInfo } from "@thuminal/term-core";
 
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { baseName, dirName, matchFiles } from "./file-match";
 import { cn } from "./lib/utils";
 import { type AppModel, ModelContext, type NewWorktree, useApp, useModel, worktreeTitle } from "./store";
+import { GROUP_COLOR_LABEL, GROUP_COLORS, groupColorVar, nextGroupColor, repoGroups } from "./worktree-groups";
 
 /** 이름에서 브랜치 이름을 만든다: 공백은 -, git 이 받지 않는 글자는 뺀다 */
 export function branchFromName(name: string): string {
@@ -49,6 +50,8 @@ function HostDialogs() {
       return <NewWorktreeDialog initialRepo={dialog.repo} parent={dialog.parent} onClose={close} />;
     case "delete-worktree":
       return <DeleteWorktreeDialog worktree={dialog.worktree} onClose={close} />;
+    case "worktree-group":
+      return <WorktreeGroupDialog repo={dialog.repo} group={dialog.group} add={dialog.add} onClose={close} />;
     case "jump":
       return <JumpPalette onClose={close} />;
     case "open-markdown":
@@ -245,6 +248,63 @@ function NewWorktreeDialog({ initialRepo, parent, onClose }: { initialRepo: stri
           </Button>
           <Button disabled={!ok} onClick={submit}>
             만들기 (Enter)
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 워크트리 그룹 만들기(`add` 워크트리를 넣는다) · 이름과 색 바꾸기(`group`). 색은 크롬 탭 그룹과 같은 아홉 개 */
+function WorktreeGroupDialog({ repo, group, add, onClose }: { repo: string; group?: WorktreeGroup; add?: string; onClose: () => void }) {
+  const model = useModel();
+  const groups = useApp((s) => repoGroups(s.repos, repo));
+  const addWt = useApp((s) => (add ? s.worktrees.find((w) => w.path === add) : undefined));
+  const [name, setName] = useState(group?.name ?? "");
+  const [color, setColor] = useState<string>(() => group?.color ?? nextGroupColor(groups));
+  const ok = name.trim().length > 0;
+  const submit = () => {
+    if (!ok) return;
+    if (group) model.editWorktreeGroup(repo, group.id, { name, color });
+    else void model.createWorktreeGroup(repo, name, color, add);
+    onClose();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>{group ? "그룹 이름 · 색 바꾸기" : "새 워크트리 그룹"}</DialogTitle>
+          <DialogDescription>
+            {group ? "사이드바에 보일 그룹 이름과 색을 바꿔요." : addWt ? `"${worktreeTitle(addWt)}" 워크트리를 넣어 새 그룹을 만들어요.` : "새 그룹을 만들어요."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <Field label="이름">
+            <Input autoFocus value={name} placeholder="예: 리뷰 대기" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          </Field>
+          <Field label="색">
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="그룹 색">
+              {GROUP_COLORS.map((c) => (
+                <button
+                  key={c}
+                  role="radio"
+                  aria-checked={color === c}
+                  aria-label={GROUP_COLOR_LABEL[c]}
+                  title={GROUP_COLOR_LABEL[c]}
+                  className="size-6 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{ background: groupColorVar(c), boxShadow: color === c ? `0 0 0 2px var(--background), 0 0 0 4px ${groupColorVar(c)}` : undefined }}
+                  onClick={() => setColor(c)}
+                />
+              ))}
+            </div>
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            취소
+          </Button>
+          <Button disabled={!ok} onClick={submit}>
+            {group ? "저장" : "만들기"} (Enter)
           </Button>
         </DialogFooter>
       </DialogContent>

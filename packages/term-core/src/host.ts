@@ -28,6 +28,7 @@ import type {
   SnapshotFormat,
   TerminalColors,
   WorkspaceLayout,
+  WorktreeGroup,
   WorktreeInfo,
 } from "./protocol";
 
@@ -259,7 +260,12 @@ export interface HostApi {
   listWorktrees(): Promise<WorktreeInfo[]>;
   createWorktree(repo: string, branch: string, opts?: { base?: string; name?: string; parent?: string }): Promise<WorktreeInfo>;
   /** 이름·고정·부모를 바꾼다. 준 것만 바꾼다. parent 를 null 로 주면 부모에서 뗀다 */
-  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null }): Promise<void>;
+  updateWorktree(path: string, change: { name?: string; pinned?: boolean; parent?: string | null; group?: string | null }): Promise<void>;
+  /**
+   * 프로젝트 하나의 워크트리 그룹 목록을 통째로 바꾸고 데몬이 맞춘 저장소를 돌려받는다 (빈 id 는 새로 붙는다. 빠진 그룹의 워크트리는 그룹 밖으로).
+   * 데몬 부 판 `WORKTREE_GROUPS_PROTOCOL_MINOR` 부터 된다
+   */
+  setWorktreeGroups(repo: string, groups: WorktreeGroup[]): Promise<RepoInfo>;
   readonly git: GitApi;
   readonly files: FilesApi;
   /** 운영체제 폴더 고르기 창. 고르지 않으면 null */

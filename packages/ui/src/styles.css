@@ -96,6 +96,17 @@
   --agent-done: #10b981;
   --agent-failed: #ef4444;
   --drop: #3b82f6;
+  /* 워크트리 그룹 색 (크롬 탭 그룹의 다크 색). 이름표 글자는 --wtg-ink */
+  --wtg-grey: #dadce0;
+  --wtg-blue: #8ab4f8;
+  --wtg-red: #f28b82;
+  --wtg-yellow: #fdd663;
+  --wtg-green: #81c995;
+  --wtg-pink: #ff8bcb;
+  --wtg-purple: #c58af9;
+  --wtg-cyan: #78d9ec;
+  --wtg-orange: #fcad70;
+  --wtg-ink: #202124;
   /* 칸이 여럿일 때 포커스된 칸 테두리 */
   --pane-focus: #22c55e;
   color-scheme: dark;
@@ -103,6 +114,17 @@
 
 :root:not(.dark) {
   color-scheme: light;
+  /* 워크트리 그룹 색 (크롬 탭 그룹의 라이트 색. 흰 글자가 읽히게 노랑 · 주황은 조금 진하게) */
+  --wtg-grey: #5f6368;
+  --wtg-blue: #1a73e8;
+  --wtg-red: #d93025;
+  --wtg-yellow: #b58000;
+  --wtg-green: #188038;
+  --wtg-pink: #d01884;
+  --wtg-purple: #a142f4;
+  --wtg-cyan: #007b83;
+  --wtg-orange: #d56e0c;
+  --wtg-ink: #ffffff;
 }
 
 @layer base {

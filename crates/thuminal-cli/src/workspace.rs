@@ -47,7 +47,7 @@ pub enum WtCmd {
         #[arg(long)]
         json: bool,
     },
-    /// 워크트리 이름·고정·부모를 바꾼다. 주지 않은 것은 그대로 둔다
+    /// 워크트리 이름·고정·부모·그룹을 바꾼다. 주지 않은 것은 그대로 둔다
     Set {
         /// 워크트리 경로나 브랜치 이름
         target: String,
@@ -66,6 +66,12 @@ pub enum WtCmd {
         /// 고정을 푼다
         #[arg(long)]
         unpin: bool,
+        /// 이 프로젝트의 워크트리 그룹(이름이나 id)에 넣는다. 그룹은 사이드바에서 만든다
+        #[arg(long, conflicts_with = "no_group")]
+        group: Option<String>,
+        /// 그룹에서 뺀다
+        #[arg(long)]
+        no_group: bool,
     },
     /// 워크트리를 지운다. 그 안에서 돌던 세션도 끝낸다
     Rm {
@@ -153,10 +159,16 @@ pub async fn repo(c: &Client, cmd: RepoCmd) -> Res<()> {
     Ok(())
 }
 
-fn print_worktrees(list: &[WorktreeInfo]) {
+fn print_worktrees(list: &[WorktreeInfo], repos: &[RepoInfo]) {
     for w in list {
         let name = w.name.as_deref().map(|n| format!("  [{n}]")).unwrap_or_default();
-        println!("{}  {:<32}  {}{}{name}", w.repo, w.branch.as_deref().unwrap_or("(detached)"), w.path, if w.is_main { "  (메인)" } else { "" });
+        let group = w
+            .group
+            .as_deref()
+            .and_then(|g| repos.iter().find(|r| r.id == w.repo)?.groups.iter().find(|x| x.id == g))
+            .map(|g| format!("  {{{}}}", g.name))
+            .unwrap_or_default();
+        println!("{}  {:<32}  {}{}{name}{group}", w.repo, w.branch.as_deref().unwrap_or("(detached)"), w.path, if w.is_main { "  (메인)" } else { "" });
     }
 }
 
@@ -171,7 +183,7 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&list)?);
             } else {
-                print_worktrees(&list);
+                print_worktrees(&list, &c.repos().await?);
             }
         }
         WtCmd::New { branch, base, repo, parent, name, json } => {
@@ -190,7 +202,7 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 println!("{}", w.path);
             }
         }
-        WtCmd::Set { target, name, parent, no_parent, pin, unpin } => {
+        WtCmd::Set { target, name, parent, no_parent, pin, unpin, group, no_group } => {
             let w = find_worktree(c, &target, false).await?;
             // 데몬은 부모를 빈 글로 받으면 뗀다
             let parent = match (parent, no_parent) {
@@ -199,10 +211,23 @@ pub async fn wt(c: &Client, cmd: WtCmd) -> Res<()> {
                 (None, false) => None,
             };
             let pinned = if pin { Some(true) } else if unpin { Some(false) } else { None };
-            if name.is_none() && parent.is_none() && pinned.is_none() {
-                return Err("--name, --parent, --no-parent, --pin, --unpin 가운데 하나를 준다".into());
+            // 그룹은 이름으로도 찾는다. 데몬은 빈 글을 받으면 그룹에서 뺀다
+            let group = match (group, no_group) {
+                (Some(g), _) => {
+                    let repo = c.repos().await?.into_iter().find(|r| r.id == w.repo).ok_or("워크트리의 저장소를 찾지 못했다")?;
+                    let found = repo.groups.iter().find(|x| x.id == g || x.name == g).ok_or_else(|| {
+                        let names: Vec<&str> = repo.groups.iter().map(|x| x.name.as_str()).collect();
+                        format!("{} 에 없는 그룹: {g} (있는 그룹: {})", repo.name, if names.is_empty() { "없음".into() } else { names.join(", ") })
+                    })?;
+                    Some(found.id.clone())
+                }
+                (None, true) => Some(String::new()),
+                (None, false) => None,
+            };
+            if name.is_none() && parent.is_none() && pinned.is_none() && group.is_none() {
+                return Err("--name, --parent, --no-parent, --pin, --unpin, --group, --no-group 가운데 하나를 준다".into());
             }
-            c.request(Request::UpdateWorktree { path: w.path.clone(), name, pinned, parent }).await?;
+            c.request(Request::UpdateWorktree { path: w.path.clone(), name, pinned, parent, group }).await?;
             println!("{}", w.path);
         }
         WtCmd::Rm { target, force, delete_branch, force_branch } => {

@@ -204,6 +204,21 @@ pub struct RepoInfo {
     pub name: String,
     /// 메인 워크트리 경로
     pub path: String,
+    /// 이 프로젝트의 워크트리 그룹, 사이드바 차례 (minor 11). 비어도 늘 보낸다 (화면은 이 필드가 있으면 그룹을 쓸 수 있다고 본다)
+    #[serde(default)]
+    pub groups: Vec<WorktreeGroup>,
+}
+
+/// 한 프로젝트 안의 워크트리 그룹 (크롬 탭 그룹처럼 이름 · 색을 붙여 고른 워크트리끼리 묶는다).
+/// 데몬은 색의 뜻을 모르고 글 그대로 남긴다 (화면이 `blue` 같은 이름을 쓴다)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeGroup {
+    /// `set_worktree_groups` 에 빈 글로 주면 데몬이 새 id 를 붙인다
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: String,
 }
 
 /// 기본 워크스페이스의 id. 지울 수 없고, 다른 워크스페이스에 넣지 않은 프로젝트가 여기 든다
@@ -251,6 +266,9 @@ pub struct WorktreeInfo {
     /// 부모 워크트리 경로 (하위 워크트리면). 사이드바가 부모 카드 밑에 들여 그린다
     #[serde(default)]
     pub parent: Option<String>,
+    /// 든 워크트리 그룹 id (`RepoInfo.groups`). 하위 워크트리는 화면이 맨 위 부모의 그룹을 따른다 (minor 11)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -471,7 +489,7 @@ pub enum Request {
         #[serde(default)]
         parent: Option<String>,
     },
-    /// 워크트리 이름·고정·부모를 바꾼다 (None 이면 그대로 둔다. 이름·부모를 빈 글로 주면 지운다)
+    /// 워크트리 이름·고정·부모·그룹을 바꾼다 (None 이면 그대로 둔다. 이름·부모·그룹을 빈 글로 주면 지운다)
     UpdateWorktree {
         path: String,
         #[serde(default)]
@@ -480,7 +498,13 @@ pub enum Request {
         pinned: Option<bool>,
         #[serde(default)]
         parent: Option<String>,
+        /// 그 워크트리 프로젝트의 그룹 id (minor 11)
+        #[serde(default)]
+        group: Option<String>,
     },
+    /// 프로젝트 하나의 워크트리 그룹 목록을 통째로 바꾼다 (만들기 · 이름 · 색 · 차례 · 지우기). 빈 id 는 새로 붙인다.
+    /// 빠진 그룹에 들었던 워크트리는 그룹 밖으로 나온다. 맞춘 저장소를 `repo` 로 돌려준다 (minor 11)
+    SetWorktreeGroups { repo: String, groups: Vec<WorktreeGroup> },
     GitStatus { worktree: String },
     /// 파일 하나의 diff. `staged` 면 스테이지된 변경, 아니면 작업 폴더 변경 (새 파일 포함)
     GitDiff {

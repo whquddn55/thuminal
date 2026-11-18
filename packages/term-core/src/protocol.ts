@@ -89,6 +89,17 @@ export interface RepoInfo {
   id: string;
   name: string;
   path: string;
+  /** 이 프로젝트의 워크트리 그룹, 사이드바 차례. 데몬 부 버전 `WORKTREE_GROUPS_PROTOCOL_MINOR` 부터 늘 들어 있다 (옛 데몬은 없다) */
+  groups?: WorktreeGroup[];
+}
+
+/** 한 프로젝트 안의 워크트리 그룹 (크롬 탭 그룹처럼 이름 · 색을 붙여 고른 워크트리끼리 묶는다) */
+export interface WorktreeGroup {
+  /** `set_worktree_groups` 에 빈 글로 주면 데몬이 새 id 를 붙인다 */
+  id: string;
+  name: string;
+  /** 색 이름 (`blue` 등, ui `worktree-groups.ts`). 데몬은 뜻을 모른다 */
+  color: string;
 }
 
 /** 기본 워크스페이스의 id. 지울 수 없고, 다른 워크스페이스에 넣지 않은 프로젝트가 여기 든다 */
@@ -127,6 +138,8 @@ export interface WorktreeInfo {
   pinned: boolean;
   /** 부모 워크트리 경로 (하위 워크트리면) */
   parent?: string | null;
+  /** 든 워크트리 그룹 id (`RepoInfo.groups`). 하위 워크트리는 화면이 맨 위 부모의 그룹을 따른다 */
+  group?: string | null;
 }
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed" | "untracked" | "conflicted";
@@ -199,6 +212,9 @@ export const OUTSIDE_FILES_PROTOCOL_MINOR = 9;
 
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 `stop_process` 의 강제 종료(`force`, SIGKILL)가 된다 */
 export const FORCE_STOP_PROTOCOL_MINOR = 10;
+
+/** 데몬 프로토콜 부 판이 이 값 이상이어야 워크트리 그룹(`set_worktree_groups`, `update_worktree` 의 `group`)이 된다 */
+export const WORKTREE_GROUPS_PROTOCOL_MINOR = 11;
 
 // ---- 리소스 관리자 (세션 프로세스와 LISTEN 포트, `list_processes`) ----
 

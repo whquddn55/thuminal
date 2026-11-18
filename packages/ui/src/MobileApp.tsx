@@ -38,6 +38,7 @@ import { groupKey, normalizeGroups } from "./groups";
 import { paneOfSession, panesOf } from "./layout";
 import { RepoMark } from "./repo-icon";
 import { descendantsOf, lineageCounts, lineageKey, loadCollapsed, toggleCollapsed, worktreeForest } from "./lineage";
+import { arrangeWorktrees, groupColorVar } from "./worktree-groups";
 import { cn } from "./lib/utils";
 import type { Services } from "./services";
 import { agentStatus, type Status, StatusIndicator, statusOf } from "./Sidebar";
@@ -290,12 +291,26 @@ function Home({ go, menu }: { go: (s: Screen) => void; menu: React.ReactNode }) 
             const r = repos.find((x) => x.id === id);
             const list = worktrees.filter((w) => w.repo === id);
             if (!r || !list.length) return [];
-            const { roots, kids } = worktreeForest(list);
+            // 워크트리 그룹: main → 그룹들 → 그룹 밖 차례로, 그룹 앞에 이름표를 붙여 늘어놓는다
+            const arranged = arrangeWorktrees([...list].sort((a, b) => Number(b.is_main) - Number(a.is_main)), list, r.groups ?? []);
+            const tree = (l: WorktreeInfo[]) => {
+              const { roots, kids } = worktreeForest(l);
+              return roots.map((w) => <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />);
+            };
             return [
               <Section key={r.id} title={r.name} icon={<RepoMark repo={r.id} name={r.name} className="size-4" />}>
-                {roots.map((w) => (
-                  <WorktreeBranch key={w.path} w={w} kids={kids} collapsed={collapsed} onToggle={toggle} go={go} />
+                {tree(arranged.main)}
+                {arranged.groups.map(({ group, members }) => (
+                  <div key={group.id} className="border-l-2 pl-1" style={{ borderColor: groupColorVar(group.color) }}>
+                    <div className="px-3 pt-1.5 pb-0.5">
+                      <span className="inline-flex h-5 items-center rounded-md px-2 text-[12px] font-semibold text-[var(--wtg-ink)]" style={{ background: groupColorVar(group.color) }}>
+                        {group.name}
+                      </span>
+                    </div>
+                    {tree(members)}
+                  </div>
                 ))}
+                {tree(arranged.loose)}
               </Section>,
             ];
           });

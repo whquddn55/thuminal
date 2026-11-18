@@ -37,6 +37,7 @@ import {
   type RepoInfo,
   type SessionInfo,
   type WorkspaceId,
+  type WorktreeGroup,
   type WorktreeInfo,
 } from "@thuminal/term-core";
 
@@ -78,6 +79,7 @@ import { SessionPorts, WorktreePorts } from "./ports-ui";
 import { ResourceButton } from "./ResourceManager";
 import { type AppState, FLOATING_WORKSPACE, HOST_STATE_LABEL, ModelContext, OTHER_WORKSPACE, useApp, useModel, worktreeTitle } from "./store";
 import { shortcutLabel } from "./shortcuts";
+import { arrangeWorktrees, canGroup, effectiveGroup, groupColorVar, groupFoldKey } from "./worktree-groups";
 
 function copy(text: string) {
   void navigator.clipboard.writeText(text).catch(() => undefined);
@@ -478,7 +480,7 @@ function ProjectGroup({
         </>
       }
     >
-      <WorktreeTree list={mainFirst(worktrees.filter((w) => !w.pinned))} collapsed={collapsed} onToggle={onToggle} />
+      <ProjectWorktrees groups={r.groups ?? []} all={worktrees} collapsed={collapsed} onToggle={onToggle} />
       {creating.map((c) => (
         <div key={c.branch} className="ml-1 flex gap-0.5 rounded-lg border border-transparent py-1.5 pr-1.5 opacity-70">
           <span className="flex size-4 items-center justify-center">
@@ -691,6 +693,11 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
   const grow = (p: string) => siblings.filter((x) => x.parent === p && !below.has(x.path)).forEach((x) => (below.add(x.path), grow(x.path)));
   grow(w.path);
   const parentChoices = siblings.filter((x) => !below.has(x.path) && x.path !== w.parent);
+  // 워크트리 그룹: 옛 데몬은 저장소에 groups 를 주지 않는다 (그때는 메뉴를 숨긴다)
+  const repoGroups = useApp((s: AppState) => s.repos.find((r) => r.id === w.repo)?.groups);
+  const groups = repoGroups ?? [];
+  const mine = effectiveGroup(w, [w, ...siblings], groups);
+  const mineGroup = groups.find((g) => g.id === mine);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -699,6 +706,8 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
             ws={w.path}
             title={title}
             subtitle={w.branch ?? "(detached)"}
+            // 고정 칸에 간 워크트리는 든 그룹 색 점을 단다
+            extra={w.pinned && mineGroup ? <span className="size-2 shrink-0 rounded-full" style={{ background: groupColorVar(mineGroup.color) }} title={`그룹: ${mineGroup.name}`} /> : undefined}
             badge={w.is_main ? "기본" : undefined}
             renaming={renaming}
             onRename={(name) => {
@@ -717,6 +726,24 @@ function WorktreeCard({ w }: { w: WorktreeInfo }) {
       <ContextMenuContent className="w-56">
         <ContextMenuItem onSelect={() => setRenaming(true)}>이름 바꾸기</ContextMenuItem>
         <ContextMenuItem onSelect={() => void model.togglePin(w)}>{w.pinned ? "고정 풀기" : "맨 위에 고정"}</ContextMenuItem>
+        {repoGroups && canGroup(w, siblings) && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>그룹에 넣기</ContextMenuSubTrigger>
+            <ContextMenuSubContent className="max-h-80 w-52 overflow-y-auto">
+              {groups.map((g) => (
+                <ContextMenuItem key={g.id} disabled={g.id === mine} onSelect={() => void model.setWorktreeGroup(w, g.id)}>
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: groupColorVar(g.color) }} />
+                  <span className="truncate">{g.name}</span>
+                </ContextMenuItem>
+              ))}
+              {groups.length > 0 && <ContextMenuSeparator />}
+              <ContextMenuItem onSelect={() => model.setDialog({ kind: "worktree-group", repo: w.repo, add: w.path })}>새 그룹…</ContextMenuItem>
+              <ContextMenuItem disabled={!mine} onSelect={() => void model.setWorktreeGroup(w, null)}>
+                그룹에서 빼기
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => model.setDialog({ kind: "new-worktree", repo: w.repo, parent: w.path })}>하위 워크트리 만들기…</ContextMenuItem>
         <ContextMenuSub>
@@ -777,8 +804,11 @@ function WorkspaceCard({
   renamePlaceholder,
   renameValue,
   onKeyDown,
+  extra,
 }: {
   ws: WorkspaceId;
+  /** 제목 줄 끝에 붙일 것 (고정 칸 카드의 그룹 색 점) */
+  extra?: React.ReactNode;
   title: string;
   subtitle: string;
   badge?: string;
@@ -879,6 +909,7 @@ function WorkspaceCard({
                 {badge}
               </span>
             )}
+            {extra}
           </div>
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{subtitle}</span>
@@ -930,6 +961,123 @@ function AgentRow({ s, now }: { s: SessionInfo; now: number }) {
       </span>
       {agent.model && <span className="max-w-20 shrink-0 truncate font-mono text-[10px] text-muted-foreground/70">{agent.model}</span>}
       <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">{ago(when, now)}</span>
+    </div>
+  );
+}
+
+/**
+ * 프로젝트 칸의 워크트리: main → 워크트리 그룹들 → 그룹 밖 워크트리 (`arrangeWorktrees`). 고정한 워크트리는 고정 칸에 있어 뺀다.
+ * 그룹 안과 그룹 밖은 저마다 부모 → 자식으로 늘어놓는다 (하위 워크트리는 맨 위 부모의 그룹에 든다)
+ */
+function ProjectWorktrees({ groups, all, collapsed, onToggle }: { groups: WorktreeGroup[]; all: WorktreeInfo[]; collapsed: Set<string>; onToggle: (key: string) => void }) {
+  const { main, groups: blocks, loose } = arrangeWorktrees(mainFirst(all.filter((w) => !w.pinned)), all, groups);
+  return (
+    <>
+      <WorktreeTree list={main} collapsed={collapsed} onToggle={onToggle} />
+      {blocks.map(({ group, members }) => (
+        <WorktreeGroupSection
+          key={group.id}
+          group={group}
+          index={groups.indexOf(group)}
+          total={groups.length}
+          repo={members[0].repo}
+          members={members}
+          collapsed={collapsed}
+          onToggle={onToggle}
+        />
+      ))}
+      <WorktreeTree list={loose} collapsed={collapsed} onToggle={onToggle} />
+    </>
+  );
+}
+
+/**
+ * 워크트리 그룹 하나: 크롬 탭 그룹처럼 그룹 색 이름표 머리 + 같은 색 세로줄을 단 카드들. 머리를 누르면 접고 편다.
+ * 접으면 머리 한 줄에 안 워크트리 상태를 개수로 붙인다 (하위 워크트리 단추와 같은 계산)
+ */
+function WorktreeGroupSection({
+  group,
+  index,
+  total,
+  repo,
+  members,
+  collapsed,
+  onToggle,
+}: {
+  group: WorktreeGroup;
+  index: number;
+  total: number;
+  repo: string;
+  members: WorktreeInfo[];
+  collapsed: Set<string>;
+  onToggle: (key: string) => void;
+}) {
+  const model = useModel();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const key = groupFoldKey(group.id);
+  const folded = collapsed.has(key);
+  const color = groupColorVar(group.color);
+  const statuses = useApp(
+    useShallow((s: AppState) => members.map((m) => statusOf(sessionsOf(s.layouts[m.path]).flatMap((id) => (s.sessions[id] ? [s.sessions[id]] : []))))),
+  );
+  const counts = folded ? lineageCounts(statuses) : [];
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!folded}
+        title={folded ? "그룹 펴기" : "그룹 접기"}
+        className="group/wtg flex h-6 cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-0.5 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={() => onToggle(key)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onToggle(key))}
+      >
+        <span
+          className="inline-flex h-[18px] min-w-0 items-center truncate rounded-md px-1.5 text-[11px] leading-none font-semibold text-[var(--wtg-ink)]"
+          style={{ background: color }}
+        >
+          {group.name}
+        </span>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{members.length}</span>
+        {counts.length > 0 && (
+          <span className="flex h-[18px] shrink-0 items-center gap-1.5 rounded-md border border-sidebar-border px-1.5 text-[10px] text-muted-foreground">
+            {counts.map(([st, n]) => (
+              <span key={st} className="flex items-center gap-0.5 tabular-nums">
+                <StatusIndicator status={st} className="size-2.5" />
+                {n}
+              </span>
+            ))}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-xs" className={cn("size-5 text-muted-foreground", !menuOpen && "hidden group-hover/wtg:inline-flex")} aria-label="그룹 메뉴">
+                <DotsThreeIcon weight="bold" className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem onSelect={() => model.setDialog({ kind: "worktree-group", repo, group })}>이름 · 색 바꾸기…</DropdownMenuItem>
+              <DropdownMenuItem disabled={index <= 0} onSelect={() => model.shiftWorktreeGroup(repo, group.id, -1)}>
+                위로 옮기기
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={index >= total - 1} onSelect={() => model.shiftWorktreeGroup(repo, group.id, 1)}>
+                아래로 옮기기
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void model.ungroupWorktreeGroup(repo, group.id)}>그룹 풀기 (워크트리는 그룹 밖으로)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span className="flex size-5 items-center justify-center text-muted-foreground" onClick={() => onToggle(key)}>
+            <CaretDownIcon className={cn("size-3 transition-transform", folded && "-rotate-90")} />
+          </span>
+        </span>
+      </div>
+      {!folded && (
+        <div className="ml-1 flex flex-col gap-1.5 border-l-2 pl-0.5" style={{ borderColor: color }}>
+          <WorktreeTree list={members} collapsed={collapsed} onToggle={onToggle} />
+        </div>
+      )}
     </div>
   );
 }

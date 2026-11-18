@@ -402,6 +402,49 @@ mod tests {
     }
 
     #[test]
+    fn worktree_groups() {
+        use thuminal_workspace::protocol::WorktreeGroup;
+        let (_dir, root) = repo();
+        let (_dir2, other) = repo();
+        let home = tempfile::tempdir().unwrap();
+        let ws = Workspace::open(Arc::new(GitCli), home.path());
+        let r = ws.add_repo(&root).unwrap();
+        let r2 = ws.add_repo(&other).unwrap();
+        let w = ws.create_worktree(&r.id, "feature/x", None, None, None).unwrap();
+        let g = |id: &str, name: &str| WorktreeGroup { id: id.into(), name: name.into(), color: "blue".into() };
+
+        // 빈 id 는 새로 붙고, 이름이 비었거나 id 가 겹치면 거절한다
+        let got = ws.set_worktree_groups(&r.id, vec![g("", " 리뷰 대기 ")]).unwrap();
+        assert_eq!(got.groups.len(), 1);
+        assert_eq!(got.groups[0].name, "리뷰 대기");
+        let id = got.groups[0].id.clone();
+        assert!(!id.is_empty());
+        assert!(ws.set_worktree_groups(&r.id, vec![g("", " ")]).is_err());
+        assert!(ws.set_worktree_groups(&r.id, vec![g(&id, "a"), g(&id, "b")]).is_err());
+        let other_id = ws.set_worktree_groups(&r2.id, vec![g("", "다른 프로젝트")]).unwrap().groups[0].id.clone();
+        assert_ne!(other_id, id, "id 는 프로젝트끼리도 겹치지 않는다");
+
+        // 넣기: 그 프로젝트의 그룹이어야 한다. 다시 열어도 남는다
+        assert!(ws.update_worktree(&w.path, None, None, None, Some(other_id)).is_err(), "다른 프로젝트 그룹에는 못 넣는다");
+        ws.update_worktree(&w.path, None, None, None, Some(id.clone())).unwrap();
+        let reopened = Workspace::open(Arc::new(GitCli), home.path());
+        assert!(reopened.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == w.path && x.group.as_deref() == Some(id.as_str())));
+        assert_eq!(reopened.repos().iter().find(|x| x.id == r.id).unwrap().groups.len(), 1);
+
+        // 빈 글로 빼고, 다시 넣은 뒤 그룹을 지우면 그룹 밖으로 나온다
+        ws.update_worktree(&w.path, None, None, None, Some(String::new())).unwrap();
+        assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == w.path && x.group.is_none()));
+        ws.update_worktree(&w.path, None, None, None, Some(id.clone())).unwrap();
+        assert!(ws.set_worktree_groups(&r.id, vec![]).unwrap().groups.is_empty());
+        assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == w.path && x.group.is_none()));
+
+        // 프로젝트를 빼면 그 그룹도 지운다
+        ws.remove_repo(&r2.id).unwrap();
+        assert!(ws.add_repo(&other).unwrap().groups.is_empty());
+        ws.remove_worktree(&r.id, Path::new(&w.path), true, true, true).unwrap();
+    }
+
+    #[test]
     fn creates_lists_and_removes_worktrees() {
         let (dir, root) = repo();
         let home = tempfile::tempdir().unwrap();
@@ -412,16 +455,16 @@ mod tests {
         let w = ws.create_worktree(&r.id, "feature/x", None, Some("로그인 작업"), None).unwrap();
         assert_eq!(w.branch.as_deref(), Some("feature/x"));
         assert_eq!(w.name.as_deref(), Some("로그인 작업"));
-        ws.update_worktree(&w.path, None, Some(true), None).unwrap();
+        ws.update_worktree(&w.path, None, Some(true), None, None).unwrap();
         assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == w.path && x.pinned));
 
         // 하위 워크트리: 부모를 기억하고, 자기 밑의 워크트리를 부모로 삼지 못하고, 빈 글로 뗀다
         let child = ws.create_worktree(&r.id, "feature/y", None, None, Some(&w.path)).unwrap();
         assert_eq!(child.parent.as_deref(), Some(w.path.as_str()));
-        assert!(ws.update_worktree(&w.path, None, None, Some(child.path.clone())).is_err(), "부모가 돌고 돌면 안 된다");
-        ws.update_worktree(&child.path, None, None, Some(String::new())).unwrap();
+        assert!(ws.update_worktree(&w.path, None, None, Some(child.path.clone()), None).is_err(), "부모가 돌고 돌면 안 된다");
+        ws.update_worktree(&child.path, None, None, Some(String::new()), None).unwrap();
         assert!(ws.worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == child.path && x.parent.is_none()));
-        ws.update_worktree(&child.path, None, None, Some(root.to_string_lossy().into_owned())).unwrap();
+        ws.update_worktree(&child.path, None, None, Some(root.to_string_lossy().into_owned()), None).unwrap();
         assert!(Workspace::open(Arc::new(GitCli), home.path()).worktrees(Some(&r.id)).unwrap().iter().any(|x| x.path == child.path && x.parent.as_deref() == Some(&*root.to_string_lossy())), "다시 열어도 남는다");
         // 손자: 가운데(child)를 지우면 손자는 메인 밑으로 옮겨진다
         let grandchild = ws.create_worktree(&r.id, "feature/z", None, None, Some(&child.path)).unwrap();
