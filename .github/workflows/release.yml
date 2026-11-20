@@ -49,9 +49,13 @@ jobs:
             args: --bundles app,dmg
           - os: ubuntu-22.04
             args: ""
-          - os: windows-latest
+          # windows-latest 의 Visual Studio 18(MSVC 14.52) 표준 라이브러리는 Clang 22 이상만 받아 Zig 0.16 의 clang 으로
+          # libghostty(simdutf) 를 빌드하지 못한다 (STL1000). Visual Studio 2022 가 든 이미지로 고정한다
+          - os: windows-2022
             args: ""
     runs-on: ${{ matrix.os }}
+    # Zig 의존성(codeberg)을 받다가 멈추면 6시간을 기다리지 않게 끊는다
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash

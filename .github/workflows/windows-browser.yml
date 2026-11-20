@@ -21,7 +21,8 @@ concurrency:
 jobs:
   probe:
     name: 칸 보이기 · 입력
-    runs-on: windows-latest
+    # Visual Studio 2022 이미지로 고정한다 (release.yml 과 같은 까닭)
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:

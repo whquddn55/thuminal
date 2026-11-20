@@ -17,7 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-22.04, windows-latest]
+        # Windows 는 Visual Studio 2022 이미지로 고정한다 (release.yml 과 같은 까닭)
+        os: [macos-latest, ubuntu-22.04, windows-2022]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
