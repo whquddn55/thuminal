@@ -47,6 +47,8 @@ export interface GroupSectionProps {
   onStartRename?: () => void;
   /** 프로젝트가 없을 때 보일 글. 기본은 끌어 넣기 안내 (끌어 넣지 못하면 "프로젝트가 없다") */
   empty?: React.ReactNode;
+  /** 머리 바로 밑에 늘 둘 줄 (원격 컴퓨터의 [플로팅]). 프로젝트가 없어도 보인다 */
+  top?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -65,6 +67,7 @@ export function GroupSection({
   onRename,
   onStartRename,
   empty,
+  top,
   children,
 }: GroupSectionProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -146,6 +149,7 @@ export function GroupSection({
       </div>
       {!collapsed && (
         <div className="pt-0.5">
+          {top}
           {count > 0 ? (
             children
           ) : (

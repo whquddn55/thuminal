@@ -3,14 +3,18 @@
 // 제목 줄을 끌어 옮기고, 가장자리 여덟 곳을 끌어 크기를 바꾸고, 제목 줄을 두 번 눌러 최대화한다.
 // 자리와 크기는 다시 켜도 남는다. 닫아도 터미널은 데몬에서 계속 돈다.
 // 여닫는 버튼(FloatingTrigger)은 창 오른쪽 아래에 떠 있고 끌어서 옮길 수 있다.
+// 원격 컴퓨터가 있으면 머리 줄 왼쪽에서 컴퓨터를 골라 그 컴퓨터의 플로팅 워크스페이스를 이 패널에 띄운다
+// (사이드바 원격 컴퓨터 칸의 [플로팅] 도 같다). 패널 자리 · 크기는 컴퓨터와 상관없이 하나다.
 
-import { ArrowsInIcon, ArrowsOutIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowsInIcon, ArrowsOutIcon, CaretDownIcon, DesktopIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
+import { DEFAULT_GROUP } from "@thuminal/term-core";
 import { useEffect, useState } from "react";
 
 import { Button } from "./components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import { cn } from "./lib/utils";
-import { FLOATING_WORKSPACE, type FloatingRect, useApp, useModel } from "./store";
+import { FLOATING_WORKSPACE, type FloatingRect, HOST_STATE_LABEL, ModelContext, useApp, useModel } from "./store";
 import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import { shortcutLabel } from "./shortcuts";
 
@@ -43,7 +47,11 @@ function fit(rect: FloatingRect | null): FloatingRect {
 }
 
 export function FloatingPanel() {
-  const model = useModel();
+  const model = useModel().root;
+  // 패널이 비추는 호스트: 탭 줄 · 터미널은 그 호스트 모델로 그린다 (자리 · 크기 · 여닫기는 창 하나의 것)
+  const hostKey = useApp((s) => s.floating.host);
+  const remoteCount = useApp((s) => s.remoteHosts.length);
+  const fm = model.hostModel(hostKey) ?? model;
   const saved = useApp((s) => s.floating.rect);
   const maximized = useApp((s) => s.floating.maximized);
   const focused = useApp((s) => s.focusArea === "floating");
@@ -129,6 +137,8 @@ export function FloatingPanel() {
         }}
       >
         <span className="shrink-0 pr-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">플로팅</span>
+        {remoteCount > 0 && <FloatingHostPicker current={hostKey} />}
+        <ModelContext.Provider value={fm}>
         <TabBar ws={FLOATING_WORKSPACE} className="h-full flex-1">
           <Button variant="ghost" size="icon-xs" className="text-muted-foreground" title={maximized ? "원래 크기" : "최대화"} onClick={() => model.setFloatingRect(saved, !maximized)}>
             {maximized ? <ArrowsInIcon /> : <ArrowsOutIcon />}
@@ -137,15 +147,55 @@ export function FloatingPanel() {
             <XIcon />
           </Button>
         </TabBar>
+        </ModelContext.Provider>
       </div>
-      <TerminalSurface surface="floating" className="flex-1">
-        <WorkspaceView
-          ws={FLOATING_WORKSPACE}
-          empty={<EmptyWorkspace ws={FLOATING_WORKSPACE} />}
-        />
-      </TerminalSurface>
+      <ModelContext.Provider value={fm}>
+        <TerminalSurface surface="floating" className="flex-1">
+          {/* 호스트를 바꾸면 칸 · 터미널을 새로 그린다 (세션 번호는 호스트마다 따로다) */}
+          <WorkspaceView
+            key={hostKey}
+            ws={FLOATING_WORKSPACE}
+            empty={<EmptyWorkspace ws={FLOATING_WORKSPACE} />}
+          />
+        </TerminalSurface>
+      </ModelContext.Provider>
       {!maximized && EDGES.map(({ edge, className }) => <div key={edge} className={cn("absolute z-10", className)} onPointerDown={(e) => drag(e, edge)} />)}
     </div>
+  );
+}
+
+/** 패널 머리 줄의 컴퓨터 고르기: 이 컴퓨터와 원격 컴퓨터 중 어느 쪽 플로팅 워크스페이스를 볼지 */
+function FloatingHostPicker({ current }: { current: string }) {
+  const root = useModel().root;
+  const hosts = useApp((s) => s.remoteHosts);
+  const localName = useApp((s) => s.groups.find((g) => g.id === DEFAULT_GROUP)?.name) || "이 컴퓨터";
+  const name = current ? (hosts.find((h) => h.id === current)?.name ?? current) : localName;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex h-6 max-w-40 shrink-0 items-center gap-1 rounded-md border border-sidebar-border px-1.5 text-[11px] text-foreground hover:bg-sidebar-accent"
+          title="어느 컴퓨터의 플로팅을 볼지 골라요"
+        >
+          <DesktopIcon className="size-3 shrink-0 text-muted-foreground" />
+          <span className="truncate">{name}</span>
+          <CaretDownIcon className="size-2.5 shrink-0 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuLabel className="text-2xs text-muted-foreground">플로팅을 볼 컴퓨터</DropdownMenuLabel>
+        <DropdownMenuItem disabled={current === ""} onSelect={() => void root.openFloating()}>
+          <span className="truncate">{localName}</span>
+          <span className="ml-auto text-2xs text-muted-foreground">이 컴퓨터</span>
+        </DropdownMenuItem>
+        {hosts.map((h) => (
+          <DropdownMenuItem key={h.id} disabled={h.id === current || h.state !== "connected"} onSelect={() => void root.hostModel(h.id)?.openFloating()}>
+            <span className="truncate">{h.name}</span>
+            {h.state !== "connected" && <span className="ml-auto text-2xs text-muted-foreground">{HOST_STATE_LABEL[h.state]}</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -195,7 +245,7 @@ export function FloatingTrigger() {
   const model = useModel();
   const open = useApp((s) => s.floating.open);
   // 닫혀 있는 동안 플로팅 탭에 새 출력이 있으면 주황 점을 띄운다
-  const unread = useApp((s) => !s.floating.open && model.unread(FLOATING_WORKSPACE, { ...s, active: "" }));
+  const unread = useApp((s) => !s.floating.open && model.root.floatingModel().unread(FLOATING_WORKSPACE, { ...model.root.floatingModel().get(), active: "" }));
   const [anchored, setAnchored] = useState(loadTrigger);
   const [live, setLive] = useState<{ left: number; top: number } | null>(null);
   const [, redraw] = useState(0);

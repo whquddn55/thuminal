@@ -115,6 +115,8 @@ export interface FloatingState {
   /** 창 오른쪽 아래 기준이 아니라 창 왼쪽 위 기준 자리 (CSS 픽셀). null 이면 처음 자리 */
   rect: FloatingRect | null;
   maximized: boolean;
+  /** 패널이 비추는 호스트 ("" 는 이 컴퓨터). 원격 컴퓨터의 플로팅 워크스페이스도 이 패널에 띄운다 */
+  host: string;
 }
 
 export interface AppState {
@@ -304,7 +306,7 @@ export class AppModel {
       panel: null,
       rightWidth: Number(localStorage.getItem(RIGHT_WIDTH_KEY)) || 300,
       commitDrafts: {},
-      floating: { ...loadJson<FloatingState>(FLOATING_KEY, { open: false, rect: null, maximized: false }), open: false },
+      floating: { ...loadJson<FloatingState>(FLOATING_KEY, { open: false, rect: null, maximized: false, host: "" }), open: false, host: "" },
       focusArea: "main",
       dialog: null,
       theme: loadThemeSettings(),
@@ -398,10 +400,20 @@ export class AppModel {
     return this.hostModel(this.root.get().activeHost) ?? this.root;
   }
 
-  /** 키보드 단축키가 다룰 모델: 플로팅 패널에 키보드가 있으면 로컬, 아니면 메인 면 호스트 */
+  /** 키보드 단축키가 다룰 모델: 플로팅 패널에 키보드가 있으면 패널이 비추는 호스트, 아니면 메인 면 호스트 */
   focusedModel(): AppModel {
     const s = this.root.get();
-    return s.floating.open && s.focusArea === "floating" ? this.root : this.activeModel();
+    return s.floating.open && s.focusArea === "floating" ? this.floatingModel() : this.activeModel();
+  }
+
+  /** 플로팅 패널이 비추는 호스트 모델 (원격 호스트가 없어졌으면 로컬) */
+  floatingModel(): AppModel {
+    return this.hostModel(this.root.get().floating.host) ?? this.root;
+  }
+
+  /** 이 모델의 플로팅 워크스페이스가 플로팅 패널에 떠 있는지 */
+  private floatingShown(s: AppState = this.get()): boolean {
+    return s.floating.open && this.floatingModel() === this;
   }
 
   /** 이 모델 호스트의 연결 상태 (로컬은 늘 connected 로 본다) */
@@ -434,7 +446,13 @@ export class AppModel {
         this.children.delete(id);
       }
     const gone = this.get().activeHost && !list.some((h) => h.id === this.get().activeHost);
-    this.set({ remoteHosts: list, ...(gone ? { activeHost: "", focusArea: "main" as const } : {}) });
+    // 플로팅 패널이 비추던 원격 호스트가 없어졌으면 이 컴퓨터 플로팅으로 돌린다
+    const floatGone = this.get().floating.host && !list.some((h) => h.id === this.get().floating.host);
+    this.set((s) => ({
+      remoteHosts: list,
+      ...(gone ? { activeHost: "", focusArea: "main" as const } : {}),
+      ...(floatGone ? { floating: { ...s.floating, host: "" } } : {}),
+    }));
     for (const h of list) this.children.get(h.id)?.hostStateChanged(h.state);
   }
 
@@ -1015,7 +1033,7 @@ export class AppModel {
   private workspaceTitle(ws: WorkspaceId): string {
     const name = this.hostName();
     const prefix = name ? `${name} · ` : "";
-    if (ws === FLOATING_WORKSPACE) return "플로팅 터미널";
+    if (ws === FLOATING_WORKSPACE) return `${prefix}플로팅 터미널`;
     if (ws === OTHER_WORKSPACE) return `${prefix}워크트리 밖 터미널`;
     const w = this.get().worktrees.find((x) => x.path === ws);
     return prefix + (w ? worktreeTitle(w) : baseName(ws));
@@ -1028,7 +1046,8 @@ export class AppModel {
     const at = paneOfSession(Object.values(s.layouts), session);
     if (!at) return false;
     const ws = at.layout.workspace;
-    const shown = ws === FLOATING_WORKSPACE ? this.isRoot && s.floating.open : ws === s.active && s.activeHost === this.hostKey;
+    // 플로팅 워크스페이스는 (원격 컴퓨터 것도) 플로팅 패널이 그 호스트를 비추고 있을 때만 보인다
+    const shown = ws === FLOATING_WORKSPACE ? this.floatingShown(s) : ws === s.active && s.activeHost === this.hostKey;
     return shown && activeTab(at.layout)?.id === at.tab.id;
   }
 
@@ -1097,7 +1116,7 @@ export class AppModel {
     if (!at) return;
     const ws = at.layout.workspace;
     if (ws === FLOATING_WORKSPACE) {
-      if (!s.floating.open) void this.toggleFloating();
+      if (!this.floatingShown(s)) void this.openFloating();
     } else if (ws !== s.active || s.activeHost !== this.hostKey) this.select(ws);
     if (activeTab(at.layout)?.id !== at.tab.id) this.selectTab(at.tab.id);
     this.focusPane(at.pane.id);
@@ -1161,10 +1180,10 @@ export class AppModel {
     }
   }
 
-  /** 키보드 단축키가 다룰 워크스페이스 (플로팅은 로컬 모델에만 있다) */
+  /** 키보드 단축키가 다룰 워크스페이스 (플로팅 패널이 이 호스트를 비추고 키보드가 거기 있으면 플로팅) */
   currentWorkspace(): WorkspaceId {
     const s = this.get();
-    return this.isRoot && s.floating.open && s.focusArea === "floating" ? FLOATING_WORKSPACE : s.active;
+    return this.floatingShown(s) && s.focusArea === "floating" ? FLOATING_WORKSPACE : s.active;
   }
 
   /** 지금 워크스페이스에서 포커스된 칸 */
@@ -1305,7 +1324,23 @@ export class AppModel {
       return;
     }
     this.set({ floating: { ...s.floating, open: true, maximized: maximized || s.floating.maximized }, focusArea: "floating" });
-    if (!s.layouts[FLOATING_WORKSPACE]?.tabs.length) await this.newTab(FLOATING_WORKSPACE);
+    const m = this.floatingModel();
+    if (!m.get().layouts[FLOATING_WORKSPACE]?.tabs.length) await m.newTab(FLOATING_WORKSPACE);
+  };
+
+  /**
+   * 이 모델 호스트의 플로팅 워크스페이스를 플로팅 패널에 띄운다 (사이드바 원격 컴퓨터 칸의 [플로팅], 패널 머리의 컴퓨터 고르기).
+   * 이미 이 호스트를 비추며 열려 있으면 `toggle` 일 때 닫는다. 탭이 없으면 그 컴퓨터 홈 폴더에서 셸을 띄운다
+   */
+  openFloating = async (toggle = false): Promise<void> => {
+    const root = this.root;
+    const s = root.get();
+    if (s.floating.open && s.floating.host === this.hostKey) {
+      if (toggle) root.set({ floating: { ...s.floating, open: false }, focusArea: "main" });
+      return;
+    }
+    root.set({ floating: { ...s.floating, open: true, host: this.hostKey }, focusArea: "floating" });
+    if (!this.get().layouts[FLOATING_WORKSPACE]?.tabs.length && this.hostState() === "connected") await this.newTab(FLOATING_WORKSPACE);
   };
 
   setFloatingRect = (rect: FloatingRect | null, maximized?: boolean) => {
@@ -1450,7 +1485,7 @@ export class AppModel {
     const s = this.get();
     const hit = Object.values(s.layouts).find((l) => l.tabs.some((t) => panesOf(t.root).some((p) => p.id === id)));
     if (!hit) return;
-    const area = this.isRoot && hit.workspace === FLOATING_WORKSPACE ? "floating" : "main";
+    const area = hit.workspace === FLOATING_WORKSPACE && this.floatingShown(s) ? "floating" : "main";
     if (s.focusArea !== area) this.setFocusArea(area);
     if (focusedPane(activeTab(hit))?.id !== id) this.focusPane(id);
   }

@@ -21,6 +21,7 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   PushPinIcon,
+  SquaresFourIcon,
   StackPlusIcon,
   TerminalWindowIcon,
   WarningCircleIcon,
@@ -378,6 +379,7 @@ function RemoteHostSection({ host, collapsed, onToggle }: { host: RemoteHost; co
           if (name !== null && name.trim() && name.trim() !== host.name) model.renameGroup(DEFAULT_GROUP, name);
         }}
         empty={host.state === "connected" ? "이 컴퓨터에 등록한 프로젝트가 없어요" : `${HOST_STATE_LABEL[host.state]} · 연결되면 프로젝트가 보여요`}
+        top={host.state === "connected" ? <RemoteFloatingRow /> : undefined}
         menu={
           <>
             <DropdownMenuItem disabled={host.state !== "connected"} onSelect={() => setRenaming(true)}>
@@ -1078,6 +1080,39 @@ function WorktreeGroupSection({
           <WorktreeTree list={members} collapsed={collapsed} onToggle={onToggle} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 원격 컴퓨터 칸 머리 바로 밑에 고정한 플로팅 카드 (그 호스트 모델 안에서 그린다). 워크트리 카드와 같은 모양이고,
+ * [열기] 를 누르면 그 컴퓨터의 플로팅 워크스페이스를 이 창의 플로팅 패널에 띄운다 (띄워 두었으면 [닫기])
+ */
+function RemoteFloatingRow() {
+  const model = useModel();
+  const sessions = useWorkspaceSessions(FLOATING_WORKSPACE);
+  const running = sessions.filter((x) => x.state.state === "running").length;
+  const shown = useApp((s) => s.floating.open && s.floating.host === model.hostKey);
+  const unread = useApp((s) => !shown && model.unread(FLOATING_WORKSPACE, { ...s, active: "" }));
+  return (
+    <div className="px-1 pb-1">
+      <div
+        data-card-active={shown || undefined}
+        className={cn("relative ml-1 flex items-start gap-0.5 rounded-lg border border-transparent pt-1.25 pr-1.5 pb-1.5 pl-0.5 select-none", !shown && "thm-card-hover")}
+      >
+        {/* 플로팅 패널 단추와 같은 아이콘. 새 출력이 있으면 그 단추처럼 주황 점을 단다 */}
+        <div className="relative flex size-4 shrink-0 items-center justify-center pt-[2px] text-muted-foreground">
+          <SquaresFourIcon className="size-3.5" />
+          {unread && <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-amber-500" />}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="block truncate text-[13px] leading-5 text-foreground">플로팅 터미널</span>
+          <span className="truncate text-[11px] leading-none text-muted-foreground">{running ? `${running}개 실행 중` : "실행 중인 터미널 없음"}</span>
+        </div>
+        <Button variant="outline" size="xs" className="mt-0.5 h-6 shrink-0 px-2 text-[11px]" onClick={() => void model.openFloating(true)}>
+          {shown ? "닫기" : "열기"}
+        </Button>
+      </div>
     </div>
   );
 }
