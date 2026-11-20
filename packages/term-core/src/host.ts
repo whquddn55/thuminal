@@ -51,7 +51,9 @@ export type BrowserEvent =
   /** 페이지가 새 창을 열려 했다 */
   | { type: "new_window"; id: number; url: string }
   /** 페이지가 바꾼 마우스 커서 (CSS cursor). `input` 을 받는 껍데기만 보낸다 */
-  | { type: "cursor"; id: number; cursor: string };
+  | { type: "cursor"; id: number; cursor: string }
+  /** 칸이 사용자 마우스를 받았다 (5초에 한 번까지). 마우스가 화면을 거치지 않는 macOS 껍데기만 보낸다 */
+  | { type: "input"; id: number };
 
 /** 메인 웹뷰 밑에 깐 브라우저 칸 하나와, 메인 웹뷰가 마우스를 그 칸으로 넘길 사각형들 */
 export interface BrowserLayerItem {

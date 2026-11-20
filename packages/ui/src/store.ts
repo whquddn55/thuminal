@@ -86,7 +86,7 @@ export interface NewWorktree {
 }
 
 /** 설정창의 칸. remote 는 이 컴퓨터 원격 접속, hosts 는 내가 붙는 원격 컴퓨터 */
-export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "remote" | "hosts" | "about";
+export type SettingsSection = "theme" | "font" | "keys" | "agent" | "notify" | "idle" | "remote" | "hosts" | "about";
 
 export type Dialog =
   | { kind: "new-worktree"; repo: string; parent?: string }

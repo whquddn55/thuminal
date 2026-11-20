@@ -158,6 +158,12 @@ pub struct AgentInfo {
     /// 턴을 끝내 idle 이어도 이것이 있으면 작업을 기다리는 중이다
     #[serde(default)]
     pub background_tasks: u32,
+    /// 이 에이전트가 부른 도구 수 (PreToolUse 수). 새 세션(SessionStart, compact 말고)이면 0 부터
+    #[serde(default)]
+    pub tool_count: u32,
+    /// 도구가 마지막으로 실패한 때 (PostToolUseFailure, 유닉스 시간 ms)
+    #[serde(default)]
+    pub tool_failed_at: Option<u64>,
 }
 
 /// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)

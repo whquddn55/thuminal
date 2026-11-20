@@ -51,6 +51,10 @@ enum BrowserEvent {
     /// 페이지가 바꾼 마우스 커서 (CSS cursor). 화면이 마우스를 넘기는 Windows 만 보낸다
     #[cfg_attr(not(windows), allow(dead_code))]
     Cursor { id: u64, cursor: String },
+    /// 칸이 사용자 마우스(누르기 · 휠 · 움직이기)를 받았다. 화면이 "가만히 있음"을 잴 때 쓴다.
+    /// 마우스가 메인 웹뷰를 거치지 않는 macOS 만 보낸다 (Windows 는 화면이 칸 자리 마우스를 직접 받는다). 5초에 한 번까지만
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Input { id: u64 },
 }
 
 /// 페이지 스크립트가 `thuminal-key://` 이동으로 넘긴 단축키 · 포커스
@@ -223,6 +227,7 @@ fn put_under(app: &AppHandle, v: &tauri::Webview) -> CmdResult<()> {
         }
         #[cfg(target_os = "macos")]
         {
+            let _ = mac_layer::APP.set(app.clone());
             let label = v.label().to_string();
             v.with_webview(move |pw| mac_layer::adopt(label, pw.inner())).map_err(|e| e.to_string())?;
         }
@@ -256,16 +261,25 @@ fn place(v: &tauri::Webview, x: f64, y: f64, w: f64, h: f64) -> CmdResult<()> {
 /// 휠 · 커서도 같은 `hitTest:` 를 따른다. 상태는 모두 메인 스레드(`with_webview`)에서만 만진다
 #[cfg(target_os = "macos")]
 mod mac_layer {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
     use std::ffi::c_void;
     use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
 
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
-    use objc2::{msg_send, sel};
-    use objc2_app_kit::{NSView, NSWindowOrderingMode};
+    use objc2::{MainThreadMarker, msg_send, sel};
+    use objc2_app_kit::{NSApplication, NSEventType, NSView, NSWindowOrderingMode};
     use objc2_foundation::NSPoint;
+    use tauri::AppHandle;
+
+    use super::{BrowserEvent, EVENT, emit};
+
+    /// 칸 마우스를 메인 웹뷰에 알릴 때 쓴다 (`put_under` 가 넣는다)
+    pub static APP: OnceLock<AppHandle> = OnceLock::new();
+    /// [`BrowserEvent::Input`] 을 이 간격에 한 번까지만 보낸다
+    const INPUT_EVERY: Duration = Duration::from_secs(5);
 
     #[derive(Default)]
     struct State {
@@ -281,6 +295,7 @@ mod mac_layer {
 
     thread_local! {
         static STATE: RefCell<State> = RefCell::default();
+        static LAST_INPUT: Cell<Option<Instant>> = const { Cell::new(None) };
     }
 
     /// 원래 내용 뷰 클래스(`WryWebViewParent`). 바꾼 `hitTest:` 가 넘기지 않을 때 이 클래스의 것을 부른다
@@ -311,10 +326,42 @@ mod mac_layer {
         // SAFETY: 이 메서드는 NSView 하위 클래스(내용 뷰)에만 붙이고, AppKit 이 살아 있는 뷰로 부른다
         let parent: &NSView = unsafe { &*this.cast::<NSView>() };
         if let Some(v) = pass_target(parent, point) {
+            note_input(&v);
             return Retained::autorelease_return(v).cast();
         }
         let original = *ORIGINAL.get().expect("install 이 먼저 돈다");
         unsafe { msg_send![super(this, original), hitTest: point] }
+    }
+
+    /// 밑의 웹뷰로 넘긴 마우스가 사용자 입력이면 메인 웹뷰에 알린다. `hitTest:` 는 AppKit 이 입력 없이도 (커서 갱신 등) 부르므로
+    /// 지금 처리 중인 이벤트 종류를 본다
+    fn note_input(hit: &NSView) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(ev) = NSApplication::sharedApplication(mtm).currentEvent() else { return };
+        let user = matches!(
+            ev.r#type(),
+            NSEventType::LeftMouseDown
+                | NSEventType::RightMouseDown
+                | NSEventType::OtherMouseDown
+                | NSEventType::LeftMouseDragged
+                | NSEventType::RightMouseDragged
+                | NSEventType::OtherMouseDragged
+                | NSEventType::MouseMoved
+                | NSEventType::ScrollWheel
+        );
+        if !user || LAST_INPUT.get().is_some_and(|t| t.elapsed() < INPUT_EVERY) {
+            return;
+        }
+        LAST_INPUT.set(Some(Instant::now()));
+        // 칸 번호는 그 웹뷰 이름(`browser-<칸>`)에서 읽는다. 원격 칸이거나 모르면 0
+        let id = STATE.with(|s| {
+            let s = s.borrow();
+            let hit_root = |v: &Retained<NSView>| hit.isDescendantOf(v);
+            s.views.iter().find(|(_, v)| hit_root(v)).and_then(|(l, _)| l.strip_prefix("browser-")?.parse().ok()).unwrap_or(0)
+        });
+        if let Some(app) = APP.get() {
+            emit(app, EVENT, BrowserEvent::Input { id });
+        }
     }
 
     fn superview(v: &NSView) -> Option<Retained<NSView>> {

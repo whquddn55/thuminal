@@ -57,6 +57,10 @@ export interface AgentInfo {
   draft_images?: number;
   /** 에이전트가 백그라운드로 돌려 두고 아직 끝나지 않은 작업 수 (데몬이 센다). idle 이어도 있으면 작업을 기다리는 중 */
   background_tasks?: number;
+  /** 이 에이전트가 부른 도구 수 (PreToolUse 수). 새 세션이면 0 부터 */
+  tool_count?: number;
+  /** 도구가 마지막으로 실패한 때 (ms) */
+  tool_failed_at?: number | null;
 }
 
 /** 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`agent_images` 요청) */

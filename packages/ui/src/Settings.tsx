@@ -3,6 +3,7 @@
 // 누르면 바로 적용된다 (따로 저장 단추가 없다).
 
 import {
+  BarbellIcon,
   BellIcon,
   BroadcastIcon,
   CheckIcon,
@@ -25,6 +26,8 @@ import { type TerminalTheme, themes } from "@thuminal/themes";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog";
 import { Switch } from "./components/ui/switch";
 import { normalizeGroups } from "./groups";
+import { previewIdleScreen } from "./gym/idle";
+import { IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, setIdleScreenSettings, useIdleScreenSettings } from "./gym/settings";
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel } from "./platform";
 import {
@@ -826,6 +829,42 @@ function AboutSection({ updates }: { updates?: UpdatesApi }) {
   );
 }
 
+/** 화면 보호기 (이 앱에 남는다) */
+function IdleScreenSection() {
+  const model = useModel();
+  const { enabled, minutes } = useIdleScreenSettings();
+  return (
+    <Group note="아무 키나 누르거나 빈 곳을 누르면 닫혀요. 사람을 누르면 그 칸으로 가요. B를 누르면 쉬는 사람들이 있는 숙소를 펼쳐요.">
+      <Toggle checked={enabled} onChange={(v) => setIdleScreenSettings({ enabled: v })} title="화면 보호기">
+        창에서 한동안 입력이 없으면 claude 세션을 헬스장 사람으로 보여 줘요. 일하는 세션은 운동하고, 기다리는 세션은 쉬어요.
+      </Toggle>
+      <Row title="대기 시간" desc="이 시간 동안 thuminal 창에서 키보드나 마우스를 쓰지 않으면 띄워요.">
+        <input
+          className={cn(input, "w-16 font-mono")}
+          type="number"
+          min={IDLE_MINUTES_MIN}
+          max={IDLE_MINUTES_MAX}
+          disabled={!enabled}
+          value={minutes}
+          onChange={(e) => Number(e.target.value) && setIdleScreenSettings({ minutes: Number(e.target.value) })}
+        />
+        <span className="text-xs text-muted-foreground">분</span>
+      </Row>
+      <Row title="미리 보기">
+        <button
+          className={button}
+          onClick={() => {
+            model.setDialog(null);
+            previewIdleScreen();
+          }}
+        >
+          지금 보기
+        </button>
+      </Row>
+    </Group>
+  );
+}
+
 type Section = SettingsSection;
 
 const SECTIONS: { id: Section; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -834,6 +873,7 @@ const SECTIONS: { id: Section; label: string; icon: React.ReactNode; desc: strin
   { id: "keys", label: "단축키", icon: <KeyboardIcon />, desc: "바꾸면 바로 적용되고 이 앱에 남아요." },
   { id: "agent", label: "에이전트", icon: <RobotIcon />, desc: "thuminal에서 실행하는 claude에 붙일 옵션이에요. 데몬에 남아 CLI에서 실행해도 같아요." },
   { id: "notify", label: "알림", icon: <BellIcon />, desc: "언제 알릴지 골라요." },
+  { id: "idle", label: "화면 보호기", icon: <BarbellIcon />, desc: "자리를 비우면 창을 덮는 화면이에요. 바꾸면 바로 적용되고 이 앱에 남아요." },
   { id: "remote", label: "원격 접속", icon: <BroadcastIcon />, desc: "폰이나 다른 컴퓨터에서 Tailscale로 이 컴퓨터에 연결해요. 설정은 데몬에 남아요." },
   { id: "hosts", label: "원격 컴퓨터", icon: <DesktopIcon />, desc: "다른 컴퓨터의 thuminal에 연결해요. 끊기면 알아서 다시 연결해요." },
   { id: "about", label: "정보", icon: <InfoIcon />, desc: "버전과 업데이트" },
@@ -891,6 +931,8 @@ export function SettingsDialog() {
               <AgentSection />
             ) : cur.id === "notify" ? (
               <NotifySection />
+            ) : cur.id === "idle" ? (
+              <IdleScreenSection />
             ) : cur.id === "about" ? (
               <AboutSection updates={updates} />
             ) : (

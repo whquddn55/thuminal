@@ -52,6 +52,7 @@ const LATE_TOOL_HOOK_AFTER_INTERRUPT_MS: u64 = 15_000;
 /// - PermissionRequest → 부름
 /// - Notification: `permission_prompt`/`elicitation_dialog` 면 부름, `idle_prompt` 면 기다림, 그 밖은 그대로
 /// - Stop → 기다림, StopFailure → 실패. 둘 다 턴 끝난 때를 남긴다. SessionStart(compact 말고) → 기다림, 지난 턴 글을 비운다
+/// - PreToolUse 마다 도구 수를 하나 더하고, PostToolUseFailure 는 실패한 때를 남긴다 (새 세션이면 둘 다 지운다)
 /// - SessionEnd → 에이전트 없음. 모르는 훅 → 상태는 그대로 두고 세션 id 만 받는다
 /// - 데몬이 멈춤(Esc · ⌃C)을 알아챈 뒤 15초 안에 온 도구 훅은 지난 턴의 늦은 알림으로 보고 버린다 (`interrupt.rs`)
 pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<AgentInfo> {
@@ -75,6 +76,8 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         image_count: 0,
         draft_images: 0,
         background_tasks: 0,
+        tool_count: 0,
+        tool_failed_at: None,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -110,6 +113,8 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
             a.last_assistant_message = None;
             a.tool_name = None;
             a.turn_ended_at = None;
+            a.tool_count = 0;
+            a.tool_failed_at = None;
             if r.model.is_some() {
                 a.model = r.model;
             }
@@ -127,10 +132,14 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         "PreToolUse" => {
             let asks = tool.as_deref().is_some_and(is_question_tool);
             a.tool_name = tool.or(a.tool_name.take());
+            a.tool_count = a.tool_count.saturating_add(1);
             Some(if asks { AgentState::NeedsAttention } else { AgentState::Working })
         }
         "PostToolUse" | "PostToolUseFailure" => {
             a.tool_name = tool.or(a.tool_name.take());
+            if r.event == "PostToolUseFailure" {
+                a.tool_failed_at = Some(now);
+            }
             Some(AgentState::Working)
         }
         "PermissionRequest" => {
@@ -651,6 +660,20 @@ mod tests {
         let f = step(Some(f), AgentReport { notification_type: Some("idle_prompt".into()), ..report("Notification") }, 12);
         assert_eq!(f.state, AgentState::Failed);
         assert_eq!(step(Some(f), report("UserPromptSubmit"), 13).state, AgentState::Working);
+    }
+
+    #[test]
+    fn counts_tools_and_failures() {
+        let a = step(None, report("UserPromptSubmit"), 1);
+        let a = step(Some(a), AgentReport { tool_name: Some("Bash".into()), ..report("PreToolUse") }, 2);
+        let a = step(Some(a), AgentReport { tool_name: Some("Bash".into()), ..report("PostToolUseFailure") }, 3);
+        let a = step(Some(a), AgentReport { tool_name: Some("Read".into()), ..report("PreToolUse") }, 4);
+        assert_eq!((a.tool_count, a.tool_failed_at), (2, Some(3)));
+        // compact 는 같은 세션이라 그대로, 새 세션이면 0 부터
+        let a = step(Some(a), AgentReport { source: Some("compact".into()), ..report("SessionStart") }, 5);
+        assert_eq!((a.tool_count, a.tool_failed_at), (2, Some(3)));
+        let a = step(Some(a), report("SessionStart"), 6);
+        assert_eq!((a.tool_count, a.tool_failed_at), (0, None));
     }
 
     #[test]

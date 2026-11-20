@@ -38,7 +38,7 @@ tauri-plugin-updater = "2"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSError", "NSGeometry", "NSArray"] }
 # 브라우저 칸 웹뷰를 메인 웹뷰 밑에 깔고 마우스를 넘긴다 (browser.rs mac_layer)
-objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics", "NSWindow", "NSApplication", "NSEvent"] }
 objc2-user-notifications = "0.3"
 block2 = "0.6"
 

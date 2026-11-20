@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./comp
 import { hostAt, useDrag } from "./dnd";
 import { panesOf } from "./layout";
 import { FloatingPanel, FloatingTrigger } from "./FloatingPanel";
+import { useIdleScreen } from "./gym/idle";
 import { cn } from "./lib/utils";
 import { actionFor, comboOf, recordingShortcut, shortcutLabel } from "./shortcuts";
 import { Dialogs } from "./overlays";
@@ -195,6 +196,8 @@ function useFileDrop(root: AppModel) {
 
 function Shell() {
   const model = useModel();
+  // 화면 보호기 키 듣기를 앱 단축키보다 먼저 건다 (떠 있는 동안 키를 먼저 가져간다)
+  const idleScreen = useIdleScreen(model);
   useShortcuts(model);
   useFileDrop(model);
   useBrowserLayer(model.services.host.browser);
@@ -223,6 +226,7 @@ function Shell() {
       <Dialogs />
       <SettingsDialog />
       <DragGhost />
+      {idleScreen}
       {notice && !error && (
         <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
           <span className="min-w-0 break-words">{notice}</span>
