@@ -349,10 +349,11 @@ function SplitView({
       {node.children.map((child, i) => (
         <div key={i} className="contents">
           {i > 0 && (
+            // 칸 사이 선: 3px, 글자색 45% 를 터미널 바탕에 섞은 색 (테두리 토큰은 어두운 터미널 바탕 위에서 거의 사라졌다)
             <div
               className={cn(
-                "group relative z-[7] shrink-0 bg-border",
-                row ? "w-px cursor-col-resize" : "h-px cursor-row-resize",
+                "group relative z-[7] shrink-0 bg-[color-mix(in_oklab,var(--terminal-foreground)_45%,var(--terminal-background))]",
+                row ? "w-[3px] cursor-col-resize" : "h-[3px] cursor-row-resize",
               )}
               onPointerDown={(e) => startResize(i - 1, e)}
               onDoubleClick={() => {
@@ -360,9 +361,9 @@ function SplitView({
                 void model.op({ op: "set_sizes", tab: tab.id, path, sizes: sizes.map((v, j) => (j === i - 1 || j === i ? pair / 2 : v)) });
               }}
             >
-              {/* 잡기 쉬운 자리: 선 양쪽 3px */}
-              <div className={cn("absolute", row ? "inset-y-0 -left-[3px] w-[7px]" : "inset-x-0 -top-[3px] h-[7px]")} />
-              <div className={cn("absolute bg-ring/0 transition-colors group-hover:bg-ring/60", row ? "inset-y-0 -left-px w-[3px]" : "inset-x-0 -top-px h-[3px]")} />
+              {/* 잡기 쉬운 자리: 선 양쪽 2px 더 */}
+              <div className={cn("absolute", row ? "inset-y-0 -left-[2px] w-[7px]" : "inset-x-0 -top-[2px] h-[7px]")} />
+              <div className={cn("absolute inset-0 bg-ring/0 transition-colors group-hover:bg-ring/60")} />
             </div>
           )}
           <div className="flex min-h-0 min-w-0" style={{ flex: `${sizes[i]} 1 0` }}>
@@ -462,8 +463,6 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
             </Button>
           </div>
         )}
-        {/* 칸이 여럿이면 포커스 안 된 칸을 흐리게 덮어 지금 쓰는 칸이 드러나게 한다 */}
-        {header && !focused && <div className="pointer-events-none absolute inset-0 z-[6] bg-background/55" />}
         {drop && (
           <div className="pointer-events-none absolute inset-0 z-[9]">
             <div
