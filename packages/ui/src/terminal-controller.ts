@@ -22,6 +22,11 @@ const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "F
 const WHEEL_NOTCH_REPORTS = 5;
 const WHEEL_NOTCH_RAPID_REPORTS = 3;
 
+/** 폰에서 이만큼(ms) 움직이지 않고 누르고 있으면 길게 누른 것으로 본다 */
+const LONG_PRESS_MS = 450;
+/** 손가락이 이만큼(px) 넘게 움직이면 길게 누르기가 아니라 끌기다 */
+const TOUCH_SLOP = 10;
+
 export class TerminalController {
   engine: TerminalEngine | null = null;
   session: SessionInfo | null = null;
@@ -201,6 +206,9 @@ export class TerminalController {
   /** 이 칸이 데몬에 보냈는데 아직 돌아오지 않은 크기 (`<열>x<줄>`, 보낸 때) */
   private sentSizes: { key: string; at: number }[] = [];
   private sizeListeners = new Set<() => void>();
+  /** 손가락으로 길게 눌러 고른 글이 있는지 (폰 화면이 [복사] 줄을 띄운다) */
+  touchSelected = false;
+  private touchSelectListeners = new Set<() => void>();
 
   private resizeDaemon(cols: number, rows: number) {
     this.daemonSize = { cols, rows };
@@ -244,6 +252,30 @@ export class TerminalController {
 
   private emitSize() {
     for (const l of this.sizeListeners) l();
+  }
+
+  /** 길게 눌러 고른 글이 생기거나 없어지면 부른다 */
+  onTouchSelect(cb: () => void): () => void {
+    this.touchSelectListeners.add(cb);
+    return () => this.touchSelectListeners.delete(cb);
+  }
+
+  private setTouchSelected(v: boolean) {
+    if (this.touchSelected === v) return;
+    this.touchSelected = v;
+    for (const l of this.touchSelectListeners) l();
+  }
+
+  /** 길게 눌러 고른 글을 돌려주고 고르기를 푼다 (복사는 화면이 한다. 폰은 클립보드 쓰는 길이 기기마다 달라서) */
+  takeTouchSelection(): string | null {
+    const text = this.engine?.selectionText() ?? null;
+    this.clearTouchSelection();
+    return text;
+  }
+
+  clearTouchSelection(): void {
+    this.engine?.clearSelection();
+    this.setTouchSelected(false);
   }
 
   /** 다른 화면이 세션 크기를 바꿔 이 칸과 다르게 그려지고 있는지 */
@@ -316,7 +348,7 @@ export class TerminalController {
   }
 
   /** 프로그램이 마우스를 받으면 보고를 보낸다. 보냈으면 true */
-  private reportMouse(action: "press" | "release" | "move", button: 0 | 1 | 2 | null, ev: MouseEvent): boolean {
+  private reportMouse(action: "press" | "release" | "move", button: 0 | 1 | 2 | null, ev: Pick<MouseEvent, "clientX" | "clientY" | "shiftKey" | "altKey" | "ctrlKey">): boolean {
     if (!this.engine) return false;
     const at = this.cellAt(ev);
     if (!at) return false;
@@ -367,18 +399,57 @@ export class TerminalController {
     on(window, "keydown", (ev) => ev.key === PRIMARY_KEY && hover(true));
     on(window, "keyup", (ev) => ev.key === PRIMARY_KEY && hover(false));
     on(window, "blur", () => links.clear());
-    // 손가락으로 끌면 스크롤백을 보고, 그냥 누르면 키보드를 띄운다 (폰)
+    // 폰: 손가락으로 끌면 스크롤백을 보고, 누르면 키보드를 띄우고(마우스를 받는 프로그램에는 그 자리 클릭도 보낸다),
+    // 길게 누르면 그 자리 단어를 고르고 떼지 않고 끌면 고르기를 넓힌다 (Termux 와 같다. 키보드는 띄우지 않는다)
     let touchY: number | null = null;
+    let touchStart: { x: number; y: number } | null = null;
     let touchMoved = false;
+    let touchSelecting = false;
+    let pressTimer = 0;
+    let lastTouch = 0;
+    const touchCell = (t: { clientX: number; clientY: number }) => {
+      const at = this.cellAt(t);
+      if (!at || !this.engine) return null;
+      return { x: Math.max(0, Math.min(this.engine.cols - 1, at.x)), y: Math.max(0, Math.min(this.engine.rows - 1, at.y)) };
+    };
     on(host, "touchstart", (ev) => {
+      lastTouch = Date.now();
+      window.clearTimeout(pressTimer);
       if (ev.touches.length !== 1) return;
-      touchY = ev.touches[0].clientY;
+      const t = ev.touches[0];
+      touchY = t.clientY;
+      touchStart = { x: t.clientX, y: t.clientY };
       touchMoved = false;
+      touchSelecting = false;
+      pressTimer = window.setTimeout(() => {
+        const at = touchStart && touchCell({ clientX: touchStart.x, clientY: touchStart.y });
+        if (touchMoved || !at || !this.engine) return;
+        touchSelecting = true;
+        this.engine.selectWord(at);
+        this.dragFrom = { x: at.x, y: at.y + this.engine.viewportTop() };
+        navigator.vibrate?.(12);
+        this.setTouchSelected(this.hasSelection());
+      }, LONG_PRESS_MS);
+    });
+    // 길게 누르는 동안 시스템 메뉴(글 고르기 · 그림 저장)가 뜨지 않게 한다. 마우스 오른쪽 클릭은 그대로 둔다
+    on(host, "contextmenu", (ev) => {
+      if (Date.now() - lastTouch < 1500) ev.preventDefault();
     });
     on(host, "touchmove", (ev) => {
       if (touchY === null || !this.engine || !this.renderer || ev.touches.length !== 1) return;
       ev.preventDefault();
       const t = ev.touches[0];
+      lastTouch = Date.now();
+      if (touchSelecting) {
+        const at = touchCell(t);
+        if (at && this.dragFrom) this.engine.select(this.dragFrom, { x: at.x, y: at.y + this.engine.viewportTop() }, true);
+        this.setTouchSelected(this.hasSelection());
+        return;
+      }
+      if (touchStart && Math.hypot(t.clientX - touchStart.x, t.clientY - touchStart.y) > TOUCH_SLOP) {
+        touchMoved = true;
+        window.clearTimeout(pressTimer);
+      }
       this.wheelAcc += touchY - t.clientY;
       touchY = t.clientY;
       const lines = Math.trunc(this.wheelAcc / this.renderer.metrics.height);
@@ -389,13 +460,41 @@ export class TerminalController {
       }
     });
     on(host, "touchend", (ev) => {
+      window.clearTimeout(pressTimer);
+      lastTouch = Date.now();
       if (touchY === null) return;
       touchY = null;
+      const start = touchStart;
+      touchStart = null;
+      if (touchSelecting) {
+        // 고르기를 마쳤다: 키보드를 띄우지 않고 [복사] 줄을 기다린다 (뒤따르는 mousedown 도 막는다)
+        ev.preventDefault();
+        touchSelecting = false;
+        this.dragFrom = null;
+        this.setTouchSelected(this.hasSelection());
+        return;
+      }
       if (touchMoved) return;
       // 누른 것은 키보드를 띄우는 것으로 받는다 (뒤따르는 mousedown 은 고르기를 지운다)
       ev.preventDefault();
+      // 고른 글이 있으면 누르기는 고르기만 푼다
+      if (this.touchSelected) {
+        this.clearTouchSelection();
+        return;
+      }
+      // 마우스를 받는 프로그램(claude 등)에는 그 자리 클릭을 보낸다 ("Jump to bottom" 같은 단추가 눌리게)
+      if (start) {
+        const pt = { clientX: start.x, clientY: start.y, shiftKey: false, altKey: false, ctrlKey: false };
+        if (this.reportMouse("press", 0, pt)) this.reportMouse("release", 0, pt);
+      }
       this.onActivate?.();
       this.focus();
+    });
+    on(host, "touchcancel", () => {
+      window.clearTimeout(pressTimer);
+      touchY = null;
+      touchStart = null;
+      touchSelecting = false;
     });
     // 마우스를 받는 프로그램(claude 등)에는 누르기·떼기·끌기를 넘긴다. Shift 나 ⌥ 를 누르고 끌면 앱이 글을 고른다 (xterm.js 와 같다)
     on(host, "mousedown", (ev) => {

@@ -39,6 +39,14 @@ tempfile = "3"
 # Windows 에서 canonicalize 가 \\?\ 를 붙이지 않게 한다 (유닉스에서는 std 와 같다)
 dunce = "1"
 
+[profile.dev]
+# 디버그 빌드가 target 을 수십 GB 로 키워서, 오류 위치(파일 · 줄)만 남기고 변수 정보는 뺀다
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# 외부 라이브러리는 디버그 정보 없이 (워크스페이스 크레이트는 위 설정을 따른다)
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

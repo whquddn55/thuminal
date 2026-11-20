@@ -611,6 +611,31 @@ function TeamButton({ session, ws, go }: { session: SessionId; ws: WorkspaceId; 
   );
 }
 
+/**
+ * 글을 클립보드에 쓴다. 안드로이드 앱 WebView 는 navigator.clipboard 를 막아 앱이 이어 주고,
+ * 원격 접속은 보통 http(Tailscale 주소)라 navigator.clipboard 가 없을 수 있어 그때는 옛 방식(execCommand)으로 쓴다
+ */
+function copyText(text: string) {
+  const app = appBridge();
+  if (app) return app.copyText(text);
+  if (navigator.clipboard && window.isSecureContext) {
+    void navigator.clipboard.writeText(text).catch(() => copyByCommand(text));
+    return;
+  }
+  copyByCommand(text);
+}
+
+function copyByCommand(text: string) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  Object.assign(ta.style, { position: "fixed", top: "0", left: "0", opacity: "0" });
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
+
 function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void }) {
   const model = useModel();
   const s = useApp((st) => st.sessions[session]);
@@ -625,6 +650,20 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
   const [line, setLine] = useState("");
   const c = model.controller(session);
   const taken = useSizeTaken(c);
+  // 길게 눌러 고른 글: [복사] 줄을 띄운다
+  const [selected, setSelected] = useState(c.touchSelected);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setSelected(c.touchSelected);
+    return c.onTouchSelect(() => setSelected(c.touchSelected));
+  }, [c]);
+  const copy = () => {
+    const text = c.takeTouchSelection();
+    if (!text) return;
+    copyText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
 
   useLayoutEffect(() => {
     if (!renderer || !hostRef.current) return;
@@ -703,6 +742,22 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
         <div ref={hostRef} className="absolute inset-x-1 inset-y-0.5" />
         {/* 데스크톱이나 다른 기기가 세션 크기를 가져갔으면 덮는다. [세션 가져오기] 를 눌러야 폰 크기로 돌아온다 */}
         <SizeTakenOverlay c={c} cols={s?.cols} rows={s?.rows} />
+        {(selected || copied) && (
+          <div className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-popover p-1 text-[14px] text-popover-foreground shadow-lg">
+            {copied ? (
+              <span className="px-3 py-1.5">복사했어요</span>
+            ) : (
+              <>
+                <button className="rounded-md px-3 py-1.5 active:bg-accent" onClick={copy}>
+                  복사
+                </button>
+                <button className="rounded-md px-3 py-1.5 text-muted-foreground active:bg-accent" onClick={() => c.clearTouchSelection()}>
+                  취소
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
       {/* 덮여 있는 동안은 키 줄 · 입력 줄도 막는다 (터미널은 입력을 받지 않는다) */}
       <div className={cn("shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)]", taken && "pointer-events-none opacity-40")} aria-disabled={taken}>
