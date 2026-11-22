@@ -26,6 +26,11 @@ const WHEEL_NOTCH_RAPID_REPORTS = 3;
 const LONG_PRESS_MS = 450;
 /** 손가락이 이만큼(px) 넘게 움직이면 길게 누르기가 아니라 끌기다 */
 const TOUCH_SLOP = 10;
+/**
+ * 손가락으로 누를 때 한 줄 빗나가도 눌리게 맞춰 주는 claude 단추 글 (스크롤 위로 올렸을 때 아래에 뜨는 한 줄짜리 알약).
+ * 폰의 한 줄은 3mm 남짓이라 손가락이 위아래 줄을 누르기 쉽다
+ */
+const TAP_TARGETS = /Jump to bottom|\d+ new messages?|Waiting for your answer/;
 
 export class TerminalController {
   engine: TerminalEngine | null = null;
@@ -349,14 +354,38 @@ export class TerminalController {
 
   /** 프로그램이 마우스를 받으면 보고를 보낸다. 보냈으면 true */
   private reportMouse(action: "press" | "release" | "move", button: 0 | 1 | 2 | null, ev: Pick<MouseEvent, "clientX" | "clientY" | "shiftKey" | "altKey" | "ctrlKey">): boolean {
-    if (!this.engine) return false;
     const at = this.cellAt(ev);
-    if (!at) return false;
-    const bytes = this.engine.input.mouse({ action, button, at, shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey });
+    return !!at && this.reportMouseAt(action, button, at, ev);
+  }
+
+  private reportMouseAt(action: "press" | "release" | "move", button: 0 | 1 | 2 | null, at: CellPoint, mods: Pick<MouseEvent, "shiftKey" | "altKey" | "ctrlKey">): boolean {
+    if (!this.engine) return false;
+    const bytes = this.engine.input.mouse({ action, button, at, shift: mods.shiftKey, alt: mods.altKey, ctrl: mods.ctrlKey });
     if (!bytes) return false;
     this.lastMouseCell = at;
     this.send(bytes);
     return true;
+  }
+
+  /** 손가락으로 누른 칸. 바로 위아래 줄에 claude 단추(TAP_TARGETS)가 있고 그 가로 자리를 눌렀으면 그 줄로 옮긴다 */
+  private snapTap(at: CellPoint): CellPoint {
+    const e = this.engine;
+    if (!e) return at;
+    for (const dy of [0, -1, 1]) {
+      const y = at.y + dy;
+      if (y < 0 || y >= e.rows) continue;
+      const line = e.lineText(y);
+      const m = TAP_TARGETS.exec(line.text);
+      if (!m) continue;
+      // 단추 글은 빈칸 두 개나 줄 끝에서 끝난다 ("Jump to bottom (click) ↓"). 양옆 여백 한 칸씩도 단추다
+      const end = line.text.indexOf("  ", m.index + m[0].length);
+      const last = (end < 0 ? line.text.trimEnd().length : end) - 1;
+      const x0 = (line.cols[m.index] ?? 0) - 1;
+      const x1 = (line.cols[last] ?? x0) + 1;
+      if (at.x >= x0 && at.x <= x1) return { x: at.x, y };
+      if (dy === 0) break;
+    }
+    return at;
   }
 
   private cellAt(ev: { clientX: number; clientY: number }): CellPoint | null {
@@ -483,9 +512,11 @@ export class TerminalController {
         return;
       }
       // 마우스를 받는 프로그램(claude 등)에는 그 자리 클릭을 보낸다 ("Jump to bottom" 같은 단추가 눌리게)
-      if (start) {
-        const pt = { clientX: start.x, clientY: start.y, shiftKey: false, altKey: false, ctrlKey: false };
-        if (this.reportMouse("press", 0, pt)) this.reportMouse("release", 0, pt);
+      const at = start && touchCell({ clientX: start.x, clientY: start.y });
+      if (at) {
+        const hit = this.snapTap(at);
+        const mods = { shiftKey: false, altKey: false, ctrlKey: false };
+        if (this.reportMouseAt("press", 0, hit, mods)) this.reportMouseAt("release", 0, hit, mods);
       }
       this.onActivate?.();
       this.focus();

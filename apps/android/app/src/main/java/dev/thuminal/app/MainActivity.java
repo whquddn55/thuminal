@@ -77,6 +77,8 @@ public class MainActivity extends Activity {
         if (web != null) {
             web.onResume();
             if (current == null) web.evaluateJavascript("window.thuminalRefresh && thuminalRefresh()", null);
+            // 컴퓨터 화면이면 연결이 살아 있는지 보게 한다 (백그라운드 동안 끊긴 연결을 기다리지 않고 바로 다시 붙는다)
+            else web.evaluateJavascript("window.thuminalResume && thuminalResume()", null);
         }
     }
 

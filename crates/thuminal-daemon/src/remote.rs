@@ -35,6 +35,8 @@ use crate::server::Server;
 use crate::session::now_ms;
 
 pub const DEFAULT_PORT: u16 = 6780;
+/// 웹소켓 메시지 하나를 이만큼 보내지 못하면 연결이 끊긴 것으로 친다 (느린 망에서 큰 저장본을 보내는 시간보다 넉넉히)
+const SEND_STALL: Duration = Duration::from_secs(60);
 
 /// 공용 토큰으로 붙은 연결의 기기 id (예전 기기 토큰은 그 기기 id 를 쓴다)
 const SHARED: &str = "shared";
@@ -541,10 +543,13 @@ async fn bridge(server: Arc<Server>, socket: WebSocket, device: String) {
     let (mut sink, mut stream) = socket.split();
     // 폰 브라우저·통신사 망은 조용한 연결을 끊는다. 25초마다 핑을 보낸다
     let mut ping = tokio::time::interval(Duration::from_secs(25));
+    // 폰이 백그라운드에 가거나 망이 끊기면 상대가 받지 않아 보내기가 멈춘다. 그대로 두면 끊긴 줄 모르는 동안
+    // (몇 분) 이 연결이 세션에 붙은 채 출력을 계속 쌓는다. 한동안 보내지 못하면 끊긴 것으로 친다
+    let stalled = |r: Result<Result<(), axum::Error>, tokio::time::error::Elapsed>| !matches!(r, Ok(Ok(())));
     loop {
         tokio::select! {
             f = frx.recv() => match f {
-                Some(body) => if sink.send(Message::Binary(body.into())).await.is_err() { break },
+                Some(body) => if stalled(tokio::time::timeout(SEND_STALL, sink.send(Message::Binary(body.into()))).await) { break },
                 None => break,
             },
             m = stream.next() => match m {
@@ -559,9 +564,9 @@ async fn bridge(server: Arc<Server>, socket: WebSocket, device: String) {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
-            _ = ping.tick() => if sink.send(Message::Ping(Vec::new().into())).await.is_err() { break },
+            _ = ping.tick() => if stalled(tokio::time::timeout(SEND_STALL, sink.send(Message::Ping(Vec::new().into()))).await) { break },
             _ = &mut kicked => {
-                let _ = sink.send(Message::Close(None)).await;
+                let _ = tokio::time::timeout(SEND_STALL, sink.send(Message::Close(None))).await;
                 break;
             }
         }

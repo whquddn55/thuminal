@@ -3,7 +3,14 @@
 // 웹소켓 메시지 하나 = 프레임 하나에서 길이 머리를 뗀 것: [종류 u8][내용]. 데몬 안에서 유닉스 소켓 연결과 똑같이 처리된다.
 // - 0 JSON: 요청 `{kind:"request", id, request}` / 응답 `{kind:"response", id, ok|err}` / 이벤트 `{kind:"event", event}`
 // - 1 출력 [세션 u64][바이트], 2 입력 [세션 u64][바이트], 3 저장본 [세션 u64][형식 u8][바이트]
-// 연결이 끊기면 다시 붙고 `daemon_reconnected` 이벤트를 흘린다 (화면이 다시 붙는다). 폰이 잠들었다 깨면 바로 다시 붙는다.
+// 연결이 끊기면 다시 붙고 `daemon_reconnected` 이벤트를 흘린다 (화면이 다시 붙는다).
+//
+// 폰이 백그라운드에 가면 웹소켓이 끊긴 줄 모른 채 "열림"으로 남는다 (망이 조용히 끊긴 반쯤 열린 연결). 그대로 두면 돌아와서
+// 보낸 입력은 사라지고, 끊긴 것을 알아채는 데 몇십 초가 걸린다. 또 claude 처럼 출력이 많은 세션은 백그라운드 동안 쌓인 출력을
+// 돌아와서 다 받아 그려야 한다. 그래서:
+// - 오래(`HIDDEN_CLOSE_MS`) 가려져 있으면 연결을 먼저 닫고, 돌아오면 새로 붙는다 (쌓인 출력 대신 저장본 하나만 받는다).
+// - 잠깐 가려졌다 돌아오면 `status` 요청으로 살아 있는지 보고(`PROBE_MS` 안에 답이 없으면) 바로 새로 붙는다.
+// - 붙기(`CONNECT_MS`)와 토큰 확인(`CHECK_MS`)에도 시간 한도를 둔다. 망이 끊긴 곳에서는 둘 다 한참 걸려 멈춘 것처럼 보였다.
 
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
@@ -43,6 +50,17 @@ import type {
 const PROTOCOL_MAJOR = 1;
 const PROTOCOL_MINOR = 6;
 
+/** 이만큼 가려져 있으면 연결을 닫는다 */
+const HIDDEN_CLOSE_MS = 30_000;
+/** 이만큼 넘게 가려졌다 돌아오면 연결이 살아 있는지 본다 */
+const PROBE_AFTER_MS = 3_000;
+/** 살아 있는지 물어본 답을 이만큼 기다린다 */
+const PROBE_MS = 2_000;
+/** 웹소켓이 열리기를 이만큼 기다린다 */
+const CONNECT_MS = 6_000;
+/** 끊긴 까닭(토큰)을 물어보는 요청을 이만큼 기다린다 */
+const CHECK_MS = 3_000;
+
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
@@ -65,6 +83,12 @@ export class WebHostApi implements HostApi {
   private everOpened = false;
   private retry = 0;
   private retryTimer = 0;
+  private hiddenAt = 0;
+  private hiddenTimer = 0;
+  /** 가려져서 연결을 닫았다. 다시 보일 때까지 요청이 새로 붙지 않는다 (git 상태 같은 주기 요청이 곧바로 다시 붙였다) */
+  private parked = false;
+  /** 붙는 중인 connect() 를 실패로 끝낸다 (붙기 전에 연결을 버릴 때) */
+  private abortConnect: (() => void) | null = null;
   state: ConnState = "connecting";
 
   constructor(
@@ -72,10 +96,67 @@ export class WebHostApi implements HostApi {
     private readonly base: string,
     private readonly token: string,
   ) {
-    document.addEventListener("visibilitychange", () => {
-      // 폰이 잠들면 웹소켓이 조용히 죽는다. 깨면 바로 다시 붙는다
-      if (document.visibilityState === "visible" && this.state === "closed") this.reconnectNow();
+    document.addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? this.resume() : this.suspend()));
+    // 안드로이드 앱이 화면으로 돌아올 때 부른다 (웹뷰가 visibilitychange 를 내지 않는 경우가 있다)
+    (window as unknown as { thuminalResume?: () => void }).thuminalResume = () => this.resume(true);
+  }
+
+  /** 가려졌다. 오래 가려져 있으면 연결을 닫는다 */
+  private suspend() {
+    this.hiddenAt = Date.now();
+    clearTimeout(this.hiddenTimer);
+    this.hiddenTimer = window.setTimeout(() => {
+      if (document.visibilityState !== "hidden") return;
+      clearTimeout(this.retryTimer);
+      this.parked = true;
+      if (this.ws) this.drop();
+    }, HIDDEN_CLOSE_MS);
+  }
+
+  /** 다시 보인다. 닫혀 있으면 바로 붙고, 열려 있으면 살아 있는지 본다 (force: 가려졌던 시간과 상관없이) */
+  private resume(force = false) {
+    clearTimeout(this.hiddenTimer);
+    const away = this.hiddenAt ? Date.now() - this.hiddenAt : 0;
+    this.hiddenAt = 0;
+    this.parked = false;
+    if (!this.ws) {
+      if (this.state !== "unauthorized") this.reconnectNow();
+      return;
+    }
+    if ((!force && away < PROBE_AFTER_MS) || this.state !== "open") return;
+    const ws = this.ws;
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), PROBE_MS));
+    Promise.race([this.send({ type: "status" }), timeout]).catch(() => {
+      // 답이 없다: 반쯤 열린 연결이다. 끊긴 것으로 치고 바로 새로 붙는다
+      if (this.ws !== ws) return;
+      this.drop();
+      this.reconnectNow();
     });
+  }
+
+  /** 지금 연결을 버린다. 끊겼을 때처럼 기다리던 요청을 실패시키고 화면이 다시 붙게 한다 (다시 붙기는 부르는 쪽이 한다) */
+  private drop() {
+    const ws = this.ws;
+    if (!ws) return;
+    ws.onopen = ws.onmessage = ws.onclose = null;
+    try {
+      ws.close();
+    } catch {
+      // 이미 닫혔다
+    }
+    this.closed(ws);
+    this.setState("closed");
+  }
+
+  /** 연결이 끊긴 뒤 정리한다 */
+  private closed(ws: WebSocket) {
+    if (this.ws !== ws) return;
+    this.ws = null;
+    this.ready = null;
+    this.abortConnect?.();
+    for (const w of this.waits.values()) w.reject(new Error("데몬과 연결이 끊겼어요"));
+    this.waits.clear();
+    this.outputs.clear();
   }
 
   onState(cb: (s: ConnState) => void): () => void {
@@ -90,14 +171,31 @@ export class WebHostApi implements HostApi {
   }
 
   private connect(): Promise<void> {
+    if (this.parked) return Promise.reject(new Error("데몬과 연결이 끊겼어요"));
     this.ready ??= new Promise<void>((resolve, reject) => {
       this.setState("connecting");
       const ws = new WebSocket(`${this.base.replace(/^http/, "ws")}/ws?token=${encodeURIComponent(this.token)}`);
       ws.binaryType = "arraybuffer";
       this.ws = ws;
       let opened = false;
+      const fail = (e: Error) => {
+        clearTimeout(slow);
+        this.abortConnect = null;
+        reject(e);
+      };
+      this.abortConnect = () => fail(new Error("데몬에 연결하지 못했어요"));
+      // 망이 끊긴 곳에서는 열리지도 닫히지도 않고 한참 걸린다. 시간이 넘으면 끊긴 것으로 친다
+      const slow = window.setTimeout(() => {
+        if (opened || this.ws !== ws) return;
+        ws.onopen = ws.onmessage = ws.onclose = null;
+        ws.close();
+        this.closed(ws);
+        void this.afterClose();
+      }, CONNECT_MS);
       ws.onopen = async () => {
         opened = true;
+        clearTimeout(slow);
+        this.abortConnect = null;
         try {
           const r = await this.send({ type: "hello", protocol_major: PROTOCOL_MAJOR, protocol_minor: PROTOCOL_MINOR, client: "web" });
           this.info = { engine: String(r.engine), version: String(r.daemon_version), protocol: [Number(r.protocol_major), Number(r.protocol_minor)] };
@@ -114,12 +212,7 @@ export class WebHostApi implements HostApi {
       ws.onmessage = (e) => this.receive(new Uint8Array(e.data as ArrayBuffer));
       ws.onclose = () => {
         if (this.ws !== ws) return;
-        this.ws = null;
-        this.ready = null;
-        for (const w of this.waits.values()) w.reject(new Error("데몬과 연결이 끊겼어요"));
-        this.waits.clear();
-        this.outputs.clear();
-        if (!opened) reject(new Error("데몬에 연결하지 못했어요"));
+        this.closed(ws);
         void this.afterClose();
       };
     });
@@ -129,7 +222,7 @@ export class WebHostApi implements HostApi {
   /** 끊긴 까닭이 토큰이면 멈추고, 아니면 조금 기다렸다 다시 붙는다 */
   private async afterClose() {
     try {
-      const r = await fetch(`${this.base}/api/check?token=${encodeURIComponent(this.token)}`);
+      const r = await fetch(`${this.base}/api/check?token=${encodeURIComponent(this.token)}`, { signal: AbortSignal.timeout(CHECK_MS) });
       if (r.status === 401) {
         this.setState("unauthorized");
         return;
@@ -138,6 +231,8 @@ export class WebHostApi implements HostApi {
       // 망이 끊겼다. 아래에서 다시 해 본다
     }
     this.setState("closed");
+    // 가려져 있는 동안은 다시 붙지 않는다 (돌아오면 resume 이 붙는다)
+    if (document.visibilityState === "hidden") return;
     const delay = Math.min(10_000, 500 * 2 ** this.retry++);
     clearTimeout(this.retryTimer);
     this.retryTimer = window.setTimeout(() => void this.connect().catch(() => {}), delay);
