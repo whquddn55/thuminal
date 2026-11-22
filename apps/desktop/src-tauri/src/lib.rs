@@ -20,7 +20,8 @@ use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, State};
 use thuminal_client::link::{Link, LinkState};
-use thuminal_client::{Client, ClientError, default_daemon_bin};
+use thuminal_client::runtime::prepare_daemon;
+use thuminal_client::{Client, ClientError};
 use thuminal_protocol::paths::Paths;
 use thuminal_protocol::{CreateSession, RepoInfo, Request, Response, SessionId, SessionInfo, SnapshotFormat, WorktreeInfo};
 use tokio::sync::Mutex;
@@ -58,8 +59,6 @@ struct AppState {
     attachments: Mutex<HashMap<(HostKey, SessionId), JoinHandle<()>>>,
     /// 호스트마다 화면으로 이벤트를 보내는 채널. 데몬에 다시 붙으면 새 연결의 이벤트를 여기로 잇는다
     events: Mutex<HashMap<HostKey, EventSink>>,
-    /// 업데이트를 설치하려고 로컬 데몬을 내렸다. 이때는 옛 데몬을 다시 띄우지 않는다
-    updating: std::sync::atomic::AtomicBool,
     /// 로컬 데몬 버전을 이미 봤다 (`replace_stale_daemon`)
     daemon_checked: std::sync::atomic::AtomicBool,
     /// 원격 호스트 목록이 바뀌거나 연결 상태가 바뀌면 목록을 통째로 보내는 채널들
@@ -91,11 +90,9 @@ impl AppState {
         if let Some(c) = slot.as_ref().filter(|c| !c.is_closed()) {
             return Ok(c.clone());
         }
-        if self.updating.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err("업데이트를 설치하는 중이에요".into());
-        }
         let reconnect = slot.is_some();
-        let c = Arc::new(Client::connect_or_spawn(&Paths::default_home(), "desktop", &default_daemon_bin()).await.map_err(err)?);
+        let paths = Paths::default_home();
+        let c = Arc::new(Client::connect_or_spawn(&paths, "desktop", &prepare_daemon(&paths)).await.map_err(err)?);
         let c = self.replace_stale_daemon(c).await.map_err(err)?;
         *slot = Some(c.clone());
         drop(slot);
@@ -108,7 +105,8 @@ impl AppState {
 
     /// 떠 있는 로컬 데몬이 이 앱과 빌드 id(`DAEMON_BUILD`, 데몬 소스의 해시)가 다르면 세션을 남긴 채 내리고 이 앱의 데몬을 새로 띄운다.
     /// 앱 버전만 바뀌고 데몬 코드는 그대로인 릴리스에서는 데몬을 그대로 둔다 (다시 시작하면 터미널에서 돌던 프로그램이 끝난다).
-    /// 앱 안 업데이트(macOS)와 .dmg · 설치 스크립트로 덮어 깐 경우 모두 여기서 고른다. 옛 데몬은 빌드 id 를 보내지 않아 늘 바꾼다.
+    /// 앱 안 업데이트(모든 OS)와 .dmg · 설치 스크립트로 덮어 깐 경우 모두 여기서 고른다. 데몬은 설치본 밖 복사본으로 돌아
+    /// (`runtime::prepare_daemon`) 설치본을 바꿔도 그대로 산다. 옛 데몬은 빌드 id 를 보내지 않아 늘 바꾼다.
     /// 앱이 뜬 뒤 처음 붙을 때 한 번만 본다. 개발 빌드는 보지 않는다 (작업 중인 개발 데몬을 내리지 않는다)
     async fn replace_stale_daemon(&self, c: Arc<Client>) -> Result<Arc<Client>, ClientError> {
         if cfg!(debug_assertions) || self.daemon_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -129,22 +127,7 @@ impl AppState {
         let paths = Paths::default_home();
         let _ = tokio::time::timeout(std::time::Duration::from_secs(10), c.closed()).await;
         thuminal_client::wait_daemon_exit(&paths, std::time::Duration::from_secs(10)).await;
-        Ok(Arc::new(Client::connect_or_spawn(&paths, "desktop", &default_daemon_bin()).await?))
-    }
-
-    /// 업데이트 전에 로컬 데몬을 세션을 남긴 채 내리고, 내려갈 때까지(최대 10초) 기다린다. 그 뒤로는 다시 띄우지 않는다
-    async fn stop_local_daemon(&self) {
-        self.updating.store(true, std::sync::atomic::Ordering::SeqCst);
-        let c = match self.client.lock().await.clone() {
-            Some(c) if !c.is_closed() => c,
-            _ => match Client::connect(&Paths::default_home(), "desktop").await {
-                Ok(c) => Arc::new(c),
-                Err(_) => return,
-            },
-        };
-        if c.restart_daemon().await.is_ok() {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), c.closed()).await;
-        }
+        Ok(Arc::new(Client::connect_or_spawn(&paths, "desktop", &prepare_daemon(&paths)).await?))
     }
 
     /// 데몬에 새로 붙었다: 그 호스트의 옛 붙기를 걷고, 이벤트를 새 연결에서 잇고, 화면에 다시 붙으라고 알린다

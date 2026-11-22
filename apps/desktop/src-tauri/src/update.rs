@@ -5,9 +5,10 @@
 //!
 //! 내려받는 동안 진행(받은 바이트 · 전체 크기)을 화면에 채널로 보낸다. 화면은 앱이 다시 시작될 때까지 오른쪽 아래에 진행을 띄운다.
 //!
-//! 설치 전에 로컬 데몬을 세션을 남긴 채 내린다(`Request::Restart`). 앱만 새 버전이 되고 옛 데몬이 남으면 기능이 맞지 않고,
-//! Windows 는 떠 있는 `thuminald.exe` 를 덮어쓰지 못한다. 다시 시작한 앱이 새 데몬을 띄우면 세션이 화면 저장본으로
-//! 되살아나고 claude 는 `--resume` 으로 이어진다. 터미널 안에서 돌던 프로세스는 다시 시작해야 한다.
+//! 데몬은 건드리지 않는다. 데몬은 설치본 밖 복사본(`runtime/<데몬 빌드 id>/`, thuminal-client `runtime`)으로 돌아
+//! 설치본을 바꿔도 그대로 산다 (Windows 도 덮어쓸 파일이 잠겨 있지 않고, Linux AppImage 도 마운트가 사라져도 산다).
+//! 다시 시작한 앱이 떠 있는 데몬의 빌드 id 를 보고 다를 때만 세션을 남긴 채 다시 시작한다 (`replace_stale_daemon`).
+//! 그때는 세션이 화면 저장본으로 되살아나고 claude 는 `--resume` 으로 이어지지만, 터미널 안에서 돌던 프로세스는 다시 시작해야 한다.
 
 use std::time::{Duration, Instant};
 
@@ -17,7 +18,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::Mutex;
 
-use crate::{AppState, CmdResult};
+use crate::CmdResult;
 
 /// 마지막으로 확인한 업데이트 (설치할 때 그대로 쓴다)
 #[derive(Default)]
@@ -56,7 +57,7 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(150);
 
 /// 확인해 둔 업데이트를 내려받아 설치하고 앱을 다시 시작한다
 #[tauri::command]
-pub async fn update_install(app: AppHandle, pending: State<'_, Pending>, state: State<'_, AppState>, progress: Channel<UpdateProgress>) -> CmdResult<()> {
+pub async fn update_install(app: AppHandle, pending: State<'_, Pending>, progress: Channel<UpdateProgress>) -> CmdResult<()> {
     let update = pending.0.lock().await.take().ok_or("확인한 업데이트가 없어요")?;
     let mut downloaded = 0u64;
     let mut last: Option<Instant> = None;
@@ -70,12 +71,6 @@ pub async fn update_install(app: AppHandle, pending: State<'_, Pending>, state: 
     };
     let bytes = update.download(on_chunk, || {}).await.map_err(|e| format!("업데이트를 내려받지 못했어요: {e}"))?;
     let _ = progress.send(UpdateProgress::Install);
-    // macOS 는 데몬을 그대로 둔다: 번들을 바꿔 끼워도 떠 있는 데몬은 옛 파일로 계속 돈다. 새 앱이 뜬 뒤 빌드 id 가 다를 때만
-    // 다시 시작한다 (`replace_stale_daemon`). Windows 는 설치 프로그램이 떠 있는 thuminald.exe 를 덮어쓰지 못하고,
-    // Linux AppImage 는 앱이 끝나면 데몬이 돌던 마운트가 사라지므로 설치 전에 내린다
-    if !cfg!(target_os = "macos") {
-        state.stop_local_daemon().await;
-    }
     tracing::info!(event = "update_install", version = %update.version);
     // Windows 는 설치 프로그램을 띄우고 앱이 끝난다. 설치 프로그램이 끝나면 앱을 다시 띄운다
     update.install(bytes).map_err(|e| format!("업데이트를 설치하지 못했어요: {e}"))?;

@@ -74,7 +74,16 @@ impl Paths {
     pub fn logs(&self) -> PathBuf {
         self.home.join("logs")
     }
+
+    /// 설치본 밖에서 실행하는 데몬 · CLI 복사본 폴더. 앱 · CLI 가 `runtime/<데몬 빌드 id>/` 를 채우고(thuminal-client `runtime`),
+    /// 웹 화면은 `runtime/web` 에 둔다. 다 채운 빌드 폴더에는 [`RUNTIME_READY`] 표시가 있다
+    pub fn runtime(&self) -> PathBuf {
+        self.home.join("runtime")
+    }
 }
+
+/// 빌드 폴더가 다 복사됐다는 표시 파일 이름 ([`Paths::runtime`]). 마지막에 쓰고, 지울 때는 맨 먼저 지운다
+pub const RUNTIME_READY: &str = ".ready";
 
 #[cfg(test)]
 mod tests {

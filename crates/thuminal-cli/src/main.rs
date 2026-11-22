@@ -12,7 +12,8 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
-use thuminal_client::{Client, default_daemon_bin};
+use thuminal_client::Client;
+use thuminal_client::runtime::prepare_daemon;
 use thuminal_protocol::paths::Paths;
 use thuminal_protocol::{AgentState, CreateSession, Event, ScreenFormat, SessionId, SessionInfo, SessionState};
 
@@ -224,7 +225,8 @@ async fn connect() -> Res<Client> {
     if let Some(host) = std::env::var("THUMINAL_HOST").ok().filter(|h| !h.is_empty()) {
         return connect_host(&host).await;
     }
-    Ok(Client::connect_or_spawn(&Paths::default_home(), "cli", &default_daemon_bin()).await?)
+    let paths = Paths::default_home();
+    Ok(Client::connect_or_spawn(&paths, "cli", &prepare_daemon(&paths)).await?)
 }
 
 /// `THUMINAL_HOST`: 이 컴퓨터 앱이 등록한 원격 컴퓨터(`hosts.json` 의 이름이나 id)의 데몬에 원격 접속으로 붙는다.

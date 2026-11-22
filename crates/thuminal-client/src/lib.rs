@@ -10,6 +10,7 @@
 //! 끊기면 다시 붙는 일은 [`link::Link`] 가 맡는다.
 
 pub mod link;
+pub mod runtime;
 pub mod ws;
 
 use std::collections::HashMap;
@@ -432,7 +433,8 @@ async fn read_frame<R: AsyncReadExt + Unpin>(rd: &mut R) -> std::io::Result<Opti
 }
 
 /// 데몬을 떼어 띄운다. 띄운 쪽(CLI, 앱)이 끝나도 데몬은 산다.
-/// 유닉스는 새 세션(`setsid`)으로, Windows 는 콘솔 없이 새 프로세스 그룹으로 띄운다
+/// 유닉스는 새 세션(`setsid`)으로, Windows 는 콘솔 없이 새 프로세스 그룹으로 띄운다. Windows 는 띄운 쪽이 job 안에 있으면
+/// (설치 프로그램이 다시 띄운 앱 등) job 이 닫힐 때 같이 끝나지 않게 job 에서도 떼어 본다. job 이 허락하지 않으면 그대로 띄운다
 pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
     use std::process::{Command, Stdio};
     std::fs::create_dir_all(paths.logs()).map_err(|e| ClientError::Spawn(e.to_string()))?;
@@ -461,6 +463,11 @@ pub fn spawn_daemon(paths: &Paths, daemon_bin: &Path) -> Result<()> {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB);
+        if cmd.spawn().is_ok() {
+            return Ok(());
+        }
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
     cmd.spawn().map_err(|e| ClientError::Spawn(format!("{}: {e}", daemon_bin.display())))?;
@@ -486,7 +493,8 @@ pub async fn wait_daemon_exit(paths: &Paths, timeout: Duration) -> bool {
     }
 }
 
-/// 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald` (Windows 는 `thuminald.exe`).
+/// 설치본 데몬 실행 파일 위치: `THUMINAL_DAEMON_BIN`, 아니면 지금 실행 파일 옆의 `thuminald` (Windows 는 `thuminald.exe`).
+/// 띄울 때는 이것을 설치본 밖으로 복사하는 [`runtime::prepare_daemon`] 을 쓴다
 pub fn default_daemon_bin() -> PathBuf {
     if let Some(p) = std::env::var_os("THUMINAL_DAEMON_BIN") {
         return PathBuf::from(p);

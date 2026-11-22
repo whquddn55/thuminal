@@ -796,7 +796,7 @@ export class AppModel {
     this.setDialog({
       kind: "confirm",
       title: `thuminal ${update.version}으로 업데이트할까요?`,
-      body: `지금 버전은 ${update.current}예요. 업데이트하면 앱이 다시 시작되고 터미널도 다시 열려요. 화면 내용과 claude 대화는 이어지지만, 터미널에서 실행 중이던 프로그램(개발 서버 등)은 다시 실행해야 해요.`,
+      body: `지금 버전은 ${update.current}예요. 업데이트하면 앱이 다시 시작돼요. 터미널은 대부분 그대로 이어져요. 터미널 쪽(데몬)이 바뀐 버전이면 터미널도 다시 열리는데, 화면 내용과 claude 대화는 이어지지만 실행 중이던 프로그램(개발 서버 등)은 다시 실행해야 해요.`,
       action: "업데이트",
       run: () => {
         const root = this.root;
