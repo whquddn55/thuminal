@@ -381,12 +381,15 @@ export interface AppUpdate {
   notes: string | null;
 }
 
+/** 업데이트 설치 진행. 내려받는 동안 download 가 여러 번, 다 받으면 install 이 한 번 온다 */
+export type UpdateProgress = { phase: "download"; downloaded: number; total: number | null } | { phase: "install" };
+
 /** 앱 업데이트: GitHub Release 의 latest.json 을 보고, 서명을 확인해 설치한다 */
 export interface UpdatesApi {
   /** 지금 앱 버전 */
   version(): Promise<string>;
   /** 새 버전이 있으면 그것, 없으면 null */
   check(): Promise<AppUpdate | null>;
-  /** 확인한 새 버전을 내려받아 설치하고 앱을 다시 시작한다. 그 전에 데몬을 세션을 남긴 채 내린다 */
-  install(): Promise<void>;
+  /** 확인한 새 버전을 내려받아 설치하고 앱을 다시 시작한다. 그 전에 데몬을 세션을 남긴 채 내린다. onProgress 로 진행을 받는다 */
+  install(onProgress?: (p: UpdateProgress) => void): Promise<void>;
 }

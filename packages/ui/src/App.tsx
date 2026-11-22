@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon, SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowCircleUpIcon, CheckIcon, CopyIcon, SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 
 import { isWorktreeWorkspace } from "@thuminal/term-core";
@@ -226,6 +226,7 @@ function Shell() {
       <Dialogs />
       <SettingsDialog />
       <DragGhost />
+      <UpdateProgressCard />
       {idleScreen}
       {notice && !error && (
         <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
@@ -319,6 +320,41 @@ function PanelButton({ on, label, onClick, children }: { on: boolean; label: str
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+
+/** 업데이트를 설치하는 동안 오른쪽 아래에 띄우는 진행. 앱이 다시 시작될 때까지 남는다 (취소는 없다) */
+function UpdateProgressCard() {
+  const updating = useApp((s) => s.updating);
+  if (!updating) return null;
+  const p = updating.progress;
+  const ratio = p?.phase === "install" ? 1 : p?.phase === "download" && p.total ? Math.min(1, p.downloaded / p.total) : null;
+  const status =
+    p === null
+      ? "내려받을 준비 중이에요"
+      : p.phase === "install"
+        ? "설치하고 있어요. 곧 앱이 다시 시작돼요"
+        : p.total
+          ? `내려받는 중 · ${mb(p.downloaded)} / ${mb(p.total)} MB`
+          : `내려받는 중 · ${mb(p.downloaded)} MB`;
+  return (
+    <div data-browser-cover className="fixed right-4 bottom-4 z-[47] flex w-72 flex-col gap-2 rounded-lg border bg-popover px-3 py-2.5 text-xs text-popover-foreground shadow-lg">
+      <div className="flex items-center gap-1.5">
+        <ArrowCircleUpIcon className="size-4 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 truncate font-medium">thuminal {updating.version} 업데이트</span>
+        {ratio !== null && <span className="tabular-nums text-muted-foreground">{Math.round(ratio * 100)}%</span>}
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        {ratio === null ? (
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/70" />
+        ) : (
+          <div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${ratio * 100}%` }} />
+        )}
+      </div>
+      <span className="text-muted-foreground tabular-nums">{status}</span>
+    </div>
   );
 }
 

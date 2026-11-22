@@ -17,6 +17,7 @@ import type {
   AgentImage,
   FontFaceInfo,
   AppUpdate,
+  UpdateProgress,
   AgentSettings,
   AgentSettingsState,
   Attachment,
@@ -133,7 +134,11 @@ export class TauriHostApi implements HostApi {
       this.updates = {
         version: getVersion,
         check: () => invoke<AppUpdate | null>("update_check"),
-        install: () => invoke<void>("update_install"),
+        install: (onProgress) => {
+          const progress = new Channel<UpdateProgress>();
+          if (onProgress) progress.onmessage = onProgress;
+          return invoke<void>("update_install", { progress });
+        },
       };
       // 원격 접속 설정은 이 컴퓨터 데몬 것만 (원격 연결은 데몬이 받지 않는다)
       this.remote = {

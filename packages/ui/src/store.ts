@@ -39,7 +39,7 @@ import {
   type WorktreeInfo,
 } from "@thuminal/term-core";
 
-import type { AppUpdate } from "@thuminal/term-core";
+import type { AppUpdate, UpdateProgress } from "@thuminal/term-core";
 import { AGENTS } from "./agents";
 import { bootFinish, bootTrack } from "./boot";
 import { pageKey, setPage } from "./browser-state";
@@ -174,6 +174,8 @@ export interface AppState {
   notice: string | null;
   /** 새 앱 버전 (데스크톱 껍데기만 확인한다) */
   update: AppUpdate | null;
+  /** 설치 중인 업데이트와 진행. 앱이 다시 시작될 때까지 오른쪽 아래에 띄운다 */
+  updating: { version: string; progress: UpdateProgress | null } | null;
 }
 
 /** 에이전트 팀 팝업 (리더 세션마다). 목록 → 팀원 하나(터미널) → 뒤로 목록 */
@@ -246,6 +248,7 @@ export const WINDOW_KEYS = [
   "error",
   "notice",
   "update",
+  "updating",
 ] as const satisfies readonly (keyof AppState)[];
 const WINDOW_KEY_SET = new Set<string>(WINDOW_KEYS);
 
@@ -329,6 +332,7 @@ export class AppModel {
       error: null,
       notice: null,
       update: null,
+      updating: null,
       ...(parent ? pickWindow(this.root.get()) : {}),
     }));
     if (parent) {
@@ -795,8 +799,15 @@ export class AppModel {
       body: `지금 버전은 ${update.current}예요. 업데이트하면 앱이 다시 시작되고 터미널도 다시 열려요. 화면 내용과 claude 대화는 이어지지만, 터미널에서 실행 중이던 프로그램(개발 서버 등)은 다시 실행해야 해요.`,
       action: "업데이트",
       run: () => {
-        this.notice("업데이트를 내려받고 있어요. 끝나면 앱이 다시 시작돼요");
-        void updates.install().catch((e) => this.fail(e));
+        const root = this.root;
+        const version = update.version;
+        root.set({ updating: { version, progress: null } });
+        void updates
+          .install((progress) => root.set({ updating: { version, progress } }))
+          .catch((e) => {
+            root.set({ updating: null });
+            this.fail(e);
+          });
       },
     });
   };
