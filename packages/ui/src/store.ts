@@ -1326,7 +1326,10 @@ export class AppModel {
     localStorage.setItem(FLOATING_KEY, JSON.stringify({ rect, maximized }));
   }
 
-  /** ⌘⌥A, Ctrl+`: 플로팅 패널을 열고 닫는다. 처음 열 때 탭이 없으면 홈 폴더에서 셸을 띄운다 */
+  /**
+   * ⌘⌥A, Ctrl+`, 플로팅 단추: 플로팅 패널을 열고 닫는다. 열 때는 앞서 원격 컴퓨터를 비췄어도 늘 이 컴퓨터 것을 연다
+   * (원격 플로팅은 사이드바 그 컴퓨터 칸의 [열기] 나 패널 머리의 컴퓨터 고르기로 연다). 탭이 없으면 홈 폴더에서 셸을 띄운다
+   */
   toggleFloating = async (maximized?: boolean): Promise<void> => {
     if (!this.isRoot) return this.root.toggleFloating(maximized);
     const s = this.get();
@@ -1334,14 +1337,14 @@ export class AppModel {
       this.set({ floating: { ...s.floating, open: false }, focusArea: "main" });
       return;
     }
-    this.set({ floating: { ...s.floating, open: true, maximized: maximized || s.floating.maximized }, focusArea: "floating" });
-    const m = this.floatingModel();
-    if (!m.get().layouts[FLOATING_WORKSPACE]?.tabs.length) await m.newTab(FLOATING_WORKSPACE);
+    this.set({ floating: { ...s.floating, open: true, host: "", maximized: maximized || s.floating.maximized }, focusArea: "floating" });
+    if (!this.get().layouts[FLOATING_WORKSPACE]?.tabs.length) await this.newTab(FLOATING_WORKSPACE);
   };
 
   /**
    * 이 모델 호스트의 플로팅 워크스페이스를 플로팅 패널에 띄운다 (사이드바 원격 컴퓨터 칸의 [플로팅], 패널 머리의 컴퓨터 고르기).
-   * 이미 이 호스트를 비추며 열려 있으면 `toggle` 일 때 닫는다. 탭이 없으면 그 컴퓨터 홈 폴더에서 셸을 띄운다
+   * 이미 이 호스트를 비추며 열려 있으면 `toggle` 일 때 닫는다. 탭이 없으면 이 컴퓨터는 홈 폴더에서 셸을 띄우고,
+   * 원격 컴퓨터는 띄우지 않고 빈 화면([새 터미널] · [claude 실행])을 보인다 (보려고 열었을 뿐인데 그 컴퓨터에 셸이 생겼다)
    */
   openFloating = async (toggle = false): Promise<void> => {
     const root = this.root;
@@ -1351,7 +1354,7 @@ export class AppModel {
       return;
     }
     root.set({ floating: { ...s.floating, open: true, host: this.hostKey }, focusArea: "floating" });
-    if (!this.get().layouts[FLOATING_WORKSPACE]?.tabs.length && this.hostState() === "connected") await this.newTab(FLOATING_WORKSPACE);
+    if (this.isRoot && !this.get().layouts[FLOATING_WORKSPACE]?.tabs.length) await this.newTab(FLOATING_WORKSPACE);
   };
 
   setFloatingRect = (rect: FloatingRect | null, maximized?: boolean) => {

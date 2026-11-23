@@ -244,8 +244,8 @@ function anchorTrigger(left: number, top: number): Anchored {
 export function FloatingTrigger() {
   const model = useModel();
   const open = useApp((s) => s.floating.open);
-  // 닫혀 있는 동안 플로팅 탭에 새 출력이 있으면 주황 점을 띄운다
-  const unread = useApp((s) => !s.floating.open && model.root.floatingModel().unread(FLOATING_WORKSPACE, { ...model.root.floatingModel().get(), active: "" }));
+  // 닫혀 있는 동안 이 컴퓨터 플로팅 탭에 새 출력이 있으면 주황 점을 띄운다 (이 단추는 늘 이 컴퓨터 플로팅을 연다. 원격은 사이드바 카드에 점이 붙는다)
+  const unread = useApp((s) => !s.floating.open && model.root.unread(FLOATING_WORKSPACE, { ...model.root.get(), active: "" }));
   const [anchored, setAnchored] = useState(loadTrigger);
   const [live, setLive] = useState<{ left: number; top: number } | null>(null);
   const [, redraw] = useState(0);
