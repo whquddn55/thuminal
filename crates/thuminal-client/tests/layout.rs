@@ -83,11 +83,15 @@ async fn next_layout_event(events: &mut tokio::sync::broadcast::Receiver<Event>)
 
 #[tokio::test]
 async fn create_session_is_placed_by_labels_and_removed_with_its_pane() {
-    let (_dir, c) = start().await;
+    let (dir, c) = start().await;
+    // 워크트리 폴더는 실제로 있어야 한다. 없으면 데몬의 워크트리 감시(worktree_watch)가 그 탭을 `other` 로 옮긴다
+    let wt_path = dir.path().join("wt-a");
+    std::fs::create_dir_all(&wt_path).unwrap();
+    let wt = wt_path.to_str().unwrap().to_string();
     let mut events = c.events();
-    let a = c.create(session_req(&[("worktree", "/tmp/wt-a")])).await.unwrap();
+    let a = c.create(session_req(&[("worktree", &wt)])).await.unwrap();
     let Event::LayoutChanged { layout } = next_layout_event(&mut events).await else { panic!("배치 이벤트가 아니다") };
-    assert_eq!(layout.workspace, "/tmp/wt-a");
+    assert_eq!(layout.workspace, wt);
     assert_eq!(sessions_in(&layout), vec![a.id]);
     assert_eq!(layout.active_tab, Some(layout.tabs[0].id));
 
@@ -104,12 +108,12 @@ async fn create_session_is_placed_by_labels_and_removed_with_its_pane() {
     // 앞서 만든 세션들의 배치 바뀜이 늦게 올 수 있어 넘기고 없어짐만 기다린다 (안 오면 3초 뒤 실패)
     loop {
         match next_layout_event(&mut events).await {
-            Event::LayoutRemoved { workspace } if workspace == "/tmp/wt-a" => break,
+            Event::LayoutRemoved { workspace } if workspace == wt => break,
             Event::LayoutChanged { .. } => {}
-            e => panic!("/tmp/wt-a 배치가 없어져야 한다: {e:?}"),
+            e => panic!("{wt} 배치가 없어져야 한다: {e:?}"),
         }
     }
-    assert!(c.layouts(Some("/tmp/wt-a".into())).await.unwrap().is_empty());
+    assert!(c.layouts(Some(wt.clone())).await.unwrap().is_empty());
 }
 
 #[tokio::test]
