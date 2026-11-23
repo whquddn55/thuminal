@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./compone
 import { Switch } from "./components/ui/switch";
 import { normalizeGroups } from "./groups";
 import { previewIdleScreen } from "./gym/idle";
+import { clearLock, setLockPassword, useIdleLock } from "./gym/lock";
 import { IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, setIdleScreenSettings, useIdleScreenSettings } from "./gym/settings";
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel } from "./platform";
@@ -833,35 +834,105 @@ function AboutSection({ updates }: { updates?: UpdatesApi }) {
 function IdleScreenSection() {
   const model = useModel();
   const { enabled, minutes } = useIdleScreenSettings();
+  const lock = useIdleLock((s) => s.on);
+  // 암호를 정하는 칸: 잠금을 켤 때와 암호를 바꿀 때 연다
+  const [setting, setSetting] = useState(false);
   return (
-    <Group note="아무 키나 누르거나 빈 곳을 누르면 닫혀요. 사람을 누르면 그 칸으로 가요. B를 누르면 쉬는 사람들이 있는 숙소를 펼쳐요.">
-      <Toggle checked={enabled} onChange={(v) => setIdleScreenSettings({ enabled: v })} title="화면 보호기">
-        창에서 한동안 입력이 없으면 claude 세션을 헬스장 사람으로 보여 줘요. 일하는 세션은 운동하고, 기다리는 세션은 쉬어요.
-      </Toggle>
-      <Row title="대기 시간" desc="이 시간 동안 thuminal 창에서 키보드나 마우스를 쓰지 않으면 띄워요.">
-        <input
-          className={cn(input, "w-16 font-mono")}
-          type="number"
-          min={IDLE_MINUTES_MIN}
-          max={IDLE_MINUTES_MAX}
-          disabled={!enabled}
-          value={minutes}
-          onChange={(e) => Number(e.target.value) && setIdleScreenSettings({ minutes: Number(e.target.value) })}
-        />
-        <span className="text-xs text-muted-foreground">분</span>
-      </Row>
-      <Row title="미리 보기">
-        <button
-          className={button}
-          onClick={() => {
-            model.setDialog(null);
-            previewIdleScreen();
+    <>
+      <Group note="아무 키나 누르거나 빈 곳을 누르면 닫혀요. 사람을 누르면 그 칸으로 가요. B를 누르면 쉬는 사람들이 있는 숙소를 펼쳐요.">
+        <Toggle checked={enabled} onChange={(v) => setIdleScreenSettings({ enabled: v })} title="화면 보호기">
+          창에서 한동안 입력이 없으면 claude 세션을 헬스장 사람으로 보여 줘요. 일하는 세션은 운동하고, 기다리는 세션은 쉬어요.
+        </Toggle>
+        <Row title="대기 시간" desc="이 시간 동안 thuminal 창에서 키보드나 마우스를 쓰지 않으면 띄워요.">
+          <input
+            className={cn(input, "w-16 font-mono")}
+            type="number"
+            min={IDLE_MINUTES_MIN}
+            max={IDLE_MINUTES_MAX}
+            disabled={!enabled}
+            value={minutes}
+            onChange={(e) => Number(e.target.value) && setIdleScreenSettings({ minutes: Number(e.target.value) })}
+          />
+          <span className="text-xs text-muted-foreground">분</span>
+        </Row>
+        <Row title="미리 보기">
+          <button
+            className={button}
+            onClick={() => {
+              model.setDialog(null);
+              previewIdleScreen();
+            }}
+          >
+            지금 보기
+          </button>
+        </Row>
+      </Group>
+      <Group note="잠금은 thuminal 창만 가려요. 터미널은 데몬에서 계속 돌아서 다른 터미널의 thuminal 명령이나 등록한 폰으로는 볼 수 있어요. 자리를 비울 때 컴퓨터 전체를 지키려면 OS 화면 잠금을 쓰세요.">
+        <Toggle
+          checked={lock || setting}
+          onChange={(v) => {
+            if (v) setSetting(true);
+            else {
+              setSetting(false);
+              clearLock();
+            }
           }}
+          title="잠금"
         >
-          지금 보기
-        </button>
+          화면 보호기를 닫을 때 암호를 물어요. 잠긴 채 앱을 끄면 다시 켤 때도 잠긴 화면으로 시작해요.
+        </Toggle>
+        {setting ? (
+          <LockPasswordForm
+            onDone={(password) => {
+              setLockPassword(password);
+              setSetting(false);
+            }}
+            onCancel={() => setSetting(false)}
+          />
+        ) : (
+          lock && (
+            <Row title="암호">
+              <button className={button} onClick={() => setSetting(true)}>
+                암호 바꾸기
+              </button>
+            </Row>
+          )
+        )}
+      </Group>
+    </>
+  );
+}
+
+/** 화면 보호기 잠금 암호를 정한다 (두 번 입력) */
+function LockPasswordForm({ onDone, onCancel }: { onDone: (password: string) => void; onCancel: () => void }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const mismatch = b !== "" && a !== b;
+  const ok = a.length >= 4 && a === b;
+  return (
+    <form
+      className="flex flex-col gap-2 py-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ok) onDone(a);
+      }}
+    >
+      <Row title="새 암호" desc="4자 이상">
+        <input className={cn(input, "w-40")} type="password" autoComplete="new-password" autoFocus value={a} onChange={(e) => setA(e.target.value)} />
       </Row>
-    </Group>
+      <Row title="한 번 더">
+        <input className={cn(input, "w-40")} type="password" autoComplete="new-password" value={b} onChange={(e) => setB(e.target.value)} />
+      </Row>
+      <div className="flex items-center justify-end gap-2">
+        {mismatch && <span className="mr-auto text-xs text-destructive">두 암호가 달라요</span>}
+        <button type="button" className={button} onClick={onCancel}>
+          취소
+        </button>
+        <button type="submit" className={button} disabled={!ok}>
+          저장
+        </button>
+      </div>
+    </form>
   );
 }
 

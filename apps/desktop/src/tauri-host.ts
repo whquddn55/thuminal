@@ -507,6 +507,10 @@ export class TauriHostApi implements HostApi {
     return this.call("remove_worktree", { repo, path, force: opts.force, deleteBranch: opts.deleteBranch, forceBranch: opts.forceBranch ?? false });
   }
 
+  idleLockReset(): Promise<{ requested: boolean; path: string }> {
+    return invoke("idle_lock_reset");
+  }
+
   async setUiZoom(scale: number): Promise<void> {
     uiZoom = scale;
     await invoke("set_ui_zoom", { scale });

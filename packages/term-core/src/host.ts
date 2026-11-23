@@ -327,6 +327,11 @@ export interface HostApi {
    * 없으면(웹) 브라우저가 ⌘+ ⌘- 로 스스로 확대한다
    */
   setUiZoom?(scale: number): Promise<void>;
+  /**
+   * 화면 보호기 잠금 암호를 잊었을 때 푸는 길. 데이터 폴더의 `idle-lock-reset` 파일이 있으면 지우고 requested 를 돌려준다.
+   * path 는 그 파일 자리 (잠금 화면 안내에 쓴다). 파일을 볼 수 없는 껍데기(웹)에는 없다
+   */
+  idleLockReset?(): Promise<{ requested: boolean; path: string }>;
   /** 배치. workspace 를 비우면 모두 */
   getLayout(workspace?: string): Promise<WorkspaceLayout[]>;
   /** 배치를 바꾼다. 바뀐 배치와 새로 만든 칸을 돌려준다 */

@@ -358,7 +358,21 @@ function drawFrame(ctx: Ctx, bg: HTMLCanvasElement, v: Views, bedOpen: boolean, 
  * 헬스장 화면. root(로컬) 모델 안에서 그린다. onPick 은 사람을 눌렀을 때 그 세션 번호로 부른다.
  * 키는 `useIdleScreen` 이 받아 B 만 넘겨준다 (bedToggle 이 바뀌면 숙소를 펼치고 접는다)
  */
-export function GymScreen({ bedToggle, onPick, onClose }: { bedToggle: number; onPick: (session: number) => void; onClose: () => void }) {
+export function GymScreen({
+  bedToggle,
+  locked,
+  onPick,
+  onClose,
+  children,
+}: {
+  bedToggle: number;
+  /** 잠겨 있다: 닫거나 사람을 누르면 암호를 묻는다 */
+  locked: boolean;
+  onPick: (session: number) => void;
+  onClose: () => void;
+  /** 그림 위에 얹을 것 (암호 칸) */
+  children?: React.ReactNode;
+}) {
   const sessions = useApp((s) => s.sessions);
   const worktrees = useApp((s) => s.worktrees);
   const feedRef = useRef(new GymFeed());
@@ -486,8 +500,9 @@ export function GymScreen({ bedToggle, onPick, onClose }: { bedToggle: number; o
         </button>
       </div>
       <div className="pointer-events-none absolute right-3.5 bottom-3 rounded-full border border-[#1c2533] bg-[rgba(10,13,20,0.78)] px-3 py-1 text-xs text-[#6b7a90]">
-        아무 키나 누르면 닫혀요 · 사람을 누르면 그 칸으로 가요
+        {locked ? "🔒 잠겨 있어요 · 아무 키나 누르면 암호를 물어요" : "아무 키나 누르면 닫혀요 · 사람을 누르면 그 칸으로 가요"}
       </div>
+      {children}
     </div>
   );
 }

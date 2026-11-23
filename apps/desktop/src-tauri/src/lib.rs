@@ -300,6 +300,21 @@ fn set_ui_zoom(app: tauri::AppHandle, scale: f64) -> CmdResult<()> {
     w.set_zoom(scale.clamp(0.3, 3.0)).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct IdleLockReset {
+    requested: bool,
+    path: String,
+}
+
+/// 화면 보호기 잠금 암호를 잊었을 때: 사용자가 데이터 폴더에 `idle-lock-reset` 파일을 만들고 앱을 다시 켜면 화면이 잠금을 푼다.
+/// 파일은 한 번 쓰고 지운다
+#[tauri::command]
+fn idle_lock_reset() -> IdleLockReset {
+    let path = Paths::default_home().home.join("idle-lock-reset");
+    let requested = path.exists() && std::fs::remove_file(&path).is_ok();
+    IdleLockReset { requested, path: path.display().to_string() }
+}
+
 #[tauri::command]
 async fn input(state: State<'_, AppState>, host: Option<String>, id: SessionId, data: Vec<u8>) -> CmdResult<()> {
     let c = state.client(host.as_deref()).await?;
@@ -701,6 +716,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             daemon_info,
             set_ui_zoom,
+            idle_lock_reset,
             list_sessions,
             create_session,
             attach,
