@@ -61,6 +61,28 @@ export interface AgentInfo {
   tool_count?: number;
   /** 도구가 마지막으로 실패한 때 (ms) */
   tool_failed_at?: number | null;
+  /** 모델 · 생각 강도 · 컨텍스트 · 사용량 (claude 상태 줄 명령이 알린다. thuminal 실행기로 실행한 claude 만) */
+  usage?: AgentUsage | null;
+}
+
+/** claude 가 상태 줄 명령에 넘겨 주는 값에서 뽑은 것. 모르는 값은 null */
+export interface AgentUsage {
+  model_id?: string | null;
+  /** Fable 5.2 */
+  model_name?: string | null;
+  effort?: string | null;
+  /** 마지막 요청이 쓴 컨텍스트 토큰 수 */
+  context_tokens?: number | null;
+  context_size?: number | null;
+  /** 컨텍스트를 쓴 비율 (%) */
+  context_pct?: number | null;
+  /** 5시간 한도를 쓴 비율 (%)과 다시 차는 때 (유닉스 시간 초) */
+  five_hour_pct?: number | null;
+  five_hour_resets?: number | null;
+  seven_day_pct?: number | null;
+  seven_day_resets?: number | null;
+  /** 로그인한 계정 (이메일) */
+  account?: string | null;
 }
 
 /** 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`agent_images` 요청) */
@@ -213,6 +235,8 @@ export const PROCESSES_PROTOCOL_MINOR = 6;
 
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 파일 칸이 워크트리 밖 파일을 절대 경로로 읽고 쓴다 */
 export const OUTSIDE_FILES_PROTOCOL_MINOR = 9;
+/** 이 부 버전부터 데몬이 에이전트 대화 기록을 대화 조각으로 읽어 준다 (`agent_chat`, `agent_chat_changed`) */
+export const AGENT_CHAT_PROTOCOL_MINOR = 12;
 
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 `stop_process` 의 강제 종료(`force`, SIGKILL)가 된다 */
 export const FORCE_STOP_PROTOCOL_MINOR = 10;
@@ -277,6 +301,60 @@ export interface ProcessReport {
   /** 포트를 읽지 못한 까닭 */
   ports_error: string | null;
 }
+/**
+ * 에이전트 대화 기록 한 조각 (`agent_chat` 요청). 대화 보기가 이것만으로 그린다.
+ * 도구 호출(`tool_use`)과 결과(`tool_result`)는 같은 `id`(도구 호출 id)로 짝짓는다
+ */
+export type ChatItem =
+  /** 사용자가 보낸 글. images 는 같이 붙인 그림 id (`agentImage` 로 받는다) */
+  | { type: "user"; id: string; at: number; text: string; images?: string[] }
+  | { type: "assistant"; id: string; at: number; text: string }
+  | { type: "thinking"; id: string; at: number; text: string }
+  | { type: "tool_use"; id: string; at: number; name: string; input: unknown }
+  | { type: "tool_result"; id: string; at: number; text: string; is_error?: boolean; truncated?: boolean }
+  /** kind: command(슬래시 명령) · command_output · compact · interrupted · error · info · turn(턴에 걸린 ms) · teammate(팀원이 보낸 글: 첫 줄 이름, 나머지 내용) */
+  | { type: "notice"; id: string; at: number; kind: string; text: string };
+
+/** claude 가 고를 수 있는 모델 하나 (`claude_models`). claude 의 `/model` 창에 뜨는 줄과 같다 */
+export interface ClaudeModel {
+  /** `/model` 에 붙일 값 (default, opus, claude-opus-4-8 …) */
+  value: string;
+  /** 화면 이름 (Opus 5.5) */
+  label: string;
+  description?: string;
+  /** 이 값이 가리키는 모델 id */
+  resolved?: string;
+  /** 고를 수 있는 생각 강도 (없으면 바꿀 수 없는 모델) */
+  efforts?: string[];
+}
+
+/** 대화 기록에서 읽은 에이전트 상태. 이번에 읽은 줄에 없던 것은 null 이고, 화면은 앞서 받은 값을 그대로 둔다 */
+export interface ChatStatus {
+  /** 마지막 답의 모델 id (`claude-sonnet-5-5`)나 `/model` 이 알린 이름 (`Sonnet 5.5`) */
+  model?: string | null;
+  /** 생각 강도 (low · medium · high …) */
+  effort?: string | null;
+  /** 마지막 요청이 쓴 컨텍스트 토큰 수 */
+  context_tokens?: number | null;
+  /** 컨텍스트 창 크기 (`/context` 를 친 적이 있어야 안다) */
+  context_window?: number | null;
+}
+
+/** `agent_chat` 응답 */
+export interface AgentChat {
+  /** 읽은 기록 파일. 에이전트나 기록이 없으면 빈 글 */
+  transcript: string;
+  /** 여기까지 읽었다. 다음 요청에 그대로 돌려준다 */
+  offset: number;
+  /** 처음부터 다시 읽었다. 가진 것을 버리고 items 로 바꾼다 */
+  reset: boolean;
+  /** 처음부터 읽었는데 tail 보다 많아 앞쪽을 뺐다 */
+  more: boolean;
+  items: ChatItem[];
+  /** 읽은 줄에서 알아낸 모델 · 생각 강도 · 컨텍스트 (옛 빌드는 보내지 않는다) */
+  status?: ChatStatus;
+}
+
 
 /** 세션 꼬리표 중 워크트리 경로를 담는 키 (데몬이 시작 폴더로 채운다) */
 export const WORKTREE_LABEL = "worktree";
@@ -293,6 +371,8 @@ export type DaemonEvent =
   | { type: "terminal_colors_changed"; colors: TerminalColors }
   /** 세션 프로그램이 OSC 9 / 777 로 데스크톱 알림을 청했다 (세션마다 1초에 한 번까지) */
   | { type: "session_notification"; session: SessionId; title: string; body: string }
+  /** 세션 에이전트의 대화 기록이 자랐거나 바뀌었다. 대화 보기가 `agent_chat` 으로 이어 읽는다 */
+  | { type: "agent_chat_changed"; session: SessionId }
   /** 앱 껍데기가 데몬에 다시 붙었다 (데몬이 다시 떴다). 세션 목록을 다시 읽고 다시 붙는다 */
   | { type: "daemon_reconnected" };
 

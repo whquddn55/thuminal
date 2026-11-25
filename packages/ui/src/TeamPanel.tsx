@@ -7,17 +7,19 @@
 // 팝업 틀(머리 줄)은 HTML 이라 그림판 위에 뜨고, 터미널 자리는 비워 두어 그림판이 비치게 한다.
 // 팀원 터미널은 그림판의 위층(layer 1)이라 리더가 다시 그려도 그 위에 다시 그린다 (renderer-webgl).
 
-import { CaretLeftIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import { CaretLeftIcon, ChatTextIcon, TerminalWindowIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import { useContext, useLayoutEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import type { SessionInfo, Tab, WorkspaceId } from "@thuminal/term-core";
 
+import { type AgentView, chatCapable, setAgentView, useAgentView } from "./chat/chat-state";
+import { ChatView } from "./chat/ChatView";
 import { GalleryButton, ImageGallery, useGallery } from "./ImagePanel";
 import { cn } from "./lib/utils";
 import { PopupHead, ResizablePopup } from "./PanePopup";
 import { TEAM_COLOR_LABEL, TEAM_NAME_LABEL, teammatesOf, teamView, useApp, useModel } from "./store";
-import { RendererContext, TerminalMenu, TerminalPane } from "./Workspace";
+import { isFocusedPane, RendererContext, TerminalMenu, TerminalPane } from "./Workspace";
 
 /** claude 가 tmux 색 이름으로 주는 팀원 색 */
 const COLORS: Record<string, string> = {
@@ -36,6 +38,48 @@ export const mateName = (s: SessionInfo) => s.labels[TEAM_NAME_LABEL] || `팀원
 
 export function useTeammates(leader: number): SessionInfo[] {
   return useApp(useShallow((s) => teammatesOf(s.sessions, leader)));
+}
+
+/** 대화 보기 ↔ 원본 단추 (칸 머리 줄이나 칸 오른쪽 위). 대화로 그릴 수 없는 세션이면 그리지 않는다 */
+export function AgentViewButton({ session, floating }: { session: number; floating?: boolean }) {
+  const model = useModel();
+  const info = useApp((s) => s.sessions[session]);
+  const view = useAgentView(model.services.host, model.hostKey, info);
+  if (!view) return null;
+  const next: AgentView = view === "chat" ? "terminal" : "chat";
+  return (
+    <button
+      className={cn(
+        "flex items-center gap-1 text-[10px]",
+        floating ? "h-5 rounded-md border bg-popover/90 px-1.5 text-popover-foreground shadow-sm hover:bg-accent" : "h-4 rounded bg-foreground/10 px-1.5 text-foreground hover:bg-foreground/20",
+      )}
+      title={view === "chat" ? "claude 터미널 화면 그대로 보기" : "대화로 보기"}
+      onClick={() => setAgentView(model.hostKey, session, next)}
+    >
+      {view === "chat" ? <TerminalWindowIcon className="size-3" /> : <ChatTextIcon className="size-3" />}
+      {view === "chat" ? "원본" : "대화"}
+    </button>
+  );
+}
+
+/** 칸 자리에 그리는 대화 보기. 키보드 · 포커스는 터미널 칸(`TerminalPane`)과 같은 규칙이다 */
+function ChatPane({ ws, paneId, session, focused, leader, onActivate }: { ws: WorkspaceId; paneId: number; session: number; focused: boolean; leader: number; onActivate?: () => void }) {
+  const model = useModel();
+  const { surface } = useContext(RendererContext);
+  const keyboard = useApp((s) => focused && s.focusArea === surface && s.dialog === null);
+  return (
+    <ChatView
+      ws={ws}
+      session={session}
+      keyboard={keyboard}
+      onActivate={() => {
+        if (model.get().focusArea !== surface) model.setFocusArea(surface);
+        onActivate?.();
+        if (!isFocusedPane(model, ws, paneId)) model.focusPane(paneId);
+      }}
+      onTerminal={() => setAgentView(model.hostKey, leader, "terminal")}
+    />
+  );
 }
 
 /** 리더 터미널 + 팀원 팝업. header 가 있으면 [팀원 N] 단추는 칸 머리 줄에 있다 */
@@ -63,18 +107,28 @@ export function TeamTerminal({
   // 띄운 팀원이 끝나 지워졌으면 목록으로
   const mate = open ? (mates.find((m) => m.id === view.mate) ?? null) : null;
   const mateKeys = mate !== null && view.keys;
+  // 대화 보기: 칸 하나에 단추 하나라 팀원 팝업도 리더의 보기를 따른다. 대화로 그릴 수 없는 팀원을 띄운 동안은
+  // 리더도 원본으로 둔다 (팝업 안 터미널은 그림판에 그려져 대화 화면 밑에 깔린다)
+  const info = useApp((s) => s.sessions[session]);
+  const agentView = useAgentView(model.services.host, model.hostKey, info);
+  const chat = agentView === "chat" && (!mate || chatCapable(mate));
   useLayoutEffect(() => {
     renderer?.layout();
-  }, [renderer, open, mate?.id]);
+  }, [renderer, open, mate?.id, chat]);
 
   return (
     <>
-      <TerminalMenu tab={tab} paneId={paneId} session={session}>
-        <TerminalPane ws={ws} paneId={paneId} session={session} focused={focused && !mateKeys} onActivate={() => model.teamKeys(session, false)} />
-      </TerminalMenu>
-      {(mates.length > 0 || gallery.count > 0) && !header && (
+      {chat ? (
+        <ChatPane ws={ws} paneId={paneId} session={session} leader={session} focused={focused && !mateKeys} onActivate={() => model.teamKeys(session, false)} />
+      ) : (
+        <TerminalMenu tab={tab} paneId={paneId} session={session}>
+          <TerminalPane ws={ws} paneId={paneId} session={session} focused={focused && !mateKeys} onActivate={() => model.teamKeys(session, false)} />
+        </TerminalMenu>
+      )}
+      {(mates.length > 0 || gallery.count > 0 || agentView) && !header && (
         <div className={cn("absolute top-1.5 right-2 z-[8] flex items-center gap-1", (open || gallery.open) && "invisible")}>
           {gallery.count > 0 && <GalleryButton session={session} floating />}
+          <AgentViewButton session={session} floating />
           {mates.length > 0 && (
             <button
               className="flex h-5 items-center gap-1 rounded-md border bg-popover/90 px-1.5 text-[10px] text-popover-foreground shadow-sm hover:bg-accent"
@@ -89,7 +143,7 @@ export function TeamTerminal({
           )}
         </div>
       )}
-      {open && (mate ? <MateDetail ws={ws} leader={session} paneId={paneId} mate={mate} focused={focused && mateKeys} /> : <MateList leader={session} mates={mates} />)}
+      {open && (mate ? <MateDetail ws={ws} leader={session} paneId={paneId} mate={mate} focused={focused && mateKeys} chat={chat} /> : <MateList leader={session} mates={mates} />)}
       {gallery.open && !open && <ImageGallery session={session} />}
     </>
   );
@@ -121,7 +175,7 @@ function MateList({ leader, mates }: { leader: number; mates: SessionInfo[] }) {
 }
 
 /** 팀원 하나의 터미널. 팝업 크기는 모든 팀원·리더가 같이 쓴다 */
-function MateDetail({ ws, leader, paneId, mate, focused }: { ws: WorkspaceId; leader: number; paneId: number; mate: SessionInfo; focused: boolean }) {
+function MateDetail({ ws, leader, paneId, mate, focused, chat }: { ws: WorkspaceId; leader: number; paneId: number; mate: SessionInfo; focused: boolean; chat: boolean }) {
   const model = useModel();
   const color = mateColor(mate);
   const { renderer } = useContext(RendererContext);
@@ -142,7 +196,11 @@ function MateDetail({ ws, leader, paneId, mate, focused }: { ws: WorkspaceId; le
         <div className="w-0.5 shrink-0" style={{ background: color }} />
         {/* 터미널 자리는 비워 둔다: 그림판(아래)의 위층 팀원 터미널이 비친다 */}
         <div className="relative min-w-0 flex-1">
-          <TerminalPane ws={ws} paneId={paneId} session={mate.id} focused={focused} layer={1} onActivate={() => model.teamKeys(leader, true)} />
+          {chat ? (
+            <ChatPane ws={ws} paneId={paneId} session={mate.id} leader={leader} focused={focused} onActivate={() => model.teamKeys(leader, true)} />
+          ) : (
+            <TerminalPane ws={ws} paneId={paneId} session={mate.id} focused={focused} layer={1} onActivate={() => model.teamKeys(leader, true)} />
+          )}
         </div>
       </div>
     </ResizablePopup>

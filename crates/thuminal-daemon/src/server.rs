@@ -176,7 +176,11 @@ impl Server {
         let m = &self.manager;
         let kind = request_kind(&request);
         // 기능 사용을 나중에 셀 수 있게 요청 종류마다 한 줄 남긴다
-        info!(event = "request", conn, client, kind);
+        // 대화 보기가 이어 읽는 요청은 일하는 동안 초마다 몇 번씩 온다. 처음 읽을 때만 남긴다.
+        // 화면 글 읽기도 대화 보기가 상태 줄을 옮기려고 2초마다 보내므로 남기지 않는다
+        if !matches!(request, Request::AgentChat { offset, .. } if offset > 0) && !matches!(request, Request::ReadScreen { .. } | Request::ReportAgentUsage { .. }) {
+            info!(event = "request", conn, client, kind);
+        }
         let result: Result<Response, ErrorBody> = match request {
             Request::Hello { .. } => Ok(Response::Hello {
                 daemon_version: env!("CARGO_PKG_VERSION").into(),
@@ -218,6 +222,7 @@ impl Server {
                 m.read_screen(session, format, scrollback).await.map(|text| Response::Screen { text })
             }
             Request::SetLabels { session, labels } => m.set_labels(session, labels).map(|session| Response::Session { session }),
+            Request::ReportAgentUsage { session, usage } => m.report_usage(session, usage).map(|()| Response::Ok),
             Request::ReportAgent {
                 session,
                 kind,
@@ -361,6 +366,18 @@ impl Server {
                     .and_then(|r| r)
                     .map(|images| Response::AgentImages { images })
             }
+            Request::AgentChat { session, transcript, offset, tail, subagent } => {
+                let m = m.clone();
+                tokio::task::spawn_blocking(move || m.agent_chat(session, transcript.as_deref(), offset, tail, subagent.as_deref()))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|chat| Response::AgentChat { chat })
+            }
+            Request::ClaudeModels => tokio::task::spawn_blocking(crate::claude_models::list)
+                .await
+                .map(|models| Response::ClaudeModels { models })
+                .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() }),
             Request::AgentImage { session, id, thumb } => {
                 let m = m.clone();
                 tokio::task::spawn_blocking(move || m.agent_image(session, &id, thumb))
@@ -618,6 +635,9 @@ fn request_kind(r: &Request) -> &'static str {
         Request::Tmux { .. } => "tmux",
         Request::AgentImages { .. } => "agent_images",
         Request::AgentImage { .. } => "agent_image",
+        Request::AgentChat { .. } => "agent_chat",
+        Request::ReportAgentUsage { .. } => "report_agent_usage",
+        Request::ClaudeModels => "claude_models",
         Request::ScanOrca => "scan_orca",
         Request::GetRemote => "get_remote",
         Request::SetRemote { .. } => "set_remote",
@@ -657,6 +677,8 @@ fn is_slow(r: &Request) -> bool {
             | Request::ScanOrca
             | Request::AgentImages { .. }
             | Request::AgentImage { .. }
+            | Request::AgentChat { .. }
+            | Request::ClaudeModels
     )
 }
 

@@ -133,6 +133,8 @@ function runAction(root: AppModel, model: AppModel, id: string, digit: number): 
       return void model.newBrowserTab();
     case "closeCurrent":
       return void model.closeCurrent();
+    case "toggleAgentView":
+      return model.toggleAgentView();
     case "splitRight":
       return void model.split("right");
     case "splitDown":

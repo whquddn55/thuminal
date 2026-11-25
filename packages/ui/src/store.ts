@@ -47,6 +47,7 @@ import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGr
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
 import { logNotice, markNoticesRead } from "./notice-log";
+import { chatCapable, chatChanged, chatKey, chatReconnected, chatRemoved, chatViewStore, setAgentView } from "./chat/chat-state";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
 import type { ResolvedLink } from "./terminal-link-hover";
@@ -251,7 +252,6 @@ export const WINDOW_KEYS = [
 ] as const satisfies readonly (keyof AppState)[];
 const WINDOW_KEY_SET = new Set<string>(WINDOW_KEYS);
 
-/** 호스트 안 워크스페이스를 창 전체에서 가르는 키. 로컬은 워크스페이스 그대로, 원격은 `<호스트 id>|<워크스페이스>` */
 /** 오른쪽 아래 카드 하나 */
 export interface Toast {
   id: number;
@@ -261,6 +261,7 @@ export interface Toast {
 const MAX_TOASTS = 4;
 let nextToast = 1;
 
+/** 호스트 안 워크스페이스를 창 전체에서 가르는 키. 로컬은 워크스페이스 그대로, 원격은 `<호스트 id>|<워크스페이스>` */
 export function placeKey(host: string, ws: WorkspaceId): string {
   return host ? `${host}|${ws}` : ws;
 }
@@ -499,8 +500,8 @@ export class AppModel {
       offClick?.();
       offBadge();
       offHosts?.();
-    };
       window.removeEventListener("focus", onFocus);
+    };
     // 테마는 데몬 답을 기다리지 않고 입힌다 (엔진 기본색도 터미널이 붙기 전에 맞춘다)
     void this.applyTheme();
     if (this.isRoot) void terminalFontsLoaded().then(() => this.refreshRenderers());
@@ -707,8 +708,12 @@ export class AppModel {
         });
         void this.controllers.get(e.session)?.dispose();
         this.controllers.delete(e.session);
+        chatRemoved(this.hostKey, e.session);
         return;
       }
+      case "agent_chat_changed":
+        chatChanged(this.hostKey, e.session);
+        return;
       case "layout_changed":
         this.set((s) => ({ layouts: { ...s.layouts, [e.layout.workspace]: e.layout } }));
         this.reapBrowsers();
@@ -737,6 +742,7 @@ export class AppModel {
         void this.refreshStatus(e.worktree);
         return;
       case "daemon_reconnected":
+        chatReconnected(this.hostKey);
         void this.reload();
         return;
     }
@@ -771,18 +777,18 @@ export class AppModel {
     this.toast("error", name ? `${name}: ${e}` : String(e));
   };
 
-  /** 원격이 끊겨 있어 실패한 것은 띠에 띄우지 않는다 (사이드바 연결 배지가 알린다) */
-  private failQuiet(e: unknown) {
-    if (!this.isRoot && this.hostState() !== "connected") console.warn("[thuminal]", this.hostKey, e);
-    else this.fail(e);
-  }
-
   /** 카드를 쌓는다. 같은 글이 이미 떠 있으면 그것을 맨 뒤로 옮긴다 */
   private toast(kind: Toast["kind"], text: string) {
     this.set((s) => ({ toasts: [...s.toasts.filter((t) => t.kind !== kind || t.text !== text), { id: nextToast++, kind, text }].slice(-MAX_TOASTS) }));
   }
 
   dismissToast = (id: number) => this.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+
+  /** 원격이 끊겨 있어 실패한 것은 띠에 띄우지 않는다 (사이드바 연결 배지가 알린다) */
+  private failQuiet(e: unknown) {
+    if (!this.isRoot && this.hostState() !== "connected") console.warn("[thuminal]", this.hostKey, e);
+    else this.fail(e);
+  }
 
   clearError = () => this.set({ toasts: [] });
 
@@ -1108,12 +1114,6 @@ export class AppModel {
     }
   };
 
-  /** 알림 목록에서 고른 알림의 칸으로 간다. 그 칸이 이미 없으면 false */
-  revealNotice = (host: string, session: SessionId): boolean => {
-    const m = this.root.hostModel(host);
-    if (!m || !paneOfSession(Object.values(m.get().layouts), session)) return false;
-    m.revealSession(session);
-    return true;
   /** 지금 보고 있는 칸의 알림을 읽은 것으로 한다 (root). 칸이 이미 없어진 알림도 더는 확인할 수 없으니 읽은 것으로 한다 */
   private syncNoticesRead() {
     markNoticesRead((e) => {
@@ -1124,6 +1124,12 @@ export class AppModel {
     });
   }
 
+  /** 알림 목록에서 고른 알림의 칸으로 간다. 그 칸이 이미 없으면 false */
+  revealNotice = (host: string, session: SessionId): boolean => {
+    const m = this.root.hostModel(host);
+    if (!m || !paneOfSession(Object.values(m.get().layouts), session)) return false;
+    m.revealSession(session);
+    return true;
   };
 
   /** 원격 호스트 알림 번호 → (호스트, 세션). 로컬 세션은 세션 번호를 그대로 쓴다 (root 만 든다) */
@@ -1226,6 +1232,17 @@ export class AppModel {
   }
 
   /** 지금 워크스페이스에서 포커스된 칸 */
+  /** 포커스 칸의 에이전트를 대화 ↔ 원본으로 바꾼다 (Orca ⌘⇧J). 에이전트 칸이 아니거나 옛 데몬이면 false */
+  toggleAgentView = (): boolean => {
+    const tab = activeTab(this.get().layouts[this.currentWorkspace()]);
+    const pane = tab && panesOf(tab.root).find((p) => p.id === tab.focused);
+    const view = chatViewStore.getState();
+    if (pane?.type !== "terminal" || !chatCapable(this.get().sessions[pane.session]) || !view.supported[this.hostKey]) return false;
+    const now = view.overrides[chatKey(this.hostKey, pane.session)] ?? view.base;
+    setAgentView(this.hostKey, pane.session, now === "chat" ? "terminal" : "chat");
+    return true;
+  };
+
   currentPane(ws: WorkspaceId = this.currentWorkspace()): PaneRef | null {
     const p = focusedPane(activeTab(this.get().layouts[ws]));
     return p ? byId(p.id) : null;

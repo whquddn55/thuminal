@@ -4,7 +4,8 @@
 export const AGENTS: { cmd: string; label: string; name: string }[] = [
   { cmd: "claude", label: "Claude Code", name: "Claude" },
   { cmd: "codex", label: "Codex", name: "Codex" },
-  { cmd: "gemini", label: "Gemini CLI", name: "Gemini" },
+  // Gemini CLI 는 구글이 접었고 Antigravity CLI(`agy`)가 그 자리를 잇는다
+  { cmd: "agy", label: "Antigravity", name: "Antigravity" },
   { cmd: "opencode", label: "OpenCode", name: "OpenCode" },
   { cmd: "cursor-agent", label: "Cursor Agent", name: "Cursor" },
 ];

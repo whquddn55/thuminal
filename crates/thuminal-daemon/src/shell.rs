@@ -190,6 +190,12 @@ fi
         if let Some(p) = self.plugin_dir() {
             out.push_str(&format!("[ -d {p} ] && set -- --plugin-dir {p} \"$@\"\n", p = sh_quote(&p.to_string_lossy())));
         }
+        // 상태 줄 명령을 thuminal 것으로 바꿔 claude 가 주는 모델 · 컨텍스트 · 사용량을 데몬이 받게 한다 (대화 보기 상태 줄).
+        // 그 명령이 사용자의 원래 상태 줄 명령을 이어 돌리므로 터미널 화면은 그대로다. thuminal 세션 안에서만 건다
+        out.push_str(&format!(
+            "if [ -n \"${{THUMINAL_SESSION_ID-}}\" ] && [ -n \"${{THUMINAL_CLI-}}\" ]; then\n  set -- --settings {json} \"$@\"\nfi\n",
+            json = sh_quote(&statusline_settings()),
+        ));
         out.push_str("exec claude \"$@\"\n");
         out
     }
@@ -454,6 +460,20 @@ if (-not $env:TMUX -and $env:THUMINAL_SESSION_ID -and $env:THUMINAL_CLI) {{
     }
 }
 
+/// claude `--settings` 에 줄 상태 줄 설정. 명령의 `$THUMINAL_CLI` 는 claude 가 명령을 돌릴 때 세션 환경에서 풀린다.
+/// 사용자가 정한 다시 그리기 주기(`refreshInterval`) · 여백(`padding`)은 그대로 옮긴다
+fn statusline_settings() -> String {
+    let mut line = serde_json::json!({ "type": "command", "command": "\"$THUMINAL_CLI\" agent statusline" });
+    let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| thuminal_protocol::paths::user_home().map(|h| h.join(".claude")));
+    let user: serde_json::Value = dir.and_then(|d| std::fs::read(d.join("settings.json")).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    for key in ["refreshInterval", "padding"] {
+        if let Some(v) = user.pointer(&format!("/statusLine/{key}")).filter(|v| v.is_number()) {
+            line[key] = v.clone();
+        }
+    }
+    serde_json::json!({ "statusLine": line }).to_string()
+}
+
 /// SKILL.md 머리(`---` 사이)에서 `key: 값` 을 읽는다. 따옴표는 벗기고, 여러 줄 값(`>-`, `|` 처럼 다음 줄들을
 /// 들여 쓴 것)은 한 줄로 잇는다
 fn frontmatter(md: &str, key: &str) -> Option<String> {
@@ -563,11 +583,14 @@ mod launcher_tests {
         // 원본 대신 데몬이 짠 플러그인 폴더를 얹는다
         let p = home.path().join("shell/claude-plugin").to_string_lossy().into_owned();
         let in_session = [("THUMINAL_SESSION_ID", "7"), ("THUMINAL_CLI", "/x/thuminal")];
+        // 세션 안에서는 상태 줄 명령을 thuminal 것으로 건다 (세션 밖에서는 걸지 않는다)
+        let st = statusline_settings();
+        assert!(st.contains(r#""command":"\"$THUMINAL_CLI\" agent statusline""#), "{st}");
 
         // 기본: 권한 확인 없이 + 팀 (세션 안에서만 tmux 흉내)
         assert_eq!(
             run(&shell, home.path(), &in_session),
-            format!("--plugin-dir {p} --teammate-mode auto --dangerously-skip-permissions --resume x | TMUX_PANE=%7 TEAMS=1")
+            format!("--settings {st} --plugin-dir {p} --teammate-mode auto --dangerously-skip-permissions --resume x | TMUX_PANE=%7 TEAMS=1")
         );
         assert_eq!(run(&shell, home.path(), &[]), format!("--plugin-dir {p} --dangerously-skip-permissions --resume x | TMUX_PANE= TEAMS=1"));
 
@@ -575,7 +598,7 @@ mod launcher_tests {
         off.claude.skip_permissions = false;
         off.claude.teams = false;
         shell.set_settings(off.clone());
-        assert_eq!(run(&shell, home.path(), &in_session), format!("--plugin-dir {p} --resume x | TMUX_PANE= TEAMS="));
+        assert_eq!(run(&shell, home.path(), &in_session), format!("--settings {st} --plugin-dir {p} --resume x | TMUX_PANE= TEAMS="));
         // 데몬이 다시 떠도 남는다
         assert_eq!(ShellIntegration::new(home.path(), None).settings(), off);
     }

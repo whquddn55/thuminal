@@ -1,4 +1,4 @@
-// 에이전트(claude, codex, gemini, opencode, cursor) 아이콘.
+// 에이전트(claude, codex, agy, opencode, cursor) 아이콘.
 // 그림은 Orca(MIT, Copyright (c) 2026 Lovecast Inc.)의 아이콘을 옮겼다. 라이선스 전문은 packages/ui/NOTICE.
 // Gemini 는 Orca 판의 흐림 필터를 빼고 같은 별 모양에 그라데이션만 입혔다.
 
@@ -47,6 +47,9 @@ export function AgentIcon({ kind, className }: { kind: string | null | undefined
           <path d={OPENAI} />
         </svg>
       );
+    // Antigravity CLI(`agy`)는 Gemini CLI 를 이은 구글 것이라 같은 아이콘을 쓴다
+    case "agy":
+    case "antigravity":
     case "gemini":
       return <Gemini className={c} />;
     case "opencode":

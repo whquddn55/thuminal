@@ -78,6 +78,7 @@ pub fn next_agent(prev: Option<AgentInfo>, r: AgentReport, now: u64) -> Option<A
         background_tasks: 0,
         tool_count: 0,
         tool_failed_at: None,
+        usage: None,
     });
     a.kind = r.kind;
     if r.agent_session_id.is_some() {
@@ -184,6 +185,8 @@ pub struct Manager {
     colors_file: PathBuf,
     /// 에이전트 대화 기록에서 찾은 붙인 그림 (세션마다)
     images: crate::images::Images,
+    /// 대화 기록이 자랐는지 볼 때 견주는 지난 (기록 경로, 크기) (세션마다, `check_chats`)
+    chat_sizes: Mutex<BTreeMap<SessionId, (String, u64)>>,
 }
 
 fn not_found(id: SessionId) -> ErrorBody {
@@ -209,6 +212,7 @@ impl Manager {
             colors: Mutex::new(colors),
             colors_file,
             images: Default::default(),
+            chat_sizes: Default::default(),
         }
     }
 
@@ -404,6 +408,22 @@ impl Manager {
         Ok(info)
     }
 
+    /// claude 상태 줄 명령이 알린 모델 · 컨텍스트 · 사용량을 남긴다. 바뀐 것이 있을 때만 알린다
+    pub fn report_usage(&self, id: SessionId, usage: thuminal_protocol::AgentUsage) -> Result<(), ErrorBody> {
+        let h = self.handle(id)?;
+        let info = {
+            let mut i = h.info.lock().unwrap();
+            let Some(a) = i.agent.as_mut() else { return Ok(()) };
+            if a.usage.as_ref() == Some(&usage) {
+                return Ok(());
+            }
+            a.usage = Some(usage);
+            i.clone()
+        };
+        let _ = self.events.send(Event::SessionUpdated { session: info });
+        Ok(())
+    }
+
     /// 일하는 중인 에이전트가 Esc 로 멈췄는지 대화 기록에서 본다. 멈췄으면 기다림으로 바꾼다 (멈추면 Stop 훅이 오지 않는다)
     pub fn check_interrupted(&self) {
         let working: Vec<(SessionId, String, u64)> = self
@@ -486,6 +506,46 @@ impl Manager {
 
     fn transcript_of(&self, id: SessionId) -> Result<Option<String>, ErrorBody> {
         Ok(self.info(id)?.agent.and_then(|a| a.transcript))
+    }
+
+    /// 에이전트 대화 기록이 자랐거나 다른 기록으로 바뀐 세션을 알린다 (0.25초마다 부른다. 파일 크기만 본다).
+    /// 대화 보기는 이 알림을 받고 `agent_chat` 으로 늘어난 부분을 읽는다
+    pub fn check_chats(&self) {
+        let now: BTreeMap<SessionId, (String, u64)> = self
+            .list()
+            .into_iter()
+            .filter_map(|i| {
+                let t = i.agent?.transcript?;
+                let len = std::fs::metadata(&t).map_or(0, |m| m.len());
+                Some((i.id, (t, len)))
+            })
+            .collect();
+        let mut seen = self.chat_sizes.lock().unwrap();
+        for (id, cur) in &now {
+            if seen.get(id) != Some(cur) {
+                let _ = self.events.send(Event::AgentChatChanged { session: *id });
+            }
+        }
+        // 에이전트가 끝난 세션도 알린다 (대화 보기가 비운다)
+        for id in seen.keys().filter(|id| !now.contains_key(id)) {
+            let _ = self.events.send(Event::AgentChatChanged { session: *id });
+        }
+        *seen = now;
+    }
+
+    /// 세션 에이전트의 대화 기록을 대화 보기용 조각으로 읽는다 (블로킹 스레드에서 부른다)
+    pub fn agent_chat(&self, id: SessionId, transcript: Option<&str>, offset: u64, tail: u32, subagent: Option<&str>) -> Result<thuminal_protocol::AgentChat, ErrorBody> {
+        let empty = || Ok(thuminal_protocol::AgentChat { reset: true, ..Default::default() });
+        let Some(path) = self.transcript_of(id)? else { return empty() };
+        let known = transcript.map(|t| (t, offset));
+        match subagent {
+            None => crate::chat::read(&path, known, tail).map_err(internal),
+            // 서브에이전트가 아직 기록을 쓰지 않았으면 빈 응답이다
+            Some(tool) => match crate::chat::subagent_path(&path, tool) {
+                Some(sub) => crate::chat::read_subagent(&sub, known, tail).map_err(internal),
+                None => empty(),
+            },
+        }
     }
 
     /// 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로)

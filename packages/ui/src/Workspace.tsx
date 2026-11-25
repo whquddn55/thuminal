@@ -34,7 +34,7 @@ import { FLOATING_WORKSPACE, teamView, useApp, useModel } from "./store";
 import { rendererOptions } from "./terminal-font";
 import { agentStatus, StatusIndicator, statusOf } from "./Sidebar";
 import { GalleryButton } from "./ImagePanel";
-import { mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
+import { AgentViewButton, mateColor, mateName, TeamTerminal, useTeammates } from "./TeamPanel";
 import { SizeTakenOverlay } from "./size-overlay";
 import { SessionPorts } from "./ports-ui";
 import { type DocActions, type DocSpec, DocView } from "./viewers";
@@ -417,6 +417,7 @@ function PaneView({ ws, tab, pane, header }: { ws: WorkspaceId; tab: Tab; pane: 
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
           {pane.type === "terminal" && <GalleryButton session={pane.session} />}
+          {pane.type === "terminal" && <AgentViewButton session={pane.session} />}
           {mates.length > 0 && pane.type === "terminal" && (
             <button
               className="flex h-4 items-center gap-1 rounded bg-primary/15 px-1.5 text-[10px] text-foreground hover:bg-primary/25"
@@ -547,7 +548,7 @@ export function TerminalMenu({ tab, paneId, session, children }: { tab: Tab; pan
 }
 
 /** 칸이 그 탭의 포커스 칸인지 (팀원을 눌러도 리더 칸이 포커스가 되게 할 때 본다) */
-function isFocusedPane(model: ReturnType<typeof useModel>, ws: WorkspaceId, paneId: number) {
+export function isFocusedPane(model: ReturnType<typeof useModel>, ws: WorkspaceId, paneId: number) {
   return activeTab(model.get().layouts[ws])?.focused === paneId;
 }
 

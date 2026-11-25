@@ -5,6 +5,8 @@
 
 pub mod background;
 pub mod browser_proxy;
+pub mod chat;
+pub mod claude_models;
 pub mod images;
 pub mod interrupt;
 pub mod layout;
@@ -91,10 +93,12 @@ impl Daemon {
         let remote = tokio::spawn(remote::watch(server.clone()));
         let push = tokio::spawn(push::watch(server.clone()));
         let worktrees = tokio::spawn(worktree_watch::watch(server.clone()));
+        let chats = tokio::spawn(chat_loop(server.manager.clone()));
         let saver = tokio::spawn(save_loop(server.manager.clone(), server.layouts.clone(), persist.clone()));
 
         server.clone().serve(listener).await;
         saver.abort();
+        chats.abort();
         teams.abort();
         remote.abort();
         push.abort();
@@ -127,6 +131,8 @@ async fn save_loop(manager: Arc<manager::Manager>, layouts: Arc<layout::Layouts>
     loop {
         tokio::select! {
             e = events.recv() => match e {
+                // 대화 기록이 자란 것은 남길 세션 정보가 아니다
+                Ok(thuminal_protocol::Event::AgentChatChanged { .. }) => {}
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => dirty = true,
                 Err(_) => return,
             },
@@ -154,6 +160,17 @@ async fn save_loop(manager: Arc<manager::Manager>, layouts: Arc<layout::Layouts>
                 }
             }
         }
+    }
+}
+
+/// 에이전트 대화 기록이 자랐는지 0.25초마다 본다 (파일 크기만). 자랐으면 대화 보기에 알린다
+async fn chat_loop(manager: Arc<manager::Manager>) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tick.tick().await;
+        let m = manager.clone();
+        let _ = tokio::task::spawn_blocking(move || m.check_chats()).await;
     }
 }
 

@@ -49,6 +49,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: "splitDown", label: "아래에 나누기", group: "탭 · 칸", keys: ["⇧⌘D"] },
   { id: "zoomPane", label: "칸 펼치기", group: "탭 · 칸", keys: ["⇧⌘↩"] },
   { id: "equalize", label: "칸 크기 고르게", group: "탭 · 칸", keys: ["⌥⌘="] },
+  { id: "toggleAgentView", label: "에이전트 대화 ↔ 원본", group: "탭 · 칸", keys: ["⇧⌘J"] },
   { id: "prevPane", label: "이전 칸", group: "탭 · 칸", keys: ["⌘["] },
   { id: "nextPane", label: "다음 칸", group: "탭 · 칸", keys: ["⌘]"] },
   { id: "focusLeft", label: "왼쪽 칸으로", group: "탭 · 칸", keys: ["⌃⌘←"] },

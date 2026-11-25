@@ -79,6 +79,19 @@ enum AgentCmd {
         #[arg(long)]
         event: Option<String>,
     },
+    /// claude 상태 줄 명령. claude 가 표준 입력으로 주는 JSON(모델 · 컨텍스트 · 사용량)을 데몬에 알리고,
+    /// 사용자가 설정한 원래 상태 줄 명령을 같은 입력으로 돌려 그 출력을 그대로 낸다 (터미널 화면의 상태 줄은 그대로다)
+    Statusline,
+    /// 세션 에이전트의 대화를 글로 찍는다 (대화 보기와 같은 내용)
+    Chat {
+        /// 세션 (12, s12, 칸 p7, `.`)
+        session: String,
+        /// 끝에서 이만큼만 (0 이면 모두)
+        #[arg(long, default_value_t = 50)]
+        tail: u32,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -344,6 +357,38 @@ fn agent_request(session: SessionId, kind: String, event: Option<String>, payloa
 }
 
 /// 훅 알림. 어떤 경우에도 에이전트를 막지 않게 1초 안에 끝내고 오류를 내지 않는다
+/// 대화 조각을 한 줄씩 찍는다: `> 사용자`, 답은 그대로, `* 도구 요약`, `  ! 실패한 결과 첫 줄`
+async fn agent_chat(c: &Client, session: &str, tail: u32, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use thuminal_protocol::{ChatItem, Request, Response};
+    let id = session_id(c, session).await?;
+    let Response::AgentChat { chat } = c.request(Request::AgentChat { session: id, transcript: None, offset: 0, tail, subagent: None }).await? else {
+        return Err("데몬이 다른 답을 보냈어요".into());
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&chat)?);
+        return Ok(());
+    }
+    if chat.more {
+        println!("… (앞 대화는 --tail 0 으로 모두 볼 수 있다)");
+    }
+    let first = |s: &str| s.lines().next().unwrap_or("").to_string();
+    for item in chat.items {
+        match item {
+            ChatItem::User { text, images, .. } => println!("> {text}{}", if images.is_empty() { String::new() } else { format!(" [그림 {}]", images.len()) }),
+            ChatItem::Assistant { text, .. } => println!("{text}"),
+            ChatItem::Thinking { .. } => {}
+            ChatItem::ToolUse { name, input, .. } => {
+                let arg = ["command", "file_path", "pattern", "description", "url", "query", "skill"].iter().find_map(|k| input.get(k).and_then(|v| v.as_str())).unwrap_or("");
+                println!("* {name} {}", first(arg));
+            }
+            ChatItem::ToolResult { text, is_error: true, .. } => println!("  ! {}", first(&text)),
+            ChatItem::ToolResult { .. } => {}
+            ChatItem::Notice { kind, text, .. } => println!("[{kind}] {}", first(&text)),
+        }
+    }
+    Ok(())
+}
+
 async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
     let Ok(sid) = std::env::var("THUMINAL_SESSION_ID") else { return ExitCode::SUCCESS };
     let Ok(session) = sid.parse::<u64>() else { return ExitCode::SUCCESS };
@@ -359,6 +404,77 @@ async fn agent_report(kind: String, event: Option<String>) -> ExitCode {
         }
     })
     .await;
+    ExitCode::SUCCESS
+}
+
+/// claude 설정 폴더 (`CLAUDE_CONFIG_DIR`, 없으면 `~/.claude`)
+fn claude_config_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR").map(std::path::PathBuf::from).or_else(|| thuminal_protocol::paths::user_home().map(|h| h.join(".claude")))
+}
+
+fn read_json(path: &std::path::Path) -> serde_json::Value {
+    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// claude 가 상태 줄 명령에 주는 JSON 에서 데몬에 알릴 값을 뽑는다
+fn usage_from_statusline(v: &serde_json::Value, account: Option<String>) -> thuminal_protocol::AgentUsage {
+    let text = |p: &str| v.pointer(p).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+    let int = |p: &str| v.pointer(p).and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|f| f.max(0.0) as u64)));
+    let pct = |p: &str| v.pointer(p).and_then(|x| x.as_f64()).map(|f| f.clamp(0.0, 100.0).round() as u32);
+    let used = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].iter().filter_map(|k| int(&format!("/context_window/current_usage/{k}"))).sum::<u64>();
+    thuminal_protocol::AgentUsage {
+        model_id: text("/model/id"),
+        model_name: text("/model/display_name"),
+        effort: text("/effort/level"),
+        context_tokens: (used > 0).then_some(used),
+        context_size: int("/context_window/context_window_size"),
+        context_pct: pct("/context_window/used_percentage"),
+        five_hour_pct: pct("/rate_limits/five_hour/used_percentage"),
+        five_hour_resets: int("/rate_limits/five_hour/resets_at"),
+        seven_day_pct: pct("/rate_limits/seven_day/used_percentage"),
+        seven_day_resets: int("/rate_limits/seven_day/resets_at"),
+        account,
+    }
+}
+
+/// 사용자가 정한 원래 상태 줄 명령 (`settings.json` 의 `statusLine.command`). thuminal 실행기는 `--settings` 로 이 명령을
+/// 가리지만 사용자 설정 파일에는 원래 것이 그대로 있다
+fn user_statusline_command() -> Option<String> {
+    let cmd = read_json(&claude_config_dir()?.join("settings.json")).pointer("/statusLine/command")?.as_str()?.to_string();
+    (!cmd.trim().is_empty() && !cmd.contains("agent statusline")).then_some(cmd)
+}
+
+/// claude 상태 줄 명령. claude 를 느리게 하지 않게 데몬 알림은 0.3초 안에 끝내고, 어떤 경우에도 오류를 내지 않는다
+async fn agent_statusline() -> ExitCode {
+    let mut input = String::new();
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
+    }
+    if let Some(session) = std::env::var("THUMINAL_SESSION_ID").ok().and_then(|s| s.parse::<u64>().ok()) {
+        let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+        // 계정은 claude 가 주지 않는다. 로그인 정보 파일에서 읽는다
+        let account = thuminal_protocol::paths::user_home()
+            .map(|h| std::env::var_os("CLAUDE_CONFIG_DIR").map(|d| std::path::PathBuf::from(d).join(".claude.json")).unwrap_or_else(|| h.join(".claude.json")))
+            .and_then(|p| read_json(&p).pointer("/oauthAccount/emailAddress").and_then(|e| e.as_str()).map(str::to_string));
+        let request = thuminal_protocol::Request::ReportAgentUsage { session: SessionId(session), usage: usage_from_statusline(&payload, account) };
+        let _ = tokio::time::timeout(Duration::from_millis(300), async {
+            if let Ok(c) = Client::connect(&Paths::default_home(), "agent-statusline").await {
+                let _ = c.request(request).await;
+            }
+        })
+        .await;
+    }
+    // 사용자의 원래 상태 줄을 같은 입력으로 돌린다 (출력은 이 프로세스의 표준 출력으로 그대로 나간다)
+    if let Some(cmd) = user_statusline_command() {
+        let mut c = if cfg!(windows) { std::process::Command::new("cmd") } else { std::process::Command::new("sh") };
+        c.args([if cfg!(windows) { "/C" } else { "-c" }, cmd.as_str()]).stdin(std::process::Stdio::piped());
+        if let Ok(mut child) = c.spawn() {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = std::io::Write::write_all(&mut stdin, input.as_bytes());
+            }
+            let _ = child.wait();
+        }
+    }
     ExitCode::SUCCESS
 }
 
@@ -458,6 +574,8 @@ async fn run(cli: Cli) -> Res<ExitCode> {
     match cli.command {
         Command::Tmux { argv } => return Ok(tmux(argv).await),
         Command::Agent(AgentCmd::Report { kind, event }) => return Ok(agent_report(kind, event).await),
+        Command::Agent(AgentCmd::Statusline) => return Ok(agent_statusline().await),
+        Command::Agent(AgentCmd::Chat { session, tail, json }) => agent_chat(&connect().await?, &session, tail, json).await?,
         Command::Daemon(DaemonCmd::Status { json }) => {
             match Client::connect(&Paths::default_home(), "cli").await {
                 Ok(c) => {
@@ -703,6 +821,21 @@ async fn wait(c: &Client, w: WaitArgs) -> Res<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_usage_from_statusline_json() {
+        let v = serde_json::json!({
+            "model": {"id": "claude-haiku-5-5", "display_name": "Haiku 5.5"},
+            "effort": {"level": "medium"},
+            "context_window": {"context_window_size": 1000000, "used_percentage": 4.4, "current_usage": {"input_tokens": 2, "output_tokens": 3, "cache_creation_input_tokens": 19277, "cache_read_input_tokens": 23158}},
+            "rate_limits": {"seven_day": {"used_percentage": 11, "resets_at": 1795766400u64}}
+        });
+        let u = usage_from_statusline(&v, Some("a@b.c".into()));
+        assert_eq!((u.model_name.as_deref(), u.effort.as_deref(), u.context_tokens, u.context_size, u.context_pct), (Some("Haiku 5.5"), Some("medium"), Some(42_437), Some(1_000_000), Some(4)));
+        assert_eq!((u.five_hour_pct, u.seven_day_pct, u.seven_day_resets, u.account.as_deref()), (None, Some(11), Some(1_795_766_400), Some("a@b.c")));
+        // 첫 답 전에는 쓴 토큰이 없다
+        assert_eq!(usage_from_statusline(&serde_json::json!({"context_window": {"current_usage": null}}), None).context_tokens, None);
+    }
 
     #[test]
     fn tail_skips_blank_lines() {

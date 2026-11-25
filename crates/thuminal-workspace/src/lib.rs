@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// 어댑터가 쓰는 프로토콜 타입 (어댑터가 프로토콜 크레이트에 직접 기대지 않게 다시 내보낸다)
 pub use thuminal_protocol as protocol;
 use thuminal_protocol::{BranchList, DEFAULT_GROUP, DirEntry, FileContent, GitStatus, LineCount, RepoGroup, RepoInfo, SearchHit, WorktreeGroup, WorktreeInfo};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum VcsError {
@@ -448,7 +448,17 @@ impl Workspace {
             let group_ids: Vec<String> = self.worktree_groups.lock().unwrap().get(&path).map(|gs| gs.iter().map(|g| g.id.clone()).collect()).unwrap_or_default();
             let meta = self.meta.lock().unwrap();
             // 폴더를 지웠는데 git 이 아직 기억하는 것(prunable)은 쓸 수 없으니 뺀다
-            for w in self.vcs.list_worktrees(&path)?.into_iter().filter(|w| w.path.exists()) {
+            // 모든 프로젝트를 읽을 때는 못 읽는 프로젝트 하나(폴더를 지웠다, 디스크를 뗐다) 때문에 나머지까지 잃지 않게 건너뛴다.
+            // 프로젝트를 짚어 물었을 때는 그 까닭을 알린다
+            let listed = match self.vcs.list_worktrees(&path) {
+                Ok(l) => l,
+                Err(e) if repo.is_none() => {
+                    warn!(event = "repo_unreadable", path = %path.display(), error = %e);
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
+            for w in listed.into_iter().filter(|w| w.path.exists()) {
                 let m = meta.get(&w.path).cloned().unwrap_or_default();
                 out.push(WorktreeInfo {
                     repo: id.clone(),
@@ -911,6 +921,10 @@ mod tests {
             Ok(path.to_path_buf())
         }
         fn list_worktrees(&self, path: &Path) -> Result<Vec<VcsWorktree>, VcsError> {
+            // 이름이 `gone` 인 저장소는 폴더가 없어 git 이 실패한 것으로 친다
+            if path.ends_with("gone") {
+                return Err(VcsError::NotARepo(path.display().to_string()));
+            }
             Ok(vec![VcsWorktree { path: path.to_path_buf(), branch: None, head: String::new() }])
         }
         fn create_worktree(&self, _: &Path, _: &Path, _: &str, _: Option<&str>) -> Result<(), VcsError> {
@@ -976,6 +990,20 @@ mod tests {
 
     fn row(id: &str, name: &str, repos: &[&str]) -> (String, String, Vec<String>) {
         (id.into(), name.into(), repos.iter().map(|r| r.to_string()).collect())
+    }
+
+    #[test]
+    fn unreadable_repo_does_not_hide_other_worktrees() {
+        let d = tempfile::tempdir().unwrap();
+        let ok = d.path().join("ok");
+        std::fs::create_dir(&ok).unwrap();
+        let ws = open(d.path());
+        ws.add_repo(&ok).unwrap();
+        ws.add_repo(&d.path().join("gone")).unwrap();
+        // 모두 읽을 때는 읽히는 것만, 짚어 물으면 오류
+        let all = ws.worktrees(None).unwrap();
+        assert_eq!(all.iter().map(|w| w.path.as_str()).collect::<Vec<_>>(), [ok.to_str().unwrap()]);
+        assert!(ws.worktrees(Some(&repo_id(&d.path().join("gone")))).is_err());
     }
 
     #[test]

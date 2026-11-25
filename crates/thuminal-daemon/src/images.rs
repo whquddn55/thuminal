@@ -254,7 +254,7 @@ fn jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
 }
 
 /// `2026-10-26T05:58:44.486Z` 꼴 (UTC) 을 유닉스 시간 ms 로
-fn parse_time_ms(s: &str) -> Option<u64> {
+pub(crate) fn parse_time_ms(s: &str) -> Option<u64> {
     let b = s.as_bytes();
     if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
         return None;

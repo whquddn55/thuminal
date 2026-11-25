@@ -28,6 +28,7 @@ import { Switch } from "./components/ui/switch";
 import { normalizeGroups } from "./groups";
 import { previewIdleScreen } from "./gym/idle";
 import { clearLock, setLockPassword, useIdleLock } from "./gym/lock";
+import { setDefaultAgentView, useDefaultAgentView } from "./chat/chat-state";
 import { IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, setIdleScreenSettings, useIdleScreenSettings } from "./gym/settings";
 import { cn } from "./lib/utils";
 import { IS_MAC, keyLabel } from "./platform";
@@ -330,6 +331,7 @@ function AgentSection() {
   const host = model.services.host;
   const [state, setState] = useState<AgentSettingsState | null>(null);
   const [oldDaemon, setOldDaemon] = useState(false);
+  const agentView = useDefaultAgentView();
   useEffect(() => {
     void host.getAgentSettings().then(setState, model.fail);
     void host.daemon().then((d) => setOldDaemon((d.protocol?.[1] ?? 0) < FILES_PROTOCOL_MINOR), () => undefined);
@@ -345,6 +347,11 @@ function AgentSection() {
     change({ ...settings, claude: { ...settings.claude, disabled_skills: on ? disabled.filter((n) => n !== name) : [...disabled, name] } });
   return (
     <>
+      <Group title="화면">
+        <Toggle checked={agentView === "chat"} onChange={(v) => setDefaultAgentView(v ? "chat" : "terminal")} title="대화로 보기">
+          claude 칸을 터미널 화면 대신 메시지와 도구 줄로 그려요. 칸의 [원본] 단추나 {shortcutLabel("toggleAgentView")}로 터미널 화면과 오가요. 이 창의 설정이에요.
+        </Toggle>
+      </Group>
       <Group title="claude">
         <Toggle checked={settings.claude.skip_permissions} onChange={(v) => change({ ...settings, claude: { ...settings.claude, skip_permissions: v } })} title="권한 확인 없이 실행">
           <Code>--dangerously-skip-permissions</Code>를 붙여요. 파일 수정이나 명령 실행을 묻지 않아요.

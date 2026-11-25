@@ -14,6 +14,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
+  AgentChat,
+  ClaudeModel,
   AgentImage,
   FontFaceInfo,
   AppUpdate,
@@ -460,8 +462,20 @@ export class TauriHostApi implements HostApi {
     return this.req({ type: "resolve_path", path, bases }, (r) => (r.path ? { path: String(r.path), isDir: !!r.is_dir } : null));
   }
 
+  readScreen(session: SessionId, colors: boolean): Promise<string> {
+    return this.req({ type: "read_screen", session, format: colors ? "vt" : "plain", scrollback: false }, (r) => String(r.text));
+  }
+
+  claudeModels(): Promise<ClaudeModel[]> {
+    return this.req({ type: "claude_models" }, (r) => r.models);
+  }
+
   agentImages(session: SessionId): Promise<AgentImage[]> {
     return this.req({ type: "agent_images", session }, (r) => r.images);
+  }
+
+  agentChat(session: SessionId, known: { transcript: string; offset: number } | null, tail: number, subagent?: string): Promise<AgentChat> {
+    return this.req({ type: "agent_chat", session, transcript: known?.transcript ?? null, offset: known?.offset ?? 0, tail, subagent: subagent ?? null }, (r) => r.chat);
   }
 
   agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }> {

@@ -1,0 +1,109 @@
+// 대화 보기 입력창의 `/` 명령 목록.
+//
+// claude 는 명령 목록을 밖으로 내주지 않아 자주 쓰는 것을 손으로 적어 둔다 (Orca 도 같은 방식이다).
+// 여기 없는 명령도 그대로 쳐서 보낼 수 있다.
+// Orca 의 터미널 채팅 보기와 같은 방식이다:
+// - 목록에는 대화 보기 안에서 끝나는 명령만 올린다. `args` 가 있는 명령(/model, /effort)은 고르면 값 목록이 이어 뜨고,
+//   값을 붙여 보내면(`/model sonnet`) claude 가 고르는 창을 띄우지 않고 바로 바꾼다. 값 없이는 보내지 않는다.
+// - 목록에 없는 명령(/resume, /config …)은 쳐서 보낼 수 있지만 claude 가 터미널 화면에 창을 띄운다. 그때는 원본에서 잇는다.
+
+export interface SlashChoice {
+  value: string;
+  desc: string;
+}
+
+export interface SlashCommand {
+  name: string;
+  desc: string;
+  /** 붙여 보낼 수 있는 값. 값을 붙이면 창 없이 바로 된다 */
+  args?: SlashChoice[];
+}
+
+/** 모델 목록을 claude 에게서 받지 못했을 때 쓰는 이름 (claude 가 받는 줄임 이름) */
+export const SEED_MODELS: SlashChoice[] = [
+  { value: "default", desc: "계정 기본 모델" },
+  { value: "opus", desc: "" },
+  { value: "fable", desc: "" },
+  { value: "sonnet", desc: "" },
+  { value: "haiku", desc: "" },
+];
+
+/** 생각 강도 값은 이름(low … max)이 곧 순서라 설명을 붙이지 않는다 */
+export const effortChoices = (levels: string[]): SlashChoice[] => levels.map((value) => ({ value, desc: "" }));
+export const SEED_EFFORTS = effortChoices(["low", "medium", "high", "xhigh", "max"]);
+
+/** 대화 보기 안에서 끝나는 claude 명령. models · efforts 는 claude 에게서 받은 것 (없으면 손으로 적어 둔 것) */
+export function claudeCommands(models: SlashChoice[] = SEED_MODELS, efforts: SlashChoice[] = SEED_EFFORTS): SlashCommand[] {
+  return [
+    { name: "clear", desc: "대화를 비우고 새로 시작" },
+    { name: "compact", desc: "대화를 요약해 줄이기" },
+    { name: "model", desc: "모델 바꾸기", args: models },
+    { name: "effort", desc: "생각 강도 바꾸기", args: efforts },
+    { name: "context", desc: "컨텍스트 사용량 보기" },
+    { name: "init", desc: "CLAUDE.md 만들기" },
+    { name: "review", desc: "지금 변경을 리뷰" },
+  ];
+}
+
+/** 목록의 한 줄: 고르면 `text` 가 입력창에 들어간다. `send` 면 바로 보낸다 */
+export interface SlashItem {
+  key: string;
+  label: string;
+  desc: string;
+  text: string;
+  send: boolean;
+}
+
+/**
+ * 입력에 맞는 목록. `/낱말` 이면 명령들, `/model 값` 처럼 값이 있는 명령 뒤면 그 값들. 그 밖이면 null (목록을 띄우지 않는다)
+ */
+export function slashItems(text: string, commands: SlashCommand[]): SlashItem[] | null {
+  const arg = /^\/([\w:.-]+) (\S*)$/.exec(text);
+  if (arg) {
+    const cmd = commands.find((c) => c.name === arg[1]);
+    if (!cmd?.args) return null;
+    const q = arg[2].toLowerCase();
+    return cmd.args
+      .filter((a) => a.value.startsWith(q))
+      .map((a) => ({ key: `${cmd.name} ${a.value}`, label: a.value, desc: a.desc, text: `/${cmd.name} ${a.value}`, send: true }));
+  }
+  const m = /^\/([\w:.-]*)$/.exec(text);
+  if (!m) return null;
+  const q = m[1].toLowerCase();
+  const starts = commands.filter((c) => c.name.startsWith(q));
+  const has = q ? commands.filter((c) => !c.name.startsWith(q) && c.name.includes(q)) : [];
+  return [...starts, ...has].map((c) => ({
+    key: c.name,
+    label: `/${c.name}`,
+    desc: c.desc,
+    // 값이 있는 명령은 값 목록으로 넘어간다
+    text: c.args ? `/${c.name} ` : `/${c.name}`,
+    send: !c.args,
+  }));
+}
+
+/** 값이 있어야 하는 명령을 값 없이 쳤으면 그 명령 (보내지 않고 값 목록을 띄운다) */
+export function needsArg(text: string, commands: SlashCommand[]): SlashCommand | null {
+  const m = /^\/([\w:.-]+)\s*$/.exec(text);
+  return (m && commands.find((c) => c.name === m[1] && c.args)) || null;
+}
+
+/** 보낸 글이 목록에 없는 슬래시 명령이면 그 이름. claude 가 터미널 화면에 창을 띄울 수 있다 */
+export function unknownCommand(text: string, commands: SlashCommand[]): string | null {
+  const m = /^\/([\w:.-]+)/.exec(text);
+  return m && !commands.some((c) => c.name === m[1]) ? `/${m[1]}` : null;
+}
+
+/** 모델 id(`claude-sonnet-5-5`)를 화면 이름(`Sonnet 5.5`)으로. 이미 이름이면 그대로 */
+export function modelLabel(model: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(model);
+  if (!m) return model;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}
+
+/** 토큰 수를 `43K` · `1M` 로 */
+export function tokenLabel(n: number): string {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}K`;
+  return String(n);
+}

@@ -3,6 +3,8 @@
 // 화면 코드는 이 인터페이스로만 데몬과 운영체제에 닿는다. 껍데기를 바꾸면 이 구현만 새로 쓴다.
 
 import type {
+  AgentChat,
+  ClaudeModel,
   AgentImage,
   AgentSettings,
   PluginSkill,
@@ -288,10 +290,20 @@ export interface HostApi {
    * 처음 있는 절대 경로를 돌려주고, 없으면 null (터미널 링크)
    */
   resolvePath(path: string, bases: string[]): Promise<{ path: string; isDir: boolean } | null>;
+  /** 세션의 지금 화면 글 (스크롤백 빼고). colors 면 줄마다 색 코드(SGR)가 붙어 온다 */
+  readScreen(session: SessionId, colors: boolean): Promise<string>;
+  /** claude 가 고를 수 있는 모델 목록 (claude 의 `/model` 창과 같다). 데몬이 claude 에게 물어 온다. 못 얻으면 빈 목록, 옛 데몬은 오류 */
+  claudeModels(): Promise<ClaudeModel[]>;
   /** 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로) */
   agentImages(session: SessionId): Promise<AgentImage[]>;
   /** 그림 하나. thumb 이면 긴 변을 줄인 작은 그림. data 는 base64 */
   agentImage(session: SessionId, id: string, thumb: boolean): Promise<{ mediaType: string; data: string }>;
+  /**
+   * 세션 에이전트의 대화 기록을 대화 보기용 조각으로 읽는다. known 은 지난 응답의 transcript · offset 이고, 이어 읽을 수 있으면
+   * 늘어난 부분만 온다. 아니면 처음부터 읽은 끝의 tail 개가 온다 (0 이면 모두). 옛 데몬은 오류를 낸다.
+   * subagent(서브에이전트를 부른 도구 호출 id)를 주면 그 서브에이전트의 대화를 읽는다
+   */
+  agentChat(session: SessionId, known: { transcript: string; offset: number } | null, tail: number, subagent?: string): Promise<AgentChat>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
   savePasteImage(data: string, ext: string): Promise<string>;
   /**

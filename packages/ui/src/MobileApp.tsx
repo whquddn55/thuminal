@@ -13,6 +13,7 @@ import {
   ArrowUpIcon,
   CaretDownIcon,
   CaretRightIcon,
+  ChatTextIcon,
   ClipboardTextIcon,
   DotsThreeVerticalIcon,
   GitForkIcon,
@@ -33,6 +34,8 @@ import { appBridge } from "./app-bridge";
 import { agentLabel } from "./agent-title";
 import { FramePane } from "./BrowserPane";
 import { AGENTS } from "./agents";
+import { setAgentView, useAgentView } from "./chat/chat-state";
+import { ChatView } from "./chat/ChatView";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { groupKey, normalizeGroups } from "./groups";
 import { paneOfSession, panesOf } from "./layout";
@@ -636,7 +639,55 @@ function copyByCommand(text: string) {
   ta.remove();
 }
 
-function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void }) {
+/** 터미널 화면. claude 세션은 기본으로 대화 보기로 그리고, 머리 줄 단추로 원본(터미널)과 오간다 */
+function TerminalScreen(props: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void }) {
+  const model = useModel();
+  const s = useApp((st) => st.sessions[props.session]);
+  const view = useAgentView(model.services.host, model.hostKey, s);
+  return view === "chat" ? <ChatScreen {...props} /> : <RawTerminalScreen {...props} canChat={view !== null} />;
+}
+
+const viewButton = "flex h-9 items-center gap-1 rounded-md px-2 text-[13px] text-muted-foreground active:bg-accent";
+
+/**
+ * 대화 보기. 터미널에 붙지 않아 세션 크기를 가져오지 않는다 (데스크톱 칸이 폰 크기로 줄지 않는다).
+ * 화면 키보드가 올라와도 입력 줄이 보이게 보이는 높이(`visualViewport`)를 따르는 것은 바깥 틀이 한다
+ */
+function ChatScreen({ ws, session, go, back }: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void }) {
+  const model = useModel();
+  const s = useApp((st) => st.sessions[session]);
+  const worktrees = useApp((st) => st.worktrees);
+  const status = s?.agent ? agentStatus(s.agent) : null;
+  const toTerminal = () => setAgentView(model.hostKey, session, "terminal");
+  return (
+    <>
+      <Header
+        title={
+          <span className="flex items-center gap-1.5">
+            {status && <StatusIndicator status={status} />}
+            <span className="truncate">{sessionLabel(s)}</span>
+          </span>
+        }
+        sub={wsTitle(ws, worktrees)}
+        back={back}
+        right={
+          <>
+            <TeamButton session={session} ws={ws} go={go} />
+            <button className={viewButton} onClick={toTerminal} aria-label="원본">
+              <TerminalWindowIcon className="size-5" />
+              원본
+            </button>
+          </>
+        }
+      />
+      <div className="relative min-h-0 flex-1 pb-[env(safe-area-inset-bottom)]">
+        <ChatView ws={ws} session={session} keyboard={false} onTerminal={toTerminal} compact />
+      </div>
+    </>
+  );
+}
+
+function RawTerminalScreen({ ws, session, go, back, canChat }: { ws: WorkspaceId; session: SessionId; go: (s: Screen) => void; back: () => void; canChat: boolean }) {
   const model = useModel();
   const s = useApp((st) => st.sessions[session]);
   const worktrees = useApp((st) => st.worktrees);
@@ -715,6 +766,12 @@ function TerminalScreen({ ws, session, go, back }: { ws: WorkspaceId; session: S
         right={
           <>
             <TeamButton session={session} ws={ws} go={go} />
+            {canChat && (
+              <button className={viewButton} onClick={() => setAgentView(model.hostKey, session, "chat")} aria-label="대화로 보기">
+                <ChatTextIcon className="size-5" />
+                대화
+              </button>
+            )}
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <button className="flex size-9 items-center justify-center rounded-md text-muted-foreground active:bg-accent" aria-label="터미널 메뉴">

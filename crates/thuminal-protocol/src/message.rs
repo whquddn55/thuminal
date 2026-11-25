@@ -164,6 +164,45 @@ pub struct AgentInfo {
     /// 도구가 마지막으로 실패한 때 (PostToolUseFailure, 유닉스 시간 ms)
     #[serde(default)]
     pub tool_failed_at: Option<u64>,
+    /// 모델 · 생각 강도 · 컨텍스트 · 사용량 (claude 상태 줄 명령이 알린다. thuminal 실행기로 띄운 claude 만)
+    #[serde(default)]
+    pub usage: Option<AgentUsage>,
+}
+
+/// claude 가 상태 줄 명령(statusLine)에 넘겨 주는 값에서 뽑은 것 (`ReportAgentUsage`). 대화 보기 아래 상태 줄이 쓴다.
+/// claude 가 답을 받을 때마다, 모델 · 권한 모드를 바꿀 때마다 다시 알려 온다. 모르는 값은 None
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AgentUsage {
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// `Fable 5.2`
+    #[serde(default)]
+    pub model_name: Option<String>,
+    /// 생각 강도 (`low` · `medium` · `high` …)
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// 마지막 요청이 쓴 컨텍스트 토큰 수 (입력 + 캐시)
+    #[serde(default)]
+    pub context_tokens: Option<u64>,
+    /// 컨텍스트 창 크기
+    #[serde(default)]
+    pub context_size: Option<u64>,
+    /// 컨텍스트를 쓴 비율 (%)
+    #[serde(default)]
+    pub context_pct: Option<u32>,
+    /// 5시간 한도를 쓴 비율 (%)과 다시 차는 때 (유닉스 시간 초)
+    #[serde(default)]
+    pub five_hour_pct: Option<u32>,
+    #[serde(default)]
+    pub five_hour_resets: Option<u64>,
+    /// 7일 한도
+    #[serde(default)]
+    pub seven_day_pct: Option<u32>,
+    #[serde(default)]
+    pub seven_day_resets: Option<u64>,
+    /// 로그인한 계정 (이메일)
+    #[serde(default)]
+    pub account: Option<String>,
 }
 
 /// 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 하나 (`AgentImages`)
@@ -185,6 +224,90 @@ pub struct AgentImage {
     /// 입력창에 붙였지만 아직 보내지 않은 그림
     #[serde(default)]
     pub pending: bool,
+}
+
+/// 에이전트 대화 기록 한 조각 (`AgentChat`). 대화 보기가 이것만으로 그린다. 기록(jsonl) 줄 모양은 데몬만 안다.
+/// `id` 는 기록 줄의 uuid(+ 줄 안 차례)이고, 도구 호출과 그 결과는 도구 호출 id 로 짝짓는다
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ChatItem {
+    /// 사용자가 보낸 글. `images` 는 같이 붙인 그림 id (`AgentImage` 요청에 쓴다)
+    User {
+        id: String,
+        at: u64,
+        text: String,
+        #[serde(default)]
+        images: Vec<String>,
+    },
+    /// 에이전트의 답 (마크다운)
+    Assistant { id: String, at: u64, text: String },
+    Thinking { id: String, at: u64, text: String },
+    /// 도구 호출. `id` 는 도구 호출 id, `input` 의 긴 글은 잘려 있다
+    ToolUse { id: String, at: u64, name: String, input: serde_json::Value },
+    /// 도구 결과. `id` 는 짝인 도구 호출 id
+    ToolResult {
+        id: String,
+        at: u64,
+        text: String,
+        #[serde(default)]
+        is_error: bool,
+        /// 글이 길어 잘랐다
+        #[serde(default)]
+        truncated: bool,
+    },
+    /// 대화 밖 알림. `kind`: `command`(슬래시 명령), `command_output`, `compact`, `interrupted`, `error`, `info`, `turn`(턴에 걸린 ms), `teammate`(팀원이 보낸 글: 첫 줄 이름, 나머지 내용)
+    Notice { id: String, at: u64, kind: String, text: String },
+}
+
+/// claude 가 고를 수 있는 모델 하나 (`ClaudeModels`). claude 의 `/model` 창에 뜨는 줄과 같다
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaudeModel {
+    /// `/model` 에 붙일 값 (`default`, `opus`, `claude-opus-4-8` …)
+    pub value: String,
+    /// 화면 이름 (`Opus 5.5`)
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    /// 이 값이 가리키는 모델 id (`claude-opus-5-5`)
+    #[serde(default)]
+    pub resolved: String,
+    /// 고를 수 있는 생각 강도 (없으면 강도를 바꿀 수 없는 모델)
+    #[serde(default)]
+    pub efforts: Vec<String>,
+}
+
+/// 대화 기록에서 읽은 에이전트 상태 (대화 보기 아래 상태 줄). 이번에 읽은 줄에 없던 것은 None 이고, 화면은 앞서 받은 값을 그대로 둔다
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ChatStatus {
+    /// 마지막 답의 모델 id (`claude-sonnet-5-5`)나 `/model` 이 알린 이름 (`Sonnet 5.5`)
+    #[serde(default)]
+    pub model: Option<String>,
+    /// 생각 강도 (`low` · `medium` · `high` …)
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// 마지막 요청이 쓴 컨텍스트 토큰 수 (입력 + 캐시)
+    #[serde(default)]
+    pub context_tokens: Option<u64>,
+    /// 컨텍스트 창 크기 (`/context` 출력에서 읽는다. 한 번도 치지 않았으면 모른다)
+    #[serde(default)]
+    pub context_window: Option<u64>,
+}
+
+/// `AgentChat` 응답
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AgentChat {
+    /// 읽은 기록 파일. 에이전트나 기록이 없으면 빈 글
+    pub transcript: String,
+    /// 여기까지 읽었다. 다음 요청에 그대로 돌려준다
+    pub offset: u64,
+    /// 이어 읽지 못해 처음부터 다시 읽었다 (첫 요청, 기록이 바뀜). 화면은 가진 것을 버리고 `items` 로 바꾼다
+    pub reset: bool,
+    /// 처음부터 읽었는데 `tail` 보다 많아 앞쪽을 뺐다
+    pub more: bool,
+    pub items: Vec<ChatItem>,
+    /// 읽은 줄에서 알아낸 모델 · 생각 강도 · 컨텍스트 (minor 12 의 뒤 빌드부터)
+    #[serde(default)]
+    pub status: ChatStatus,
 }
 
 /// 에이전트 글 필드(프롬프트, 마지막 답)를 이 글자 수까지 남긴다
@@ -458,6 +581,8 @@ pub enum Request {
         #[serde(default)]
         cwd: Option<String>,
     },
+    /// claude 상태 줄 명령(`thuminal agent statusline`)이 알리는 모델 · 컨텍스트 · 사용량. 에이전트가 없는 세션이면 버린다
+    ReportAgentUsage { session: SessionId, usage: AgentUsage },
     Kill { session: SessionId },
     /// 끝난 세션을 목록에서 지운다
     Remove { session: SessionId },
@@ -636,6 +761,22 @@ pub enum Request {
         #[serde(default)]
         thumb: bool,
     },
+    /// 세션 에이전트의 대화 기록을 대화 보기용 조각으로 읽는다 (minor 12). `transcript` · `offset` 은 지난 응답 것을 돌려준다.
+    /// 그 기록을 이어 읽을 수 있으면 늘어난 부분만, 아니면 처음부터 읽어 끝의 `tail` 개만 준다 (0 이면 모두)
+    AgentChat {
+        session: SessionId,
+        #[serde(default)]
+        transcript: Option<String>,
+        #[serde(default)]
+        offset: u64,
+        #[serde(default)]
+        tail: u32,
+        /// 서브에이전트를 부른 도구 호출 id. 있으면 그 서브에이전트의 기록(`<기록>/subagents/agent-*.jsonl`)을 읽는다
+        #[serde(default)]
+        subagent: Option<String>,
+    },
+    /// claude 가 고를 수 있는 모델 목록 (minor 12 의 뒤 빌드부터). claude 에게 물어 10분 기억한다. 못 얻으면 빈 목록
+    ClaudeModels,
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
     ListProcesses,
@@ -716,6 +857,8 @@ pub enum Response {
     Tmux { stdout: String, stderr: String, code: i32 },
     Processes { report: Box<ProcessReport> },
     AgentImages { images: Vec<AgentImage> },
+    AgentChat { chat: AgentChat },
+    ClaudeModels { models: Vec<ClaudeModel> },
     /// 그림 내용 (`data` 는 base64)
     AgentImageData { media_type: String, data: String },
     OrcaScan { scan: OrcaScan },
@@ -742,6 +885,8 @@ pub enum Event {
     /// workspace 배치가 없어졌다
     LayoutRemoved { workspace: String },
     TerminalColorsChanged { colors: TerminalColors },
+    /// 세션 에이전트의 대화 기록이 자랐거나 다른 기록으로 바뀌었다 (minor 12). 대화 보기가 `AgentChat` 으로 이어 읽는다
+    AgentChatChanged { session: SessionId },
     /// 세션 프로그램이 OSC 9 / OSC 777 로 데스크톱 알림을 청했다 (세션마다 1초에 한 번까지)
     SessionNotification { session: SessionId, title: String, body: String },
 }

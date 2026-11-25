@@ -854,7 +854,7 @@ export class TerminalController {
 const SOFT_KEYBOARD_PAD = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent) ? "    " : "";
 
 /** 파일 내용을 base64 로 (data: 주소의 앞머리를 뗀다) */
-function toBase64(f: Blob): Promise<string> {
+export function toBase64(f: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
