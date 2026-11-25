@@ -19,6 +19,8 @@ Object.assign(globalThis, {
   },
   window: Object.assign(globalThis, {
     matchMedia: () => ({ matches: false, addEventListener: () => undefined }),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
   }),
   document: {
     documentElement: { classList: { toggle: () => undefined }, style: { setProperty: () => undefined } },
