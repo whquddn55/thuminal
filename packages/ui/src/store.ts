@@ -46,7 +46,7 @@ import { pageKey, setPage } from "./browser-state";
 import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
-import { logNotice } from "./notice-log";
+import { logNotice, markNoticesRead } from "./notice-log";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
 import { TerminalController } from "./terminal-controller";
 import type { ResolvedLink } from "./terminal-link-hover";
@@ -170,8 +170,8 @@ export interface AppState {
   remoteHosts: RemoteHost[];
   /** 데몬에 다시 붙을 때마다 는다 (세션 번호가 같아도 다시 붙게 한다) */
   generation: number;
-  error: string | null;
-  notice: string | null;
+  /** 오른쪽 아래에 쌓아 띄우는 오류 · 알릴 것 (뒤가 가장 최근). 창 전체 상태 */
+  toasts: Toast[];
   /** 새 앱 버전 (데스크톱 껍데기만 확인한다) */
   update: AppUpdate | null;
   /** 설치 중인 업데이트와 진행. 앱이 다시 시작될 때까지 오른쪽 아래에 띄운다 */
@@ -245,14 +245,22 @@ export const WINDOW_KEYS = [
   "notify",
   "activeHost",
   "remoteHosts",
-  "error",
-  "notice",
+  "toasts",
   "update",
   "updating",
 ] as const satisfies readonly (keyof AppState)[];
 const WINDOW_KEY_SET = new Set<string>(WINDOW_KEYS);
 
 /** 호스트 안 워크스페이스를 창 전체에서 가르는 키. 로컬은 워크스페이스 그대로, 원격은 `<호스트 id>|<워크스페이스>` */
+/** 오른쪽 아래 카드 하나 */
+export interface Toast {
+  id: number;
+  kind: "error" | "notice";
+  text: string;
+}
+const MAX_TOASTS = 4;
+let nextToast = 1;
+
 export function placeKey(host: string, ws: WorkspaceId): string {
   return host ? `${host}|${ws}` : ws;
 }
@@ -329,8 +337,7 @@ export class AppModel {
       dialogHost: "",
       remoteHosts: [],
       generation: 0,
-      error: null,
-      notice: null,
+      toasts: [],
       update: null,
       updating: null,
       ...(parent ? pickWindow(this.root.get()) : {}),
@@ -478,7 +485,13 @@ export class AppModel {
     const offBrowser = host.browser?.onEvent((e) => this.onBrowserEvent(e));
     // 알림 누르기·Dock 배지·원격 호스트 목록은 창 하나의 일이라 root 만 맡는다
     const offClick = this.isRoot ? host.onNotificationClick?.((n) => this.onNoticeClick(n)) : undefined;
-    const offBadge = this.store.subscribe(() => this.root.updateBadge());
+    const offBadge = this.store.subscribe(() => {
+      this.root.updateBadge();
+      this.root.syncNoticesRead();
+    });
+    // 창이 다시 앞에 오면 보이는 칸의 알림을 읽은 것으로 한다
+    const onFocus = () => this.syncNoticesRead();
+    if (this.isRoot) window.addEventListener("focus", onFocus);
     const offHosts = this.isRoot ? host.hosts?.onChange((list) => this.syncHosts(list)) : undefined;
     this.unsubscribe = () => {
       offDaemon();
@@ -487,6 +500,7 @@ export class AppModel {
       offBadge();
       offHosts?.();
     };
+      window.removeEventListener("focus", onFocus);
     // 테마는 데몬 답을 기다리지 않고 입힌다 (엔진 기본색도 터미널이 붙기 전에 맞춘다)
     void this.applyTheme();
     if (this.isRoot) void terminalFontsLoaded().then(() => this.refreshRenderers());
@@ -754,7 +768,7 @@ export class AppModel {
   fail = (e: unknown) => {
     console.error("[thuminal]", this.hostKey || "로컬", e);
     const name = this.hostName();
-    this.set({ error: name ? `${name}: ${e}` : String(e) });
+    this.toast("error", name ? `${name}: ${e}` : String(e));
   };
 
   /** 원격이 끊겨 있어 실패한 것은 띠에 띄우지 않는다 (사이드바 연결 배지가 알린다) */
@@ -763,13 +777,17 @@ export class AppModel {
     else this.fail(e);
   }
 
-  clearError = () => this.set({ error: null, notice: null });
+  /** 카드를 쌓는다. 같은 글이 이미 떠 있으면 그것을 맨 뒤로 옮긴다 */
+  private toast(kind: Toast["kind"], text: string) {
+    this.set((s) => ({ toasts: [...s.toasts.filter((t) => t.kind !== kind || t.text !== text), { id: nextToast++, kind, text }].slice(-MAX_TOASTS) }));
+  }
 
-  /** 오류는 아니지만 알릴 것 (아래 띠에 잠깐 보인다) */
-  notice = (text: string) => {
-    this.set({ notice: text });
-    window.setTimeout(() => this.get().notice === text && this.set({ notice: null }), 6000);
-  };
+  dismissToast = (id: number) => this.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+
+  clearError = () => this.set({ toasts: [] });
+
+  /** 오류는 아니지만 알릴 것 (오른쪽 아래 카드로 잠깐 보인다) */
+  notice = (text: string) => this.toast("notice", text);
 
   // ---- 앱 업데이트 ----
 
@@ -1084,7 +1102,7 @@ export class AppModel {
     const n = { title: "thuminal", subtitle: "시험 알림", body: "알림이 이렇게 와요" };
     try {
       await notify({ ...n, session: 0, sound: this.root.get().notify.sound });
-      logNotice({ at: Date.now(), host: "", session: 0, kind: "test", ...n });
+      logNotice({ at: Date.now(), host: "", session: 0, kind: "test", read: true, ...n });
     } catch (e) {
       this.fail(e);
     }
@@ -1096,6 +1114,16 @@ export class AppModel {
     if (!m || !paneOfSession(Object.values(m.get().layouts), session)) return false;
     m.revealSession(session);
     return true;
+  /** 지금 보고 있는 칸의 알림을 읽은 것으로 한다 (root). 칸이 이미 없어진 알림도 더는 확인할 수 없으니 읽은 것으로 한다 */
+  private syncNoticesRead() {
+    markNoticesRead((e) => {
+      const m = this.hostModel(e.host);
+      // 아직 읽지 못한 호스트는 칸이 있는지 알 수 없다
+      if (!m?.loaded || m.loading || e.kind === "test") return false;
+      return m.watching(e.session) || !paneOfSession(Object.values(m.get().layouts), e.session);
+    });
+  }
+
   };
 
   /** 원격 호스트 알림 번호 → (호스트, 세션). 로컬 세션은 세션 번호를 그대로 쓴다 (root 만 든다) */

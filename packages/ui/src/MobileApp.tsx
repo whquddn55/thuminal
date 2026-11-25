@@ -146,7 +146,7 @@ function Phone({ conn, onForget, openSession }: { conn: RemoteConnection; onForg
   }, [want, wantWs]); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState(conn.state);
   useEffect(() => conn.onState(setState), [conn]);
-  const error = useApp((s) => s.error);
+  const error = useApp((s) => s.toasts.filter((t) => t.kind === "error").at(-1)?.text ?? null);
   const model = useModel();
   // 지금 화면의 터미널이 사라지면 처음 화면으로
   const gone = useApp((s) => screen.kind === "term" && !s.sessions[screen.session] && Object.keys(s.sessions).length > 0);

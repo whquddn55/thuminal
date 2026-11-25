@@ -1,5 +1,5 @@
-import { ArrowCircleUpIcon, CheckIcon, CopyIcon, SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowCircleUpIcon, SidebarSimpleIcon } from "@phosphor-icons/react";
+import { useEffect, useMemo } from "react";
 
 import { isWorktreeWorkspace } from "@thuminal/term-core";
 
@@ -18,6 +18,7 @@ import type { Services } from "./services";
 import { SettingsDialog } from "./Settings";
 import { Sidebar } from "./Sidebar";
 import { AppModel, HOST_STATE_LABEL, hostStateIsError, ModelContext, OTHER_WORKSPACE, useApp, useModel } from "./store";
+import { Toasts } from "./Toasts";
 import { EmptyWorkspace, TabBar, TerminalSurface, WorkspaceView } from "./Workspace";
 import "./styles.css";
 
@@ -203,9 +204,7 @@ function Shell() {
   useBrowserLayer(model.services.host.browser);
   const under = !!model.services.host.browser;
   const floating = useApp((s) => s.floating.open);
-  const error = useApp((s) => s.error);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
-  const notice = useApp((s) => s.notice);
   // 메인 면과 오른쪽 사이드바는 고른 호스트 모델로 그린다 (지운 원격이면 로컬)
   const activeHost = useApp((s) => s.activeHost);
   useApp((s) => s.remoteHosts);
@@ -226,26 +225,10 @@ function Shell() {
       <Dialogs />
       <SettingsDialog />
       <DragGhost />
-      <UpdateProgressCard />
       {idleScreen}
-      {notice && !error && (
-        <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
-          <span className="min-w-0 break-words">{notice}</span>
-          <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={model.clearError}>
-            <XIcon className="size-3.5" />
-          </button>
-        </div>
-      )}
-      {error && (
-        <div data-browser-cover className="fixed bottom-4 left-1/2 z-50 flex max-w-[70%] -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/40 bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
-          {/* 오류 글은 골라 복사할 수 있다 (경로가 든 오류를 claude 에게 그대로 넘기게) */}
-          <span className="min-w-0 cursor-text break-words text-destructive select-text">{error}</span>
-          <CopyButton text={error} />
-          <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={model.clearError}>
-            <XIcon className="size-3.5" />
-          </button>
-        </div>
-      )}
+      <Toasts>
+        <UpdateProgressCard />
+      </Toasts>
     </>
   );
 }
@@ -340,7 +323,7 @@ function UpdateProgressCard() {
           ? `내려받는 중 · ${mb(p.downloaded)} / ${mb(p.total)} MB`
           : `내려받는 중 · ${mb(p.downloaded)} MB`;
   return (
-    <div data-browser-cover className="fixed right-4 bottom-4 z-[47] flex w-72 flex-col gap-2 rounded-lg border bg-popover px-3 py-2.5 text-xs text-popover-foreground shadow-lg">
+    <div data-browser-cover className="pointer-events-auto flex flex-col gap-2 rounded-lg border bg-popover px-3 py-2.5 text-xs text-popover-foreground shadow-lg">
       <div className="flex items-center gap-1.5">
         <ArrowCircleUpIcon className="size-4 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate font-medium">thuminal {updating.version} 업데이트</span>
@@ -376,20 +359,5 @@ function DragGhost() {
       {{ tab: "탭: ", pane: "칸: ", project: "프로젝트: " }[source.kind]}
       {source.title}
     </div>
-  );
-}
-
-/** 글을 복사하는 작은 단추. 복사하면 잠깐 체크 표시로 바뀐다 */
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  const copy = () =>
-    void navigator.clipboard.writeText(text).then(
-      () => (setDone(true), window.setTimeout(() => setDone(false), 1200)),
-      () => undefined,
-    );
-  return (
-    <button className="shrink-0 text-muted-foreground hover:text-foreground" title="복사" onClick={copy}>
-      {done ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-    </button>
   );
 }
