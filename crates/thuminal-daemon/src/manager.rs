@@ -548,6 +548,13 @@ impl Manager {
         }
     }
 
+    /// 세션 에이전트의 폴더에서 claude 가 `/` 목록에 올리는 스킬 · 사용자 명령 (블로킹 스레드에서 부른다. 처음에는 몇 초 걸린다)
+    pub fn claude_commands(&self, id: SessionId) -> Result<Vec<thuminal_protocol::ClaudeCommand>, ErrorBody> {
+        let info = self.info(id)?;
+        let cwd = info.agent.and_then(|a| a.cwd).unwrap_or(info.cwd);
+        Ok(crate::claude_models::commands(&cwd, self.shell.plugin_dir().as_deref()))
+    }
+
     /// 세션 에이전트와 같은 프로젝트의 지난 대화 목록 (블로킹 스레드에서 부른다)
     pub fn agent_sessions(&self, id: SessionId) -> Result<Vec<thuminal_protocol::AgentSession>, ErrorBody> {
         Ok(self.transcript_of(id)?.map(|t| crate::chat::sessions(&t, crate::chat::SESSIONS_MAX)).unwrap_or_default())

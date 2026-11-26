@@ -276,6 +276,18 @@ pub struct ClaudeModel {
     pub efforts: Vec<String>,
 }
 
+/// claude 의 `/` 목록에 뜨는 스킬 · 사용자 명령 하나 (`ClaudeCommands`)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaudeCommand {
+    /// `/` 뒤에 칠 이름 (`docx`, `thuthi:setup`)
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// 뒤에 붙일 값의 모양 (`[topic] [slide-count]`). 없으면 빈 글
+    #[serde(default)]
+    pub argument_hint: String,
+}
+
 /// 이어 갈 수 있는 지난 claude 대화 하나 (`AgentSessions`)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSession {
@@ -791,6 +803,9 @@ pub enum Request {
     /// 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화 목록, 최근 것부터 (minor 12 의 뒤 빌드부터).
     /// 대화 보기의 `/resume` 이 고르게 보인다. 지금 대화는 뺀다
     AgentSessions { session: SessionId },
+    /// 세션 에이전트의 폴더에서 claude 의 `/` 목록에 뜨는 스킬 · 사용자 명령 (minor 12 의 뒤 빌드부터. claude 내장 명령은 뺀다).
+    /// claude 를 한 번 실행해 묻고 폴더마다 2분 기억한다. 못 얻으면 빈 목록
+    ClaudeCommands { session: SessionId },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
     ListProcesses,
@@ -874,6 +889,7 @@ pub enum Response {
     AgentChat { chat: AgentChat },
     ClaudeModels { models: Vec<ClaudeModel> },
     AgentSessions { sessions: Vec<AgentSession> },
+    ClaudeCommands { commands: Vec<ClaudeCommand> },
     /// 그림 내용 (`data` 는 base64)
     AgentImageData { media_type: String, data: String },
     OrcaScan { scan: OrcaScan },

@@ -382,6 +382,14 @@ impl Server {
                     .and_then(|r| r)
                     .map(|sessions| Response::AgentSessions { sessions })
             }
+            Request::ClaudeCommands { session } => {
+                let m = m.clone();
+                tokio::task::spawn_blocking(move || m.claude_commands(session))
+                    .await
+                    .map_err(|e| ErrorBody { code: ErrorCode::Internal, message: e.to_string() })
+                    .and_then(|r| r)
+                    .map(|commands| Response::ClaudeCommands { commands })
+            }
             Request::ClaudeModels => tokio::task::spawn_blocking(crate::claude_models::list)
                 .await
                 .map(|models| Response::ClaudeModels { models })
@@ -647,6 +655,7 @@ fn request_kind(r: &Request) -> &'static str {
         Request::ReportAgentUsage { .. } => "report_agent_usage",
         Request::ClaudeModels => "claude_models",
         Request::AgentSessions { .. } => "agent_sessions",
+        Request::ClaudeCommands { .. } => "claude_commands",
         Request::ScanOrca => "scan_orca",
         Request::GetRemote => "get_remote",
         Request::SetRemote { .. } => "set_remote",
@@ -689,6 +698,7 @@ fn is_slow(r: &Request) -> bool {
             | Request::AgentChat { .. }
             | Request::ClaudeModels
             | Request::AgentSessions { .. }
+            | Request::ClaudeCommands { .. }
     )
 }
 

@@ -252,7 +252,7 @@ if (-not $env:TMUX -and $env:THUMINAL_SESSION_ID -and $env:THUMINAL_CLI) {{
     }
 
     /// 실행기가 얹는 플러그인 폴더. 짜 둔 `shell/claude-plugin` 이 있으면 그것, 아니면 원본
-    fn plugin_dir(&self) -> Option<PathBuf> {
+    pub fn plugin_dir(&self) -> Option<PathBuf> {
         self.claude_plugin.as_ref()?;
         let built = self.dir.join("claude-plugin");
         Some(if built.join("skills").exists() { built } else { self.claude_plugin.clone()? })

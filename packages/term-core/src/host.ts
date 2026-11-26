@@ -5,6 +5,7 @@
 import type {
   AgentChat,
   AgentSession,
+  ClaudeCommand,
   ClaudeModel,
   AgentImage,
   AgentSettings,
@@ -305,6 +306,13 @@ export interface HostApi {
    * subagent(서브에이전트를 부른 도구 호출 id)를 주면 그 서브에이전트의 대화를 읽는다
    */
   agentChat(session: SessionId, known: { transcript: string; offset: number } | null, tail: number, subagent?: string): Promise<AgentChat>;
+  /**
+   * 세션에 글 · 키를 넣는다 (`send_text` 요청). `input` 과 달리 이 연결에서 터미널로 붙지 않은 세션에도 들어간다.
+   * 대화 보기가 쓴다 (터미널에 붙지 않고 그리므로 `input` 으로는 앱을 다시 켠 뒤의 칸에 닿지 않는다)
+   */
+  sendText(session: SessionId, text: string): Promise<void>;
+  /** 세션 에이전트의 폴더에서 claude 가 `/` 목록에 올리는 스킬 · 사용자 명령 (내장 명령은 뺀다). 처음에는 몇 초 걸린다. 옛 데몬은 오류를 낸다 */
+  claudeCommands(session: SessionId): Promise<ClaudeCommand[]>;
   /** 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화, 최근 것부터 (지금 대화는 뺀다). 옛 데몬은 오류를 낸다 */
   agentSessions(session: SessionId): Promise<AgentSession[]>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */

@@ -16,6 +16,7 @@ import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentChat,
   AgentSession,
+  ClaudeCommand,
   ClaudeModel,
   AgentImage,
   FontFaceInfo,
@@ -469,6 +470,14 @@ export class TauriHostApi implements HostApi {
 
   claudeModels(): Promise<ClaudeModel[]> {
     return this.req({ type: "claude_models" }, (r) => r.models);
+  }
+
+  sendText(session: SessionId, text: string): Promise<void> {
+    return this.req({ type: "send_text", session, text });
+  }
+
+  claudeCommands(session: SessionId): Promise<ClaudeCommand[]> {
+    return this.req({ type: "claude_commands", session }, (r) => r.commands);
   }
 
   agentSessions(session: SessionId): Promise<AgentSession[]> {

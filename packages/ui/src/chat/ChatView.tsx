@@ -10,6 +10,7 @@
 //   claude 가 터미널 화면에만 띄우는 창(/resume, /config …)은 [원본] 에서 다룬다. 화면 글을 읽어 옮기지 않는다.
 
 import { ArrowDownIcon, ArrowUpIcon, CaretRightIcon, CheckIcon, StopIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, ChatStatus, HostApi, SessionId, WorkspaceId } from "@thuminal/term-core";
@@ -19,13 +20,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn } from "../lib/utils";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
-import { chatFeed, type ChatFeed, type PendingSend, useAgentSessions, useChat, useClaudeModels } from "./chat-state";
+import { chatFeed, type ChatFeed, type PendingSend, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
 import { claudeCommands, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
 import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary } from "./timeline";
 
 const Markdown = lazy(() => import("../markdown"));
 
-const enc = new TextEncoder();
 /** 키를 이어 보낼 때 사이 틈 (claude 묻는 창이 다음 화면을 그릴 시간) */
 const KEY_GAP_MS = 180;
 
@@ -34,9 +34,6 @@ export interface ChatActions {
   openUrl: (url: string, inApp: boolean) => void;
   notice: (text: string) => void;
 }
-
-/** Enter 를 보낸 뒤 턴이 시작됐는지 보는 때 (앞 확인부터 잰 ms). 시작되지 않았으면 그때마다 Enter 를 다시 보낸다 */
-const SUBMIT_CHECKS_MS = [1500, 3000];
 
 /** 지난 때를 `방금` · `12분 전` · `3시간 전` · `5일 전` 으로 */
 function agoLabel(at: number): string {
@@ -47,10 +44,11 @@ function agoLabel(at: number): string {
   return `${Math.floor(m / 1440)}일 전`;
 }
 
-/** 세션에 키 · 글을 보내는 것들. `resting` 은 claude 가 지금 입력을 기다리며 쉬고 있는지 (묻는 창이 떠 있으면 아니다) */
-function useSender(host: HostApi, session: SessionId, feed: ChatFeed, resting: () => boolean) {
+/** 세션에 키 · 글을 보내는 것들 */
+function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
   return useMemo(() => {
-    const raw = (text: string) => host.input(session, enc.encode(text));
+    // 대화 보기는 터미널에 붙지 않는다. 붙은 세션에만 닿는 `input` 대신 요청(`send_text`)으로 넣는다
+    const raw = (text: string) => host.sendText(session, text);
     const keys = async (list: string[]) => {
       for (const [i, k] of list.entries()) {
         if (i) await new Promise((r) => setTimeout(r, KEY_GAP_MS));
@@ -71,21 +69,11 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed, resting: (
         }
         const typed = !text.includes("\n") && text.length <= 400;
         // 슬래시 명령은 기록에 사용자 글로 남지 않는다
-        const pending = text.startsWith("/") ? null : feed.addPending(text);
-        const wasResting = resting();
+        if (!text.startsWith("/")) feed.addPending(text);
         await raw(typed ? text : `\x1b[200~${text}\x1b[201~`);
         // 붙여 넣은 글을 claude 가 받아 그릴 시간을 준다 (Orca 도 붙여넣기 뒤 0.5초 기다린다)
         await new Promise((r) => setTimeout(r, typed ? 80 : 500));
         await raw("\r");
-        // claude 가 Enter 를 줄바꿈으로 넣거나 놓쳐서 글이 입력창에 남은 채 보내지지 않을 때가 있다 (다시 시작한 직후 등).
-        // 쉬고 있던 claude 가 턴을 시작하지 않았으면 Enter 를 다시 보낸다. 빈 입력창의 Enter 는 아무 일도 없고,
-        // 묻는 창이 떠 있을 때는 Enter 가 답이 되므로 쉬는 상태에서만 보낸다
-        if (pending === null || !wasResting) return;
-        for (const wait of SUBMIT_CHECKS_MS) {
-          await new Promise((r) => setTimeout(r, wait));
-          if (!resting() || !feed.get().pending.some((p) => p.id === pending)) return;
-          await raw("\r");
-        }
       },
       interrupt: () => raw("\x1b"),
     };
@@ -116,10 +104,7 @@ export function ChatView({
   const feed = chatFeed(host, model.hostKey, session);
   const snap = useChat(feed);
   const agent = useApp((s) => s.sessions[session]?.agent ?? null);
-  const send = useSender(host, session, feed, () => {
-    const st = model.get().sessions[session]?.agent?.state;
-    return st === "idle" || st === "failed";
-  });
+  const send = useSender(host, session, feed);
   const timeline = useMemo(() => buildTimeline(snap.items), [snap.items]);
 
   const actions = useMemo<ChatActions>(
@@ -175,6 +160,7 @@ export function ChatView({
   // 지난 대화 목록은 입력창에 `/` 를 칠 때마다 다시 읽는다
   const [slashTick, setSlashTick] = useState(0);
   const past = useAgentSessions(host, session, slashTick);
+  const skills = useClaudeCommands(host, session);
   const { models, efforts, commands } = useMemo(() => {
     const models: SlashChoice[] = listed.length ? listed.map((m) => ({ value: m.value, desc: m.value === "default" && m.description ? m.description.split(" · ")[0] : m.label })) : SEED_MODELS;
     // 지금 모델이 받는 강도만 보인다
@@ -182,8 +168,9 @@ export function ChatView({
     const cur = listed.find((m) => m.resolved === now || m.label === now || m.value === now);
     const efforts = cur?.efforts?.length ? effortChoices(cur.efforts) : SEED_EFFORTS;
     const sessions: SlashChoice[] = past.map((s) => ({ value: s.id, label: s.title, desc: agoLabel(s.modified) }));
-    return { models, efforts, commands: claudeCommands(models, efforts, sessions) };
-  }, [listed, past, snap.status.model, agent?.model]);
+    const extra: SlashCommand[] = skills.map((c) => ({ name: c.name, desc: c.description ?? "" }));
+    return { models, efforts, commands: claudeCommands(models, efforts, sessions, extra) };
+  }, [listed, past, skills, snap.status.model, agent?.model]);
 
   const waiting = state === "needs_attention";
   const working = state === "working";
@@ -509,6 +496,7 @@ function SubagentChat({ tool, ws, session, actions, scroller }: { tool: ToolCall
 /** 사용자가 붙여 보낸 그림의 작은 판 */
 function ChatImage({ host, session, id }: { host: HostApi; session: SessionId; id: string }) {
   const [src, setSrc] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let alive = true;
     host.agentImage(session, id, true).then(
@@ -519,7 +507,50 @@ function ChatImage({ host, session, id }: { host: HostApi; session: SessionId; i
       alive = false;
     };
   }, [host, session, id]);
-  return src ? <img src={src} alt="붙인 그림" className="max-h-28 rounded border" /> : <span className="h-16 w-24 rounded border bg-muted" />;
+  if (!src) return <span className="h-16 w-24 rounded border bg-muted" />;
+  return (
+    <>
+      <button className="cursor-zoom-in rounded" title="크게 보기" onClick={() => setOpen(true)}>
+        <img src={src} alt="붙인 그림" className="max-h-28 rounded border" />
+      </button>
+      {open && <ImagePopup host={host} session={session} id={id} thumb={src} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** 붙인 그림을 창 가득 크게 본다. 원본을 받는 동안은 작은 판을 늘려 보인다. Esc 나 그림 밖을 누르면 닫는다 */
+function ImagePopup({ host, session, id, thumb, onClose }: { host: HostApi; session: SessionId; id: string; thumb: string; onClose: () => void }) {
+  const [full, setFull] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    host.agentImage(session, id, false).then(
+      (r) => alive && setFull(`data:${r.mediaType};base64,${r.data}`),
+      (e) => alive && setError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [host, session, id]);
+  return (
+    <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80" />
+        <DialogPrimitive.Content aria-describedby={undefined} className="fixed inset-0 z-50 flex flex-col outline-none" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+          <div className="flex h-10 shrink-0 items-center px-4 text-xs text-white/80">
+            <DialogPrimitive.Title className="font-medium text-white">붙인 그림</DialogPrimitive.Title>
+            {error && <span className="ml-3 text-white/60">원본을 읽지 못했어요: {error}</span>}
+            <DialogPrimitive.Close className="ml-auto flex size-7 items-center justify-center rounded-md hover:bg-white/15" title="닫기 (Esc)">
+              <XIcon className="size-4" />
+            </DialogPrimitive.Close>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center px-8 pb-6" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+            <img src={full ?? thumb} alt="붙인 그림" className={cn("max-h-full max-w-full object-contain shadow-2xl", !full && "min-h-[40%] blur-[1px]")} draggable={false} />
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
 }
 
 function PendingRow({ p, working, onDrop }: { p: PendingSend; working: boolean; onDrop: () => void }) {
@@ -699,7 +730,7 @@ function usePermissionMode(host: HostApi, session: SessionId, state: string | un
       if (!start) return false;
       let now: ModeId | null = start;
       for (let i = 0; i < 8 && now !== target; i++) {
-        await host.input(session, enc.encode("\x1b[Z"));
+        await host.sendText(session, "\x1b[Z");
         // claude 가 모드 줄을 다시 그릴 틈
         for (let k = 0; k < 10; k++) {
           await new Promise((r) => setTimeout(r, 120));
@@ -805,7 +836,11 @@ function Composer({
   // 값이 있는 명령(/model)은 값 목록으로 넘어가고, 나머지는 바로 보낸다
   const choose = (item: SlashItem) => (item.send ? send(item.text) : setText(item.text));
   const pickAt = menu ? Math.min(cursor, menu.length - 1) : 0;
-  useEffect(() => setCursor(0), [text]);
+  useEffect(() => {
+    setCursor(0);
+    // Esc 로 닫은 것은 그 글에만 해당한다. 글이 바뀌면(지웠다 다시 치면) 다시 띄운다
+    setClosedFor((c) => (c !== null && c !== text ? null : c));
+  }, [text]);
   const slashing = text.startsWith("/");
   useEffect(() => {
     if (slashing) onSlash();
@@ -963,7 +998,7 @@ function SlashMenu({ items, at, onHover, onPick }: { items: SlashItem[]; at: num
             </>
           ) : (
             <>
-              <span className="w-28 shrink-0 font-mono text-xs">{c.label}</span>
+              <span className="max-w-[45%] min-w-28 shrink-0 truncate font-mono text-xs">{c.label}</span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
             </>
           )}

@@ -9,7 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-import { AGENT_CHAT_PROTOCOL_MINOR, type AgentSession, type ChatItem, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
+import { AGENT_CHAT_PROTOCOL_MINOR, type AgentSession, type ChatItem, type ClaudeCommand, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
 
 export type AgentView = "chat" | "terminal";
 
@@ -81,6 +81,25 @@ export function useAgentView(host: HostApi, hostKey: string, s: SessionInfo | un
 
 export function useDefaultAgentView(): AgentView {
   return useStore(chatViewStore, (v) => v.base);
+}
+
+/**
+ * claude 가 `/` 목록에 올리는 스킬 · 사용자 명령. 데몬이 claude 를 한 번 실행해 받아 오므로 처음에는 몇 초 걸린다
+ * (데몬이 폴더마다 잠깐 기억한다). 그동안과 옛 데몬에서는 빈 목록이다
+ */
+export function useClaudeCommands(host: HostApi, session: SessionId): ClaudeCommand[] {
+  const [list, setList] = useState<ClaudeCommand[]>([]);
+  useEffect(() => {
+    let alive = true;
+    host.claudeCommands(session).then(
+      (l) => alive && setList(l),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [host, session]);
+  return list;
 }
 
 /**
@@ -213,10 +232,8 @@ export class ChatFeed {
     }
   }
 
-  addPending(text: string): number {
-    const id = this.nextPending++;
-    this.emit({ pending: [...this.snap.pending, { id, text, at: Date.now() }] });
-    return id;
+  addPending(text: string) {
+    this.emit({ pending: [...this.snap.pending, { id: this.nextPending++, text, at: Date.now() }] });
   }
 
   dropPending(id: number) {

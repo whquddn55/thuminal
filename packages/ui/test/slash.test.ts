@@ -27,6 +27,16 @@ describe("대화 보기 / 명령", () => {
     expect(unknownCommand("/resume", cmds)).toBe("/resume");
   });
 
+  it("claude 가 알려 준 스킬은 내장 명령 뒤에 잇고, 이름이 겹치면 내장 명령을 둔다", () => {
+    const cmds = claudeCommands(undefined, undefined, [], [
+      { name: "thuthi:setup", desc: "점검" },
+      { name: "clear", desc: "겹치는 이름" },
+    ]);
+    expect(cmds.filter((c) => c.name === "clear").map((c) => c.desc)).toEqual(["대화를 비우고 새로 시작"]);
+    expect(slashItems("/setup", cmds)?.map((i) => [i.text, i.send])).toEqual([["/thuthi:setup", true]]);
+    expect(unknownCommand("/thuthi:setup", cmds)).toBeNull();
+  });
+
   it("/exit 는 목록에 있고 바로 보낸다", () => {
     expect(slashItems("/exi", claudeCommands())?.map((i) => [i.text, i.send])).toEqual([["/exit", true]]);
   });

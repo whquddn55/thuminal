@@ -328,6 +328,15 @@ export interface ClaudeModel {
   efforts?: string[];
 }
 
+/** claude 의 `/` 목록에 뜨는 스킬 · 사용자 명령 하나 (`claude_commands`) */
+export interface ClaudeCommand {
+  /** `/` 뒤에 칠 이름 (docx, thuthi:setup) */
+  name: string;
+  description?: string;
+  /** 뒤에 붙일 값의 모양. 없으면 빈 글 */
+  argument_hint?: string;
+}
+
 /** 이어 갈 수 있는 지난 claude 대화 하나 (`agent_sessions`) */
 export interface AgentSession {
   /** claude 세션 id (`/resume` 에 붙일 값) */

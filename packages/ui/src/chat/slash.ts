@@ -6,6 +6,7 @@
 // - 목록에는 대화 보기 안에서 끝나는 명령만 올린다. `args` 가 있는 명령(/model, /effort)은 고르면 값 목록이 이어 뜨고,
 //   값을 붙여 보내면(`/model sonnet`) claude 가 고르는 창을 띄우지 않고 바로 바꾼다. 값 없이는 보내지 않는다.
 //   `/resume` 의 값은 데몬이 읽어 준 지난 대화 목록이다 (받지 못했으면 목록에 올리지 않는다).
+// - 스킬 · 사용자 명령은 데몬이 claude 에게 물어 받은 것을 그 뒤에 잇는다 (claude 의 `/` 목록과 같다).
 // - 목록에 없는 명령(/config …)은 쳐서 보낼 수 있지만 claude 가 터미널 화면에 창을 띄운다. 그때는 원본에서 잇는다.
 
 export interface SlashChoice {
@@ -37,10 +38,15 @@ export const SEED_EFFORTS = effortChoices(["low", "medium", "high", "xhigh", "ma
 
 /**
  * 대화 보기 안에서 끝나는 claude 명령. models · efforts 는 claude 에게서 받은 것 (없으면 손으로 적어 둔 것),
- * sessions 는 이어 갈 수 있는 지난 대화 (없으면 `/resume` 을 올리지 않는다)
+ * sessions 는 이어 갈 수 있는 지난 대화 (없으면 `/resume` 을 올리지 않는다), skills 는 claude 가 알려 준 스킬 · 사용자 명령
  */
-export function claudeCommands(models: SlashChoice[] = SEED_MODELS, efforts: SlashChoice[] = SEED_EFFORTS, sessions: SlashChoice[] = []): SlashCommand[] {
-  return [
+export function claudeCommands(
+  models: SlashChoice[] = SEED_MODELS,
+  efforts: SlashChoice[] = SEED_EFFORTS,
+  sessions: SlashChoice[] = [],
+  skills: SlashCommand[] = [],
+): SlashCommand[] {
+  const own: SlashCommand[] = [
     { name: "clear", desc: "대화를 비우고 새로 시작" },
     { name: "compact", desc: "대화를 요약해 줄이기" },
     ...(sessions.length ? [{ name: "resume", desc: "지난 대화 이어 가기", args: sessions }] : []),
@@ -51,6 +57,7 @@ export function claudeCommands(models: SlashChoice[] = SEED_MODELS, efforts: Sla
     { name: "review", desc: "지금 변경을 리뷰" },
     { name: "exit", desc: "claude 를 끝내고 터미널로" },
   ];
+  return [...own, ...skills.filter((s) => !own.some((c) => c.name === s.name))];
 }
 
 /** 목록의 한 줄: 고르면 `text` 가 입력창에 들어간다. `send` 면 바로 보낸다 */
