@@ -21,7 +21,7 @@ import { cn } from "../lib/utils";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
 import { type ChatDraft, chatFeed, type ChatFeed, draftKey, flatText as flat, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
-import { claudeCommands, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
+import { claudeCommands, commandTag, defPath, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
 import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary, tuiInputBox } from "./timeline";
 
 const Markdown = lazy(() => import("../markdown"));
@@ -215,7 +215,7 @@ export function ChatView({
     const cur = listed.find((m) => m.resolved === now || m.label === now || m.value === now);
     const efforts = cur?.efforts?.length ? effortChoices(cur.efforts) : SEED_EFFORTS;
     const sessions: SlashChoice[] = past.map((s) => ({ value: s.id, label: s.title, desc: agoLabel(s.modified) }));
-    const extra: SlashCommand[] = skills.map((c) => ({ name: c.name, desc: c.description ?? "" }));
+    const extra: SlashCommand[] = skills.map((c) => ({ name: c.name, desc: c.description ?? "", tag: commandTag(c), where: c.path || undefined }));
     return { models, efforts, commands: claudeCommands(models, efforts, sessions, extra) };
   }, [listed, past, skills, snap.status.model, agent?.model]);
 
@@ -299,6 +299,7 @@ export function ChatView({
         <Composer
           key={draft}
           draft={draft}
+          root={ws}
           host={host}
           keyboard={keyboard && !questions}
           working={working}
@@ -859,9 +860,12 @@ function Composer({
   onSlash,
   commands,
   draft,
+  root,
 }: {
   /** 쓰다 만 글 · 붙인 그림을 둘 곳 (`draftKey`). 이 키가 바뀌면 입력창을 새로 만든다 */
   draft: string;
+  /** 워크스페이스 경로 (정의 파일 경로를 그 밑 경로로 짧게 보인다) */
+  root: string;
   /** `/` 목록에 올릴 명령 */
   commands: SlashCommand[];
   /** `/` 를 치기 시작했다 */
@@ -950,7 +954,7 @@ function Composer({
 
   return (
     <div className="relative">
-      {menu && <SlashMenu items={menu} at={pickAt} onHover={setCursor} onPick={choose} />}
+      {menu && <SlashMenu items={menu} at={pickAt} root={root} onHover={setCursor} onPick={choose} />}
       <div
         className="flex flex-col gap-1.5 rounded-lg border bg-card p-1.5 focus-within:border-ring"
         onDragOver={(e) => e.dataTransfer.types.includes("Files") && e.preventDefault()}
@@ -1043,36 +1047,52 @@ function Composer({
 }
 
 /** 입력창 위에 뜨는 `/` 명령 목록. ↑↓ 로 고르고 Enter 로 보내고 Tab 으로 채운다 */
-function SlashMenu({ items, at, onHover, onPick }: { items: SlashItem[]; at: number; onHover: (i: number) => void; onPick: (c: SlashItem) => void }) {
+function SlashMenu({ items, at, root, onHover, onPick }: { items: SlashItem[]; at: number; root: string; onHover: (i: number) => void; onPick: (c: SlashItem) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     ref.current?.children[at]?.scrollIntoView({ block: "nearest" });
   }, [at]);
+  // 고른 줄이 무엇이고 어디에 정의됐는지 아래에 한 줄로 보인다 (명령 목록일 때만. 값 · 지난 대화 목록에는 없다)
+  const cur = items[at];
+  const tagged = items.some((c) => c.tag);
   return (
-    <div ref={ref} className="absolute inset-x-0 bottom-full z-[2] mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg thm-scroll">
-      {items.map((c, i) => (
-        <button
-          key={c.key}
-          className={cn("flex w-full items-center gap-3 rounded-md px-2 py-1 text-left", i === at && "bg-accent")}
-          // 누를 때 입력창 포커스를 빼앗지 않는다
-          onPointerDown={(e) => e.preventDefault()}
-          onPointerMove={() => i !== at && onHover(i)}
-          onClick={() => onPick(c)}
-        >
-          {c.wide ? (
-            <>
-              <span className="min-w-0 flex-1 truncate text-xs">{c.label}</span>
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.desc}</span>
-            </>
-          ) : (
-            <>
-              <span className="max-w-[45%] min-w-28 shrink-0 truncate font-mono text-xs">{c.label}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
-            </>
+    <div className="absolute inset-x-0 bottom-full z-[2] mb-1 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg">
+      <div ref={ref} className="thm-scroll max-h-64 overflow-y-auto p-1">
+        {items.map((c, i) => (
+          <button
+            key={c.key}
+            className={cn("flex w-full items-center gap-3 rounded-md px-2 py-1 text-left", i === at && "bg-accent")}
+            // 누를 때 입력창 포커스를 빼앗지 않는다
+            onPointerDown={(e) => e.preventDefault()}
+            onPointerMove={() => i !== at && onHover(i)}
+            onClick={() => onPick(c)}
+          >
+            {c.wide ? (
+              <>
+                <span className="min-w-0 flex-1 truncate text-xs">{c.label}</span>
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.desc}</span>
+              </>
+            ) : (
+              <>
+                <span className="max-w-[45%] min-w-28 shrink-0 truncate font-mono text-xs">{c.label}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
+                {c.tag && <span className="shrink-0 text-2xs text-muted-foreground/80">{c.tag}</span>}
+              </>
+            )}
+            {!c.send && <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />}
+          </button>
+        ))}
+      </div>
+      {tagged && cur && (
+        <div className="flex items-center gap-2 border-t px-3 py-1 text-2xs text-muted-foreground">
+          <span className="shrink-0">{cur.tag === "내장" ? "claude 내장 명령" : cur.tag || "스킬 · 명령"}</span>
+          {cur.where && (
+            <span className="min-w-0 flex-1 truncate text-right font-mono" title={cur.where}>
+              {defPath(cur.where, root)}
+            </span>
           )}
-          {!c.send && <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />}
-        </button>
-      ))}
+        </div>
+      )}
     </div>
   );
 }
