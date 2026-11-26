@@ -20,9 +20,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn } from "../lib/utils";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
-import { chatFeed, type ChatFeed, type PendingSend, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
+import { type ChatDraft, chatFeed, type ChatFeed, draftKey, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
 import { claudeCommands, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
-import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary } from "./timeline";
+import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary, tuiInputBox } from "./timeline";
 
 const Markdown = lazy(() => import("../markdown"));
 
@@ -44,6 +44,12 @@ function agoLabel(at: number): string {
   return `${Math.floor(m / 1440)}일 전`;
 }
 
+/** 멈춘 뒤 claude 가 글을 입력창에 되돌려 놓았는지 보는 때 (앞 확인부터 잰 ms) */
+const RESTORE_CHECKS_MS = [350, 500, 800];
+
+/** 줄바꿈 자리(터미널이 접은 줄)와 그림 표시를 빼고 견준다 */
+const flat = (t: string) => t.replace(/\[Image #\d+\]/g, "").replace(/\s+/g, "");
+
 /** 세션에 키 · 글을 보내는 것들 */
 function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
   return useMemo(() => {
@@ -59,23 +65,45 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
       raw,
       keys,
       /** 입력창에 글을 넣고 Enter. 여러 줄이나 긴 글은 붙여넣기로 감싸 한 번에 넣는다 */
-      prompt: async (text: string, images: string[] = []) => {
+      prompt: async (text: string, images: ChatDraft["images"] = []) => {
+        // 슬래시 명령은 기록에 사용자 글로 남지 않는다
+        if (!text.startsWith("/")) feed.addPending(text, images);
+        else for (const i of images) URL.revokeObjectURL(i.url);
         // 그림은 파일 경로를 붙여 넣으면 claude 가 `[Image #N]` 으로 붙인다 (터미널에 그림을 붙여 넣을 때와 같다)
         if (images.length) {
-          await raw(`\x1b[200~${images.join(" ")}\x1b[201~`);
+          await raw(`\x1b[200~${images.map((i) => i.path).join(" ")}\x1b[201~`);
           await new Promise((r) => setTimeout(r, 600));
           if (!text) return void (await raw("\r"));
           await raw(" ");
         }
         const typed = !text.includes("\n") && text.length <= 400;
-        // 슬래시 명령은 기록에 사용자 글로 남지 않는다
-        if (!text.startsWith("/")) feed.addPending(text);
         await raw(typed ? text : `\x1b[200~${text}\x1b[201~`);
         // 붙여 넣은 글을 claude 가 받아 그릴 시간을 준다 (Orca 도 붙여넣기 뒤 0.5초 기다린다)
         await new Promise((r) => setTimeout(r, typed ? 80 : 500));
         await raw("\r");
       },
       interrupt: () => raw("\x1b"),
+      /**
+       * 일하는 claude 를 멈춘다. 막 보낸 글을 답이 나오기 전에 멈추면 claude 는 그 글을 자기 입력창에 되돌려 놓는다.
+       * 그대로 두면 다음에 보내는 글이 그 뒤에 붙으므로, claude 입력창은 비우고(⌃C) 그 글을 돌려준다 (대화 보기 입력창에 넣는다).
+       * 화면의 입력창 글이 우리가 보낸 글과 같을 때만 한다 (claude 가 흐리게 보이는 제안 글 · 터미널에서 직접 친 글은 건드리지 않는다)
+       */
+      interruptAndReclaim: async (): Promise<ChatDraft | null> => {
+        await raw("\x1b");
+        for (const wait of RESTORE_CHECKS_MS) {
+          await new Promise((r) => setTimeout(r, wait));
+          const box = tuiInputBox(await host.readScreen(session, false).catch(() => ""));
+          if (!box) continue;
+          const snap = feed.get();
+          const pending = [...snap.pending].reverse().find((p) => flat(p.text) === flat(box) && (p.text || p.images.length));
+          const sent = pending ? null : [...snap.items].reverse().find((i) => i.type === "user");
+          const text = pending?.text ?? (sent?.type === "user" && flat(sent.text) === flat(box) ? sent.text : null);
+          if (text === null) continue;
+          await raw("\x03");
+          return { text, images: (pending && feed.takePending(pending.id)?.images) || [] };
+        }
+        return null;
+      },
     };
   }, [host, session, feed]);
 }
@@ -105,6 +133,8 @@ export function ChatView({
   const snap = useChat(feed);
   const agent = useApp((s) => s.sessions[session]?.agent ?? null);
   const send = useSender(host, session, feed);
+  // 쓰다 만 글은 세션마다 따로 둔다 (칸이 사라졌다 돌아와도 남는다)
+  const draft = draftKey(model.hostKey, session, useApp((s) => s.sessions[session]?.created_at ?? 0));
   const timeline = useMemo(() => buildTimeline(snap.items), [snap.items]);
 
   const actions = useMemo<ChatActions>(
@@ -159,8 +189,8 @@ export function ChatView({
   const listed = useClaudeModels(host, model.hostKey);
   // 지난 대화 목록은 입력창에 `/` 를 칠 때마다 다시 읽는다
   const [slashTick, setSlashTick] = useState(0);
-  const past = useAgentSessions(host, session, slashTick);
-  const skills = useClaudeCommands(host, session);
+  const past = useAgentSessions(host, model.hostKey, session, slashTick);
+  const skills = useClaudeCommands(host, model.hostKey, session);
   const { models, efforts, commands } = useMemo(() => {
     const models: SlashChoice[] = listed.length ? listed.map((m) => ({ value: m.value, desc: m.value === "default" && m.description ? m.description.split(" · ")[0] : m.label })) : SEED_MODELS;
     // 지금 모델이 받는 강도만 보인다
@@ -250,6 +280,8 @@ export function ChatView({
           </div>
         )}
         <Composer
+          key={draft}
+          draft={draft}
           host={host}
           keyboard={keyboard && !questions}
           working={working}
@@ -261,7 +293,7 @@ export function ChatView({
             // 보기는 그대로 두고 원본으로 가는 길만 알린다 (Orca 도 이런 명령은 터미널에 맡긴다)
             setSlash(unknownCommand(t, commands));
           }}
-          onInterrupt={() => void send.interrupt()}
+          onInterrupt={() => send.interruptAndReclaim().catch(() => null)}
           onError={model.fail}
           onSlash={() => setSlashTick((n) => n + 1)}
           commands={commands}
@@ -556,7 +588,16 @@ function ImagePopup({ host, session, id, thumb, onClose }: { host: HostApi; sess
 function PendingRow({ p, working, onDrop }: { p: PendingSend; working: boolean; onDrop: () => void }) {
   return (
     <div className="flex max-w-[80%] items-start gap-2 self-end rounded-2xl rounded-br-md bg-muted/50 px-3.5 py-2 text-muted-foreground">
-      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{p.text}</span>
+      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">
+        {p.images.length > 0 && (
+          <span className="mb-1 flex flex-wrap gap-1.5">
+            {p.images.map((i) => (
+              <img key={i.path} src={i.url} alt="붙인 그림" className="h-14 rounded border object-cover" />
+            ))}
+          </span>
+        )}
+        {p.text}
+      </span>
       <span className="shrink-0 text-[11px]">{working ? "대기 중" : "보내는 중"}</span>
       <button className="flex size-4 shrink-0 items-center justify-center rounded hover:bg-foreground/10" title="지우기" onClick={onDrop}>
         <XIcon className="size-3" />
@@ -800,7 +841,10 @@ function Composer({
   onError,
   onSlash,
   commands,
+  draft,
 }: {
+  /** 쓰다 만 글 · 붙인 그림을 둘 곳 (`draftKey`). 이 키가 바뀌면 입력창을 새로 만든다 */
+  draft: string;
   /** `/` 목록에 올릴 명령 */
   commands: SlashCommand[];
   /** `/` 를 치기 시작했다 */
@@ -809,12 +853,15 @@ function Composer({
   keyboard: boolean;
   working: boolean;
   compact?: boolean;
-  onSend: (text: string, images: string[]) => void;
-  onInterrupt: () => void;
+  onSend: (text: string, images: ChatDraft["images"]) => void;
+  /** 멈춘다. claude 가 입력창에 되돌려 놓은 글이 있으면 그것을 돌려준다 */
+  onInterrupt: () => Promise<ChatDraft | null>;
   onError: (e: unknown) => void;
 }) {
-  const [text, setText] = useState("");
-  const [images, setImages] = useState<Attached[]>([]);
+  // 다른 탭 · 워크트리에 다녀오면 이 입력창은 없어졌다 다시 생긴다. 쓰던 것은 밖(chat-state)에 두고 이어 쓴다
+  const [text, setText] = useState(() => loadDraft(draft).text);
+  const [images, setImages] = useState<Attached[]>(() => loadDraft(draft).images);
+  useEffect(() => saveDraft(draft, { text, images }), [draft, text, images]);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     // 폰은 화면 키보드가 저절로 올라오지 않게 누를 때만 포커스를 준다
@@ -848,14 +895,18 @@ function Composer({
 
   const send = (t: string) => {
     if (!t && !images.length) return;
-    onSend(
-      t,
-      images.map((i) => i.path),
-    );
-    for (const i of images) URL.revokeObjectURL(i.url);
+    // 그림 미리 보기 주소는 보낸 글이 기록에 나타날 때 놓는다 (멈추면 입력창으로 되돌린다)
+    onSend(t, images);
     setImages([]);
     setText("");
   };
+  // 멈춘 글이 돌아오면 쓰던 글 앞에 넣는다
+  const interrupt = () =>
+    void onInterrupt().then((back) => {
+      if (!back) return;
+      setText((cur) => (cur ? `${back.text}\n${cur}` : back.text));
+      setImages((cur) => [...back.images, ...cur]);
+    });
   const submit = () => {
     const t = text.trim();
     // 값이 있어야 하는 명령(/model, /effort)은 값 없이 보내지 않는다 (claude 가 터미널 화면에 고르는 창을 띄운다). 값 목록을 띄운다
@@ -951,12 +1002,12 @@ function Composer({
                 submit();
               } else if (e.key === "Escape" && working) {
                 e.preventDefault();
-                onInterrupt();
+                interrupt();
               }
             }}
           />
           {working && (
-            <button className="flex size-7 shrink-0 items-center justify-center rounded-md border text-muted-foreground hover:bg-accent hover:text-foreground" title="중단 (Esc)" onClick={onInterrupt}>
+            <button className="flex size-7 shrink-0 items-center justify-center rounded-md border text-muted-foreground hover:bg-accent hover:text-foreground" title="중단 (Esc)" onClick={interrupt}>
               <StopIcon weight="fill" className="size-3" />
             </button>
           )}

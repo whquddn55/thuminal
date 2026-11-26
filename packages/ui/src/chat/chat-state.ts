@@ -9,7 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-import { AGENT_CHAT_PROTOCOL_MINOR, type AgentSession, type ChatItem, type ClaudeCommand, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
+import { AGENT_CHAT_PROTOCOL_MINOR, type AgentSession, CHAT_LISTS_PROTOCOL_MINOR, type ChatItem, type ClaudeCommand, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
 
 export type AgentView = "chat" | "terminal";
 
@@ -24,12 +24,15 @@ interface ViewState {
   overrides: Record<string, AgentView>;
   /** 호스트의 데몬이 `agent_chat` 을 아는지 (아직 묻지 않았으면 없다) */
   supported: Record<string, boolean>;
+  /** 호스트 데몬의 프로토콜 부 버전 (아직 묻지 않았으면 없다). 새로 생긴 요청을 옛 데몬에 보내지 않으려고 본다 */
+  minor: Record<string, number>;
 }
 
 export const chatViewStore = createStore<ViewState>(() => ({
   base: localStorage.getItem(VIEW_KEY) === "terminal" ? "terminal" : "chat",
   overrides: {},
   supported: {},
+  minor: {},
 }));
 
 /** 세션 번호는 호스트마다 따로라 `<호스트>|<세션>` 으로 가른다 */
@@ -59,12 +62,13 @@ function probe(host: HostApi, hostKey: string) {
   host
     .daemon()
     .then(
-      (d) => (d.protocol?.[1] ?? 0) >= AGENT_CHAT_PROTOCOL_MINOR,
+      (d) => d.protocol?.[1] ?? 0,
       () => null,
     )
-    .then((ok) => {
+    .then((minor) => {
       probing.delete(hostKey);
-      if (ok !== null) chatViewStore.setState((s) => ({ supported: { ...s.supported, [hostKey]: ok } }));
+      if (minor !== null)
+        chatViewStore.setState((s) => ({ supported: { ...s.supported, [hostKey]: minor >= AGENT_CHAT_PROTOCOL_MINOR }, minor: { ...s.minor, [hostKey]: minor } }));
     });
 }
 
@@ -87,9 +91,11 @@ export function useDefaultAgentView(): AgentView {
  * claude 가 `/` 목록에 올리는 스킬 · 사용자 명령. 데몬이 claude 를 한 번 실행해 받아 오므로 처음에는 몇 초 걸린다
  * (데몬이 폴더마다 잠깐 기억한다). 그동안과 옛 데몬에서는 빈 목록이다
  */
-export function useClaudeCommands(host: HostApi, session: SessionId): ClaudeCommand[] {
+export function useClaudeCommands(host: HostApi, hostKey: string, session: SessionId): ClaudeCommand[] {
   const [list, setList] = useState<ClaudeCommand[]>([]);
+  const known = useStore(chatViewStore, (v) => (v.minor[hostKey] ?? 0) >= CHAT_LISTS_PROTOCOL_MINOR);
   useEffect(() => {
+    if (!known) return;
     let alive = true;
     host.claudeCommands(session).then(
       (l) => alive && setList(l),
@@ -98,7 +104,7 @@ export function useClaudeCommands(host: HostApi, session: SessionId): ClaudeComm
     return () => {
       alive = false;
     };
-  }, [host, session]);
+  }, [host, session, known]);
   return list;
 }
 
@@ -106,10 +112,11 @@ export function useClaudeCommands(host: HostApi, session: SessionId): ClaudeComm
  * 이어 갈 수 있는 지난 대화 (`/resume` 목록). `tick` 이 바뀔 때마다 다시 읽고, 0 이면 읽지 않는다 (입력창에 `/` 를 칠 때 읽는다).
  * 옛 데몬이면 빈 목록이다
  */
-export function useAgentSessions(host: HostApi, session: SessionId, tick: number): AgentSession[] {
+export function useAgentSessions(host: HostApi, hostKey: string, session: SessionId, tick: number): AgentSession[] {
   const [list, setList] = useState<AgentSession[]>([]);
+  const known = useStore(chatViewStore, (v) => (v.minor[hostKey] ?? 0) >= CHAT_LISTS_PROTOCOL_MINOR);
   useEffect(() => {
-    if (!tick) return;
+    if (!tick || !known) return;
     let alive = true;
     host.agentSessions(session).then(
       (l) => alive && setList(l),
@@ -118,7 +125,7 @@ export function useAgentSessions(host: HostApi, session: SessionId, tick: number
     return () => {
       alive = false;
     };
-  }, [host, session, tick]);
+  }, [host, session, tick, known]);
   return list;
 }
 
@@ -127,7 +134,12 @@ export interface PendingSend {
   id: number;
   text: string;
   at: number;
+  /** 같이 붙여 보낸 그림 (입력창으로 되돌릴 때 쓴다) */
+  images: ChatDraft["images"];
 }
+
+/** 대기 글이 없어질 때 그림 미리 보기 주소를 놓는다 */
+const release = (list: PendingSend[]) => list.forEach((p) => p.images.forEach((i) => URL.revokeObjectURL(i.url)));
 
 export interface ChatSnapshot {
   items: ChatItem[];
@@ -223,6 +235,7 @@ export class ChatFeed {
         const arrived = chat.items.flatMap((i) => (i.type === "user" ? [norm(i.text)] : []));
         // claude 가 글을 감싸거나(붙여 넣은 글 꼬리표) 그림 표시를 붙이기도 해서 앞머리가 들어 있으면 같은 글로 본다
         const pending = arrived.length ? this.snap.pending.filter((p) => !arrived.some((t) => t.includes(norm(p.text).slice(0, 80)))) : this.snap.pending;
+        release(this.snap.pending.filter((p) => !pending.includes(p)));
         this.emit({ items, more: chat.reset ? chat.more : this.snap.more, loaded: true, pending, error: null, status: mergeStatus(chat.reset ? {} : this.snap.status, chat.status) });
       } while (this.dirty);
     } catch (e) {
@@ -232,16 +245,46 @@ export class ChatFeed {
     }
   }
 
-  addPending(text: string) {
-    this.emit({ pending: [...this.snap.pending, { id: this.nextPending++, text, at: Date.now() }] });
+  addPending(text: string, images: ChatDraft["images"] = []) {
+    this.emit({ pending: [...this.snap.pending, { id: this.nextPending++, text, at: Date.now(), images }] });
   }
 
   dropPending(id: number) {
+    release(this.snap.pending.filter((p) => p.id === id));
     this.emit({ pending: this.snap.pending.filter((p) => p.id !== id) });
+  }
+
+  /** 대기 글을 목록에서 빼서 돌려준다 (입력창으로 되돌린다. 그림 주소는 놓지 않는다) */
+  takePending(id: number): PendingSend | undefined {
+    const hit = this.snap.pending.find((p) => p.id === id);
+    if (hit) this.emit({ pending: this.snap.pending.filter((p) => p.id !== id) });
+    return hit;
   }
 }
 
 const feeds = new Map<string, ChatFeed>();
+
+/** 입력창에 쓰다 만 글과 붙인 그림. 칸이 화면에서 사라졌다 돌아와도(탭 · 워크트리를 오가도) 남는다. 앱을 끄면 잊는다 */
+export interface ChatDraft {
+  text: string;
+  /** 붙인 그림: 데몬 쪽 임시 파일 경로와 미리 보기 주소 */
+  images: { path: string; url: string }[];
+}
+
+const drafts = new Map<string, ChatDraft>();
+
+/** 쓰다 만 것을 가르는 키. 데몬이 다시 뜨면 세션 번호를 다시 쓰므로 세션을 만든 때까지 넣는다 */
+export const draftKey = (host: string, session: SessionId, createdAt: number) => `${chatKey(host, session)}|${createdAt}`;
+
+export function loadDraft(key: string): ChatDraft {
+  return drafts.get(key) ?? { text: "", images: [] };
+}
+
+/** 비었으면 지운다 */
+export function saveDraft(key: string, d: ChatDraft) {
+  if (d.text || d.images.length) drafts.set(key, d);
+  else drafts.delete(key);
+}
 
 export function chatFeed(host: HostApi, hostKey: string, session: SessionId, subagent?: string): ChatFeed {
   const key = subagent ? `${chatKey(hostKey, session)}|${subagent}` : chatKey(hostKey, session);
@@ -259,6 +302,11 @@ export function chatChanged(hostKey: string, session: SessionId) {
 export function chatRemoved(hostKey: string, session: SessionId) {
   const key = chatKey(hostKey, session);
   for (const k of [...feeds.keys()]) if (k === key || k.startsWith(`${key}|`)) feeds.delete(k);
+  for (const [k, d] of [...drafts])
+    if (k.startsWith(`${key}|`)) {
+      for (const i of d.images) URL.revokeObjectURL(i.url);
+      drafts.delete(k);
+    }
   if (key in chatViewStore.getState().overrides) {
     chatViewStore.setState((s) => {
       const overrides = { ...s.overrides };
@@ -273,8 +321,10 @@ export function chatReconnected(hostKey: string) {
   if (hostKey in chatViewStore.getState().supported) {
     chatViewStore.setState((s) => {
       const supported = { ...s.supported };
+      const minor = { ...s.minor };
       delete supported[hostKey];
-      return { supported };
+      delete minor[hostKey];
+      return { supported, minor };
     });
   }
   for (const [key, f] of feeds) if (key.startsWith(`${hostKey}|`)) f.reset();

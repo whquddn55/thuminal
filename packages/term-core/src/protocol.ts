@@ -237,6 +237,11 @@ export const PROCESSES_PROTOCOL_MINOR = 6;
 export const OUTSIDE_FILES_PROTOCOL_MINOR = 9;
 /** 이 부 버전부터 데몬이 에이전트 대화 기록을 대화 조각으로 읽어 준다 (`agent_chat`, `agent_chat_changed`) */
 export const AGENT_CHAT_PROTOCOL_MINOR = 12;
+/**
+ * 이 부 버전부터 데몬이 지난 대화 목록(`agent_sessions`)과 스킬 · 사용자 명령 목록(`claude_commands`)을 준다.
+ * 이보다 옛 데몬은 모르는 요청을 받으면 연결을 끊으므로 보내지 않는다
+ */
+export const CHAT_LISTS_PROTOCOL_MINOR = 13;
 
 /** 데몬 프로토콜 부 판이 이 값 이상이어야 `stop_process` 의 강제 종료(`force`, SIGKILL)가 된다 */
 export const FORCE_STOP_PROTOCOL_MINOR = 10;

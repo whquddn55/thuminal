@@ -176,3 +176,16 @@ export function duration(ms: number): string {
   const m = Math.floor(s / 60);
   return m < 60 ? `${m}분 ${s % 60}초` : `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
+
+/**
+ * claude 터미널 화면 글에서 입력창에 든 글을 읽는다 (가로줄 두 개 사이, 첫 줄은 `❯ `, 이어지는 줄은 두 칸 들여 쓴다).
+ * 입력창이 보이지 않으면 null
+ */
+export function tuiInputBox(screen: string): string | null {
+  const lines = screen.split("\n").map((l) => l.trimEnd());
+  const rules = lines.flatMap((l, i) => (/^─{20,}$/.test(l) ? [i] : []));
+  if (rules.length < 2) return null;
+  const body = lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1]);
+  if (!body.length || !body[0].startsWith("❯")) return null;
+  return [body[0].slice(1).trimStart(), ...body.slice(1).map((l) => l.replace(/^ {1,2}/, ""))].join("\n").trim();
+}

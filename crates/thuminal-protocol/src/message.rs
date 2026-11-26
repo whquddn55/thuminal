@@ -800,10 +800,10 @@ pub enum Request {
     },
     /// claude 가 고를 수 있는 모델 목록 (minor 12 의 뒤 빌드부터). claude 에게 물어 10분 기억한다. 못 얻으면 빈 목록
     ClaudeModels,
-    /// 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화 목록, 최근 것부터 (minor 12 의 뒤 빌드부터).
+    /// 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화 목록, 최근 것부터 (minor 13).
     /// 대화 보기의 `/resume` 이 고르게 보인다. 지금 대화는 뺀다
     AgentSessions { session: SessionId },
-    /// 세션 에이전트의 폴더에서 claude 의 `/` 목록에 뜨는 스킬 · 사용자 명령 (minor 12 의 뒤 빌드부터. claude 내장 명령은 뺀다).
+    /// 세션 에이전트의 폴더에서 claude 의 `/` 목록에 뜨는 스킬 · 사용자 명령 (minor 13. claude 내장 명령은 뺀다).
     /// claude 를 한 번 실행해 묻고 폴더마다 2분 기억한다. 못 얻으면 빈 목록
     ClaudeCommands { session: SessionId },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다

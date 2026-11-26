@@ -96,7 +96,16 @@ impl Server {
                         Ok(m) => m,
                         Err(e) => {
                             warn!(event = "bad_message", conn, error = %e);
-                            break;
+                            // 모르는 요청(새 화면이 옛 데몬에 보낸 것)이면 그 요청에만 오류로 답하고 연결은 둔다.
+                            // 끊으면 화면이 다시 붙어 같은 요청을 또 보내며 맴돈다
+                            let id = serde_json::from_slice::<serde_json::Value>(&bytes).ok().and_then(|v| v.get("id").and_then(serde_json::Value::as_u64));
+                            match id {
+                                Some(id) => {
+                                    let _ = tx.send(err_frame(id, ErrorCode::InvalidRequest, format!("데몬이 모르는 요청이에요: {e}")));
+                                    continue;
+                                }
+                                None => break,
+                            }
                         }
                     };
                     let ClientMessage::Request { id, request } = msg;

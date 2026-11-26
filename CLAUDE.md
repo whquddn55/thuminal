@@ -26,7 +26,7 @@ scripts/build-android.sh             # 안드로이드 앱 → apps/web/public/d
 - 다른 컴퓨터(예: Windows) 데몬에 CLI 를 댈 때: 앱의 원격 컴퓨터에 등록한 뒤 `THUMINAL_HOME=~/Library/Application\ Support/thuminal THUMINAL_HOST=<이름> target/debug/thuminal term ls`. `hosts.json` 의 주소 · 토큰으로 원격 접속에 붙는다. 그 컴퓨터에 탭을 열어(`tab new`) 명령이나 claude 를 돌려 보며 확인한다.
 - 데몬 코드를 바꾼 뒤: `cargo build -p thuminald -p thuminal-cli && scripts/prepare-sidecars.sh debug` 하고 데몬에 `SIGTERM`(예: `pkill -TERM -f "thuminald --home …dev-home"`). 앱이 새 데몬을 띄우고, 세션은 화면 저장본으로 되살아나며 claude 는 `--resume` 으로 이어진다. `thuminal daemon stop` 은 세션 기록을 지우므로 되살아나지 않는다.
 - 업데이트 서명 키는 `~/.tauri/thuminal.key`(암호는 macOS 키체인 `thuminal-updater-key`), CI 는 GitHub secret `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 를 쓴다. 키를 잃으면 이미 설치된 앱이 다음 버전을 받지 못한다. 안드로이드 앱은 처음 만든 Mac 의 디버그 키(`~/.android/debug.keystore`)로 서명하고, CI 는 같은 키를 secret `ANDROID_KEYSTORE_BASE64` 로 받는다 (키가 다르면 폰에 덮어 깔지 못한다).
-- 시험은 사용자의 dev-home 세션에 입력을 보내지 말고 따로 띄운 데몬(`target/debug/thuminald --home <임시 폴더>`)에서 한다.
+- 시험은 사용자의 dev-home 세션에 입력을 보내지 말고 따로 띄운 데몬(`target/debug/thuminald --home <임시 폴더>`)에서 한다. `pnpm dev` 가 떠 있으면 Rust 가 바뀔 때마다 tauri 가 옛 사이드카(`src-tauri/binaries`)를 `target/debug/thuminald` 에 덮어쓰므로, 빌드한 바로 뒤에 바이너리를 다른 곳에 복사해 그것을 띄운다. 훅(에이전트 상태)까지 보려면 `THUMINAL_CLAUDE_PLUGIN=plugins/claude-code/thuminal`, 웹 화면은 `THUMINAL_WEB_ROOT=apps/web/dist` 와 `thuminal remote on --port <빈 포트>` 로 본다.
 
 ## 큰 그림
 
@@ -67,6 +67,8 @@ plugins/claude-code/thuminal  ← claude 훅 → `thuminal agent report` → 데
 ## 지킬 것
 
 - **프로토콜 타입은 두 벌이다.** 원본은 `crates/thuminal-protocol/src/{message,layout}.rs`, TS 쪽은 `packages/term-core/src/protocol.ts`. 와이어 모양을 바꾸면 둘을 같이 바꾼다. enum 은 serde `tag = "type"`(op 는 `tag = "op"`), snake_case 다. 새 필드는 `#[serde(default)]` 로 옛 데몬·앱과 맞춘다.
+- **새 요청을 만들면 `PROTOCOL_MINOR` 를 올리고, 화면은 데몬 부 버전을 보고 옛 데몬에는 보내지 않는다.** 부 버전 12 까지의 데몬은 모르는 요청을 받으면 연결을 끊는다 (화면이 다시 붙어 같은 요청을 또 보내며 맴돈다). 원격 컴퓨터의 데몬은 앱보다 옛 버전일 수 있다.
+- 껍데기의 `input`(Input 프레임)은 그 연결에서 터미널로 붙은(attach) 세션에만 들어간다. 터미널에 붙지 않고 키를 넣는 화면(대화 보기)은 `sendText`(`send_text` 요청)를 쓴다.
 - 앱의 데몬 요청은 대부분 generic `daemon_request` Tauri 명령으로 그대로 넘어간다 (`tauri-host.ts` 의 `req()`). 새 요청에 Tauri 명령을 늘릴 필요는 보통 없다.
 - 데몬은 바깥 환경의 `THUMINAL_*`, `ORCA_*`, `CLAUDE_CODE_*` 를 세션에 물려주지 않는다 (`SCRUBBED_ENV_PREFIXES`). 세션 안 CLI 가 써야 하는 값은 데몬이 다시 넣는다.
 - 단축키는 Orca 와 같게 둔다 (⌘1~9 워크트리, ⌃1~9 탭, ⌘⌥←→ 방문 기록, ⌘⌥A 플로팅, ⌘D/⌘⇧D 나누기, ⌘⇧J 에이전트 대화 ↔ 원본). thuminal 에만 있는 칸 방향 이동은 ⌃⌘방향키, 크기는 ⌃⌘⇧방향키다. ⌘+ ⌘- ⌘0 은 터미널에 포커스가 있으면 모든 터미널 글자 크기, 아니면 앱 화면 배율(Tauri 웹뷰 확대)이다 (`ui/src/App.tsx` `useShortcuts`). Windows · Linux 는 누른 키를 macOS 자리로 바꿔 읽는다 (`ui/src/platform.ts` `appMods`): ⌘ 는 Ctrl(터미널과 겹치는 Ctrl+D · W · L 등도 앱이 가져간다), ⌃1~9 탭은 Alt+1~9, ⌃⌘방향키는 Ctrl+Alt+방향키, ⌘⌥←→ 는 Alt+←→, 터미널 단어 이동은 Ctrl+←→. 화면에 쓰는 단축키 글자는 `keyLabel("⌘D")` 로 바꿔 보인다.

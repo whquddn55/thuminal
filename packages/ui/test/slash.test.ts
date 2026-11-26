@@ -41,3 +41,15 @@ describe("대화 보기 / 명령", () => {
     expect(slashItems("/exi", claudeCommands())?.map((i) => [i.text, i.send])).toEqual([["/exit", true]]);
   });
 });
+
+describe("claude 터미널 화면의 입력창 읽기", () => {
+  const rule = "─".repeat(60);
+  it("가로줄 사이의 글을 읽고, 접힌 줄의 들여쓰기를 뗀다", async () => {
+    const { tuiInputBox } = await import("../src/chat/timeline");
+    const screen = ["⏺ 답", "", rule, "❯ 첫 글이에요 길게 써서", "  다음 줄로 접혔어요", rule, "  5h – │ 7d 1%", "  ⏵⏵ bypass permissions on"].join("\n");
+    expect(tuiInputBox(screen)).toBe("첫 글이에요 길게 써서\n다음 줄로 접혔어요");
+    expect(tuiInputBox([rule, "❯ ", rule].join("\n"))).toBe("");
+    // 입력창이 없는 화면(묻는 창 등)
+    expect(tuiInputBox("Do you want to proceed?\n❯ 1. Yes")).toBeNull();
+  });
+});
