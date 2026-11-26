@@ -11,7 +11,7 @@
 
 import { ArrowDownIcon, ArrowUpIcon, CaretRightIcon, CheckIcon, StopIcon, TerminalWindowIcon, XIcon } from "@phosphor-icons/react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, ChatStatus, HostApi, SessionId, WorkspaceId } from "@thuminal/term-core";
 
@@ -1046,42 +1046,43 @@ function Composer({
 function SlashMenu({ items, at, onHover, onPick }: { items: SlashItem[]; at: number; onHover: (i: number) => void; onPick: (c: SlashItem) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    ref.current?.children[at]?.scrollIntoView({ block: "nearest" });
+    ref.current?.querySelector(`[data-index="${at}"]`)?.scrollIntoView({ block: "nearest" });
   }, [at]);
-  // 명령 목록이면 오른쪽에 종류 · 범위 칸을 둔다 (값 · 지난 대화 목록에는 없다)
-  const tagged = items.some((c) => c.kind);
+  // 명령 목록이면 묶음마다 구분선과 묶음 이름을 둔다 (값 · 지난 대화 목록에는 없다)
+  const grouped = items.some((c) => c.group);
   return (
-    <div ref={ref} className="absolute inset-x-0 bottom-full z-[2] mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg thm-scroll">
+    <div ref={ref} className="absolute inset-x-0 bottom-full z-[2] mb-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg thm-scroll">
       {items.map((c, i) => (
-        <button
-          key={c.key}
-          className={cn("flex w-full items-center gap-3 rounded-md px-2 py-1 text-left", i === at && "bg-accent")}
-          // 정의 파일 경로
-          title={c.where}
-          // 누를 때 입력창 포커스를 빼앗지 않는다
-          onPointerDown={(e) => e.preventDefault()}
-          onPointerMove={() => i !== at && onHover(i)}
-          onClick={() => onPick(c)}
-        >
-          {c.wide ? (
-            <>
-              <span className="min-w-0 flex-1 truncate text-xs">{c.label}</span>
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.desc}</span>
-            </>
-          ) : (
-            <>
-              <span className="max-w-[45%] min-w-28 shrink-0 truncate font-mono text-xs">{c.label}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
-              {tagged && (
-                <>
-                  <span className="w-7 shrink-0 text-2xs text-muted-foreground/80">{c.kind}</span>
-                  <span className="w-11 shrink-0 text-2xs text-muted-foreground/80">{c.scope}</span>
-                </>
-              )}
-            </>
+        <Fragment key={c.key}>
+          {grouped && c.group !== items[i - 1]?.group && (
+            <div className={cn("px-2 pt-1 pb-0.5 text-2xs font-medium text-muted-foreground", i > 0 && "mt-1 border-t pt-1.5")}>{c.group}</div>
           )}
-          {!c.send && <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />}
-        </button>
+          <button
+            data-index={i}
+            className={cn("flex w-full items-center gap-3 rounded-md px-2 py-1 text-left", i === at && "bg-accent")}
+            // 정의 파일 경로
+            title={c.where}
+            // 누를 때 입력창 포커스를 빼앗지 않는다
+            onPointerDown={(e) => e.preventDefault()}
+            onPointerMove={() => i !== at && onHover(i)}
+            onClick={() => onPick(c)}
+          >
+            {c.wide ? (
+              <>
+                <span className="min-w-0 flex-1 truncate text-xs">{c.label}</span>
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.desc}</span>
+              </>
+            ) : (
+              <>
+                <span className="max-w-[45%] min-w-28 shrink-0 truncate font-mono text-xs">{c.label}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
+                {c.kind && <span className="shrink-0 text-2xs text-muted-foreground/80">{c.kind}</span>}
+                {c.scope && <span className="w-9 shrink-0 text-2xs text-muted-foreground/80">{c.scope}</span>}
+              </>
+            )}
+            {!c.send && <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />}
+          </button>
+        </Fragment>
       ))}
     </div>
   );

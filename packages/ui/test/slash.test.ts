@@ -67,14 +67,32 @@ describe("버려진 갈래 가리기", () => {
   });
 });
 
-describe("스킬 · 명령의 종류와 범위", () => {
-  it("종류와 정의된 범위를 따로 준다", async () => {
+describe("스킬 · 명령 묶음", () => {
+  it("정의된 곳으로 묶고, 플러그인 것은 한 묶음에 모아 설치 범위를 적는다", async () => {
     const { commandTags } = await import("../src/chat/slash");
-    expect(commandTags({ kind: "skill", source: "project" })).toEqual({ kind: "스킬", scope: "프로젝트" });
-    expect(commandTags({ kind: "command", source: "user" })).toEqual({ kind: "명령", scope: "사용자" });
-    expect(commandTags({ kind: "skill", source: "local" })).toEqual({ kind: "스킬", scope: "로컬" });
-    expect(commandTags({ kind: "skill", source: "account" })).toEqual({ kind: "스킬", scope: "계정" });
-    // 옛 데몬은 둘 다 주지 않는다
-    expect(commandTags({})).toEqual({ kind: "", scope: "" });
+    expect(commandTags({ name: "brand", kind: "skill", source: "project" })).toEqual({ group: "프로젝트", kind: "스킬", scope: "" });
+    expect(commandTags({ name: "ship", kind: "command", source: "user" })).toEqual({ group: "사용자", kind: "명령", scope: "" });
+    expect(commandTags({ name: "docx", kind: "skill", source: "account" })).toEqual({ group: "계정", kind: "스킬", scope: "" });
+    expect(commandTags({ name: "thuthi:setup", kind: "skill", source: "user", plugin: "thuthi" })).toEqual({ group: "플러그인", kind: "스킬", scope: "사용자" });
+    expect(commandTags({ name: "x:y", kind: "command", source: "local", plugin: "x" })).toEqual({ group: "플러그인", kind: "명령", scope: "로컬" });
+    // 옛 데몬
+    expect(commandTags({ name: "thuthi:setup" })).toEqual({ group: "플러그인", kind: "", scope: "" });
+    expect(commandTags({ name: "docx" })).toEqual({ group: "스킬 · 명령", kind: "", scope: "" });
+  });
+
+  it("목록은 묶음끼리 모인다 (묶음 안에서는 앞머리가 맞는 것이 먼저)", async () => {
+    const { claudeCommands, slashItems } = await import("../src/chat/slash");
+    const cmds = claudeCommands(undefined, undefined, [], [
+      { name: "thuthi:design-x", desc: "", group: "플러그인" },
+      { name: "design", desc: "", group: "프로젝트" },
+      { name: "docx", desc: "", group: "계정" },
+      { name: "mydesign", desc: "", group: "프로젝트" },
+    ]);
+    expect(slashItems("/design", cmds)?.map((i) => [i.label, i.group])).toEqual([
+      ["/design", "프로젝트"],
+      ["/mydesign", "프로젝트"],
+      ["/thuthi:design-x", "플러그인"],
+    ]);
+    expect(slashItems("/", cmds)?.map((i) => i.group).filter((g, i, a) => g !== a[i - 1])).toEqual(["내장", "프로젝트", "플러그인", "계정"]);
   });
 });
