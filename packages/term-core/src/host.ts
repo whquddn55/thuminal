@@ -4,6 +4,7 @@
 
 import type {
   AgentChat,
+  AgentSession,
   ClaudeModel,
   AgentImage,
   AgentSettings,
@@ -304,6 +305,8 @@ export interface HostApi {
    * subagent(서브에이전트를 부른 도구 호출 id)를 주면 그 서브에이전트의 대화를 읽는다
    */
   agentChat(session: SessionId, known: { transcript: string; offset: number } | null, tail: number, subagent?: string): Promise<AgentChat>;
+  /** 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화, 최근 것부터 (지금 대화는 뺀다). 옛 데몬은 오류를 낸다 */
+  agentSessions(session: SessionId): Promise<AgentSession[]>;
   /** 붙여넣은 그림을 데몬 쪽 임시 파일로 쓰고 그 경로를 돌려준다. data 는 base64 */
   savePasteImage(data: string, ext: string): Promise<string>;
   /**

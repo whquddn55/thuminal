@@ -9,7 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-import { AGENT_CHAT_PROTOCOL_MINOR, type ChatItem, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
+import { AGENT_CHAT_PROTOCOL_MINOR, type AgentSession, type ChatItem, type ChatStatus, type ClaudeModel, type HostApi, type SessionId, type SessionInfo } from "@thuminal/term-core";
 
 export type AgentView = "chat" | "terminal";
 
@@ -81,6 +81,26 @@ export function useAgentView(host: HostApi, hostKey: string, s: SessionInfo | un
 
 export function useDefaultAgentView(): AgentView {
   return useStore(chatViewStore, (v) => v.base);
+}
+
+/**
+ * 이어 갈 수 있는 지난 대화 (`/resume` 목록). `tick` 이 바뀔 때마다 다시 읽고, 0 이면 읽지 않는다 (입력창에 `/` 를 칠 때 읽는다).
+ * 옛 데몬이면 빈 목록이다
+ */
+export function useAgentSessions(host: HostApi, session: SessionId, tick: number): AgentSession[] {
+  const [list, setList] = useState<AgentSession[]>([]);
+  useEffect(() => {
+    if (!tick) return;
+    let alive = true;
+    host.agentSessions(session).then(
+      (l) => alive && setList(l),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [host, session, tick]);
+  return list;
 }
 
 /** 보낸 뒤 아직 기록에 나타나지 않은 글 (claude 가 일하는 중이면 줄 서 있다) */
@@ -193,8 +213,10 @@ export class ChatFeed {
     }
   }
 
-  addPending(text: string) {
-    this.emit({ pending: [...this.snap.pending, { id: this.nextPending++, text, at: Date.now() }] });
+  addPending(text: string): number {
+    const id = this.nextPending++;
+    this.emit({ pending: [...this.snap.pending, { id, text, at: Date.now() }] });
+    return id;
   }
 
   dropPending(id: number) {

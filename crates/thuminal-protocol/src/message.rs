@@ -276,6 +276,17 @@ pub struct ClaudeModel {
     pub efforts: Vec<String>,
 }
 
+/// 이어 갈 수 있는 지난 claude 대화 하나 (`AgentSessions`)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSession {
+    /// claude 세션 id (`/resume` 에 붙일 값)
+    pub id: String,
+    /// claude 가 붙인 제목. 없으면 사용자 글의 앞머리
+    pub title: String,
+    /// 기록을 마지막으로 쓴 때 (ms)
+    pub modified: u64,
+}
+
 /// 대화 기록에서 읽은 에이전트 상태 (대화 보기 아래 상태 줄). 이번에 읽은 줄에 없던 것은 None 이고, 화면은 앞서 받은 값을 그대로 둔다
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ChatStatus {
@@ -777,6 +788,9 @@ pub enum Request {
     },
     /// claude 가 고를 수 있는 모델 목록 (minor 12 의 뒤 빌드부터). claude 에게 물어 10분 기억한다. 못 얻으면 빈 목록
     ClaudeModels,
+    /// 세션 에이전트와 같은 프로젝트에서 이어 갈 수 있는 지난 대화 목록, 최근 것부터 (minor 12 의 뒤 빌드부터).
+    /// 대화 보기의 `/resume` 이 고르게 보인다. 지금 대화는 뺀다
+    AgentSessions { session: SessionId },
     /// claude 에이전트 팀이 부르는 tmux 명령 하나 (`thuminal tmux …`). 데몬이 팀원 세션으로 흉내 낸다
     /// 세션마다 셸 밑 프로세스(pid · CPU · 메모리)와 이 컴퓨터에서 LISTEN 중인 TCP 포트, 포트를 붙인 곳 (minor 6)
     ListProcesses,
@@ -859,6 +873,7 @@ pub enum Response {
     AgentImages { images: Vec<AgentImage> },
     AgentChat { chat: AgentChat },
     ClaudeModels { models: Vec<ClaudeModel> },
+    AgentSessions { sessions: Vec<AgentSession> },
     /// 그림 내용 (`data` 는 base64)
     AgentImageData { media_type: String, data: String },
     OrcaScan { scan: OrcaScan },

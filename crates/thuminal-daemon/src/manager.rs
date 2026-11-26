@@ -548,6 +548,11 @@ impl Manager {
         }
     }
 
+    /// 세션 에이전트와 같은 프로젝트의 지난 대화 목록 (블로킹 스레드에서 부른다)
+    pub fn agent_sessions(&self, id: SessionId) -> Result<Vec<thuminal_protocol::AgentSession>, ErrorBody> {
+        Ok(self.transcript_of(id)?.map(|t| crate::chat::sessions(&t, crate::chat::SESSIONS_MAX)).unwrap_or_default())
+    }
+
     /// 세션 에이전트 대화 기록에서 사용자가 붙여 보낸 그림 목록 (보낸 차례대로)
     pub fn agent_images(&self, id: SessionId) -> Result<Vec<thuminal_protocol::AgentImage>, ErrorBody> {
         Ok(self.transcript_of(id)?.map(|t| self.images.list(id, &t)).unwrap_or_default())

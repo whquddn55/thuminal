@@ -1,0 +1,33 @@
+import { describe, expect, it } from "vitest";
+
+import { claudeCommands, needsArg, slashItems, unknownCommand } from "../src/chat/slash";
+
+describe("대화 보기 / 명령", () => {
+  const past = [
+    { value: "aaaa-1111", label: "알림 개수 배지", desc: "3시간 전" },
+    { value: "bbbb-2222", label: "Windows 브라우저 칸", desc: "2일 전" },
+  ];
+
+  it("지난 대화가 있으면 /resume 이 제목 목록으로 이어지고, 고르면 id 를 붙여 보낸다", () => {
+    const cmds = claudeCommands(undefined, undefined, past);
+    expect(needsArg("/resume", cmds)?.name).toBe("resume");
+    expect(slashItems("/resume ", cmds)?.map((i) => [i.label, i.text, i.send])).toEqual([
+      ["알림 개수 배지", "/resume aaaa-1111", true],
+      ["Windows 브라우저 칸", "/resume bbbb-2222", true],
+    ]);
+    // 제목이나 id 앞머리로 찾는다
+    expect(slashItems("/resume windows", cmds)?.map((i) => i.text)).toEqual(["/resume bbbb-2222"]);
+    expect(slashItems("/resume aaaa", cmds)?.map((i) => i.text)).toEqual(["/resume aaaa-1111"]);
+    expect(unknownCommand("/resume aaaa-1111", cmds)).toBeNull();
+  });
+
+  it("지난 대화를 받지 못했으면 /resume 은 목록에 없는 명령이다 (원본에서 잇는다)", () => {
+    const cmds = claudeCommands();
+    expect(needsArg("/resume", cmds)).toBeNull();
+    expect(unknownCommand("/resume", cmds)).toBe("/resume");
+  });
+
+  it("/exit 는 목록에 있고 바로 보낸다", () => {
+    expect(slashItems("/exi", claudeCommands())?.map((i) => [i.text, i.send])).toEqual([["/exit", true]]);
+  });
+});

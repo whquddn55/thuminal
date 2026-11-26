@@ -18,11 +18,11 @@
 //! 상태를 들지 않는다. 화면이 지난 응답의 `offset` 을 돌려주면 그 뒤만 읽는다.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use serde_json::Value;
-use thuminal_protocol::{AgentChat, ChatItem, ChatStatus};
+use thuminal_protocol::{AgentChat, AgentSession, ChatItem, ChatStatus};
 
 /// 도구 결과 글을 이 바이트까지 남긴다
 const RESULT_MAX: usize = 6 * 1024;
@@ -449,10 +449,106 @@ fn read_file(path: &str, known: Option<(&str, u64)>, tail: u32, sidechain: bool)
     Ok(AgentChat { transcript: path.to_string(), offset: pos, reset, more, items, status })
 }
 
+/// 지난 대화 목록에 올리는 수
+pub const SESSIONS_MAX: usize = 40;
+/// 제목을 찾으려고 기록의 앞 · 뒤에서 읽는 바이트 (기록은 수백 MB 가 되기도 한다)
+const TITLE_SCAN: u64 = 256 * 1024;
+const TITLE_MAX: usize = 200;
+
+/// `current` 기록과 같은 폴더(같은 프로젝트)에 있는 지난 대화, 최근에 쓴 것부터. `current` 와 사용자 글이 없는 기록은 뺀다
+pub fn sessions(current: &str, limit: usize) -> Vec<AgentSession> {
+    let cur = Path::new(current);
+    let Some(rd) = cur.parent().and_then(|d| std::fs::read_dir(d).ok()) else { return Vec::new() };
+    let mut files: Vec<(u64, std::path::PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension()? != "jsonl" || p == cur {
+                return None;
+            }
+            let m = e.metadata().ok()?;
+            let at = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+            m.is_file().then_some((at, p))
+        })
+        .collect();
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    files
+        .into_iter()
+        .filter_map(|(modified, p)| Some(AgentSession { id: p.file_stem()?.to_str()?.to_string(), title: session_title(&p)?, modified }))
+        .take(limit)
+        .collect()
+}
+
+/// 기록의 제목: 사용자가 붙인 이름 → claude 가 붙인 제목 → 마지막 사용자 글 → 처음 사용자 글. 앞 · 뒤 `TITLE_SCAN` 만 본다
+fn session_title(path: &Path) -> Option<String> {
+    let mut f = File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    let read = |f: &mut File, from: u64, n: u64| -> Option<Vec<u8>> {
+        f.seek(SeekFrom::Start(from)).ok()?;
+        let mut buf = Vec::new();
+        f.take(n).read_to_end(&mut buf).ok()?;
+        Some(buf)
+    };
+    if len <= TITLE_SCAN * 2 {
+        chunks.push(read(&mut f, 0, len)?);
+    } else {
+        // 앞 조각은 끝의 잘린 줄을, 뒤 조각은 앞의 잘린 줄을 버린다
+        let mut head = read(&mut f, 0, TITLE_SCAN)?;
+        head.truncate(head.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1));
+        let tail = read(&mut f, len - TITLE_SCAN, TITLE_SCAN)?;
+        let start = tail.iter().position(|&b| b == b'\n').map_or(tail.len(), |i| i + 1);
+        chunks.push(head);
+        chunks.push(tail[start..].to_vec());
+    }
+    let (mut custom, mut ai, mut last, mut first) = (None, None, None, None);
+    let has = |line: &[u8], needle: &[u8]| line.windows(needle.len()).any(|w| w == needle);
+    for line in chunks.iter().flat_map(|c| c.split(|&b| b == b'\n')) {
+        if has(line, b"-title\"") || has(line, b"\"last-prompt\"") {
+            let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
+            let s = |k: &str| v.get(k).and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_string);
+            match v.get("type").and_then(Value::as_str) {
+                Some("custom-title") => custom = s("customTitle").or(custom),
+                Some("ai-title") => ai = s("aiTitle").or(ai),
+                Some("last-prompt") => last = s("lastPrompt").or(last),
+                _ => {}
+            }
+        } else if first.is_none() && has(line, b"\"type\":\"user\"") {
+            first = items_in_line(line, 0).into_iter().find_map(|i| match i {
+                ChatItem::User { text, .. } if !text.trim().is_empty() => Some(text),
+                _ => None,
+            });
+        }
+    }
+    let title = custom.or(ai).or(last).or(first)?;
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(clip(&title, TITLE_MAX).0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sessions_lists_other_transcripts_with_titles() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str, lines: Vec<Value>| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, lines.into_iter().flat_map(line).collect::<Vec<u8>>()).unwrap();
+            p.to_str().unwrap().to_string()
+        };
+        let user = |text: &str| json!({"type":"user","uuid":"u","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":text}});
+        let cur = write("cur.jsonl", vec![user("지금 대화")]);
+        write("titled.jsonl", vec![user("처음 글"), json!({"type":"ai-title","aiTitle":"옛 제목"}), json!({"type":"ai-title","aiTitle":"붙인  제목"})]);
+        write("plain.jsonl", vec![json!({"type":"mode","mode":"normal"}), user("첫 줄\n둘째 줄")]);
+        write("empty.jsonl", vec![json!({"type":"mode","mode":"normal"})]);
+        write("note.txt", vec![user("기록이 아니다")]);
+        let mut got: Vec<(String, String)> = sessions(&cur, 10).into_iter().map(|s| (s.id, s.title)).collect();
+        got.sort();
+        assert_eq!(got, vec![("plain".to_string(), "첫 줄 둘째 줄".to_string()), ("titled".to_string(), "붙인 제목".to_string())]);
+        assert_eq!(sessions(&cur, 1).len(), 1);
+    }
 
     fn line(v: Value) -> Vec<u8> {
         let mut b = serde_json::to_vec(&v).unwrap();

@@ -15,6 +15,7 @@ import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { FileConflictError, agentSettingsState } from "@thuminal/term-core";
 import type {
   AgentChat,
+  AgentSession,
   ClaudeModel,
   AgentImage,
   FontFaceInfo,
@@ -468,6 +469,10 @@ export class TauriHostApi implements HostApi {
 
   claudeModels(): Promise<ClaudeModel[]> {
     return this.req({ type: "claude_models" }, (r) => r.models);
+  }
+
+  agentSessions(session: SessionId): Promise<AgentSession[]> {
+    return this.req({ type: "agent_sessions", session }, (r) => r.sessions);
   }
 
   agentImages(session: SessionId): Promise<AgentImage[]> {

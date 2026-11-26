@@ -5,11 +5,14 @@
 // Orca 의 터미널 채팅 보기와 같은 방식이다:
 // - 목록에는 대화 보기 안에서 끝나는 명령만 올린다. `args` 가 있는 명령(/model, /effort)은 고르면 값 목록이 이어 뜨고,
 //   값을 붙여 보내면(`/model sonnet`) claude 가 고르는 창을 띄우지 않고 바로 바꾼다. 값 없이는 보내지 않는다.
-// - 목록에 없는 명령(/resume, /config …)은 쳐서 보낼 수 있지만 claude 가 터미널 화면에 창을 띄운다. 그때는 원본에서 잇는다.
+//   `/resume` 의 값은 데몬이 읽어 준 지난 대화 목록이다 (받지 못했으면 목록에 올리지 않는다).
+// - 목록에 없는 명령(/config …)은 쳐서 보낼 수 있지만 claude 가 터미널 화면에 창을 띄운다. 그때는 원본에서 잇는다.
 
 export interface SlashChoice {
   value: string;
   desc: string;
+  /** 목록에 값 대신 보일 이름 (지난 대화의 제목). 이것으로도 찾는다 */
+  label?: string;
 }
 
 export interface SlashCommand {
@@ -32,16 +35,21 @@ export const SEED_MODELS: SlashChoice[] = [
 export const effortChoices = (levels: string[]): SlashChoice[] => levels.map((value) => ({ value, desc: "" }));
 export const SEED_EFFORTS = effortChoices(["low", "medium", "high", "xhigh", "max"]);
 
-/** 대화 보기 안에서 끝나는 claude 명령. models · efforts 는 claude 에게서 받은 것 (없으면 손으로 적어 둔 것) */
-export function claudeCommands(models: SlashChoice[] = SEED_MODELS, efforts: SlashChoice[] = SEED_EFFORTS): SlashCommand[] {
+/**
+ * 대화 보기 안에서 끝나는 claude 명령. models · efforts 는 claude 에게서 받은 것 (없으면 손으로 적어 둔 것),
+ * sessions 는 이어 갈 수 있는 지난 대화 (없으면 `/resume` 을 올리지 않는다)
+ */
+export function claudeCommands(models: SlashChoice[] = SEED_MODELS, efforts: SlashChoice[] = SEED_EFFORTS, sessions: SlashChoice[] = []): SlashCommand[] {
   return [
     { name: "clear", desc: "대화를 비우고 새로 시작" },
     { name: "compact", desc: "대화를 요약해 줄이기" },
+    ...(sessions.length ? [{ name: "resume", desc: "지난 대화 이어 가기", args: sessions }] : []),
     { name: "model", desc: "모델 바꾸기", args: models },
     { name: "effort", desc: "생각 강도 바꾸기", args: efforts },
     { name: "context", desc: "컨텍스트 사용량 보기" },
     { name: "init", desc: "CLAUDE.md 만들기" },
     { name: "review", desc: "지금 변경을 리뷰" },
+    { name: "exit", desc: "claude 를 끝내고 터미널로" },
   ];
 }
 
@@ -52,6 +60,8 @@ export interface SlashItem {
   desc: string;
   text: string;
   send: boolean;
+  /** 이름이 긴 글(대화 제목)이다: 이름에 자리를 넓게 주고 설명은 오른쪽 끝에 둔다 */
+  wide?: boolean;
 }
 
 /**
@@ -64,8 +74,8 @@ export function slashItems(text: string, commands: SlashCommand[]): SlashItem[] 
     if (!cmd?.args) return null;
     const q = arg[2].toLowerCase();
     return cmd.args
-      .filter((a) => a.value.startsWith(q))
-      .map((a) => ({ key: `${cmd.name} ${a.value}`, label: a.value, desc: a.desc, text: `/${cmd.name} ${a.value}`, send: true }));
+      .filter((a) => a.value.startsWith(q) || !!a.label?.toLowerCase().includes(q))
+      .map((a) => ({ key: `${cmd.name} ${a.value}`, label: a.label ?? a.value, wide: !!a.label, desc: a.desc, text: `/${cmd.name} ${a.value}`, send: true }));
   }
   const m = /^\/([\w:.-]*)$/.exec(text);
   if (!m) return null;

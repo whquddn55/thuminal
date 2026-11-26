@@ -19,7 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn } from "../lib/utils";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
-import { chatFeed, type ChatFeed, type PendingSend, useChat, useClaudeModels } from "./chat-state";
+import { chatFeed, type ChatFeed, type PendingSend, useAgentSessions, useChat, useClaudeModels } from "./chat-state";
 import { claudeCommands, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
 import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary } from "./timeline";
 
@@ -35,8 +35,20 @@ export interface ChatActions {
   notice: (text: string) => void;
 }
 
-/** 세션에 키 · 글을 보내는 것들 */
-function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
+/** Enter 를 보낸 뒤 턴이 시작됐는지 보는 때 (앞 확인부터 잰 ms). 시작되지 않았으면 그때마다 Enter 를 다시 보낸다 */
+const SUBMIT_CHECKS_MS = [1500, 3000];
+
+/** 지난 때를 `방금` · `12분 전` · `3시간 전` · `5일 전` 으로 */
+function agoLabel(at: number): string {
+  const m = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
+  if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
+  return `${Math.floor(m / 1440)}일 전`;
+}
+
+/** 세션에 키 · 글을 보내는 것들. `resting` 은 claude 가 지금 입력을 기다리며 쉬고 있는지 (묻는 창이 떠 있으면 아니다) */
+function useSender(host: HostApi, session: SessionId, feed: ChatFeed, resting: () => boolean) {
   return useMemo(() => {
     const raw = (text: string) => host.input(session, enc.encode(text));
     const keys = async (list: string[]) => {
@@ -59,11 +71,21 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
         }
         const typed = !text.includes("\n") && text.length <= 400;
         // 슬래시 명령은 기록에 사용자 글로 남지 않는다
-        if (!text.startsWith("/")) feed.addPending(text);
+        const pending = text.startsWith("/") ? null : feed.addPending(text);
+        const wasResting = resting();
         await raw(typed ? text : `\x1b[200~${text}\x1b[201~`);
         // 붙여 넣은 글을 claude 가 받아 그릴 시간을 준다 (Orca 도 붙여넣기 뒤 0.5초 기다린다)
         await new Promise((r) => setTimeout(r, typed ? 80 : 500));
         await raw("\r");
+        // claude 가 Enter 를 줄바꿈으로 넣거나 놓쳐서 글이 입력창에 남은 채 보내지지 않을 때가 있다 (다시 시작한 직후 등).
+        // 쉬고 있던 claude 가 턴을 시작하지 않았으면 Enter 를 다시 보낸다. 빈 입력창의 Enter 는 아무 일도 없고,
+        // 묻는 창이 떠 있을 때는 Enter 가 답이 되므로 쉬는 상태에서만 보낸다
+        if (pending === null || !wasResting) return;
+        for (const wait of SUBMIT_CHECKS_MS) {
+          await new Promise((r) => setTimeout(r, wait));
+          if (!resting() || !feed.get().pending.some((p) => p.id === pending)) return;
+          await raw("\r");
+        }
       },
       interrupt: () => raw("\x1b"),
     };
@@ -94,7 +116,10 @@ export function ChatView({
   const feed = chatFeed(host, model.hostKey, session);
   const snap = useChat(feed);
   const agent = useApp((s) => s.sessions[session]?.agent ?? null);
-  const send = useSender(host, session, feed);
+  const send = useSender(host, session, feed, () => {
+    const st = model.get().sessions[session]?.agent?.state;
+    return st === "idle" || st === "failed";
+  });
   const timeline = useMemo(() => buildTimeline(snap.items), [snap.items]);
 
   const actions = useMemo<ChatActions>(
@@ -147,14 +172,18 @@ export function ChatView({
   const [mode, setMode] = usePermissionMode(host, session, state);
   // 모델 · 생각 강도 목록은 claude 에게서 받는다 (Orca 와 같다). 받기 전 · 못 받았을 때는 손으로 적어 둔 것
   const listed = useClaudeModels(host, model.hostKey);
+  // 지난 대화 목록은 입력창에 `/` 를 칠 때마다 다시 읽는다
+  const [slashTick, setSlashTick] = useState(0);
+  const past = useAgentSessions(host, session, slashTick);
   const { models, efforts, commands } = useMemo(() => {
     const models: SlashChoice[] = listed.length ? listed.map((m) => ({ value: m.value, desc: m.value === "default" && m.description ? m.description.split(" · ")[0] : m.label })) : SEED_MODELS;
     // 지금 모델이 받는 강도만 보인다
     const now = snap.status.model ?? agent?.model ?? "";
     const cur = listed.find((m) => m.resolved === now || m.label === now || m.value === now);
     const efforts = cur?.efforts?.length ? effortChoices(cur.efforts) : SEED_EFFORTS;
-    return { models, efforts, commands: claudeCommands(models, efforts) };
-  }, [listed, snap.status.model, agent?.model]);
+    const sessions: SlashChoice[] = past.map((s) => ({ value: s.id, label: s.title, desc: agoLabel(s.modified) }));
+    return { models, efforts, commands: claudeCommands(models, efforts, sessions) };
+  }, [listed, past, snap.status.model, agent?.model]);
 
   const waiting = state === "needs_attention";
   const working = state === "working";
@@ -247,6 +276,7 @@ export function ChatView({
           }}
           onInterrupt={() => void send.interrupt()}
           onError={model.fail}
+          onSlash={() => setSlashTick((n) => n + 1)}
           commands={commands}
         />
         <StatusLine
@@ -737,10 +767,13 @@ function Composer({
   onSend,
   onInterrupt,
   onError,
+  onSlash,
   commands,
 }: {
   /** `/` 목록에 올릴 명령 */
   commands: SlashCommand[];
+  /** `/` 를 치기 시작했다 */
+  onSlash: () => void;
   host: HostApi;
   keyboard: boolean;
   working: boolean;
@@ -773,6 +806,10 @@ function Composer({
   const choose = (item: SlashItem) => (item.send ? send(item.text) : setText(item.text));
   const pickAt = menu ? Math.min(cursor, menu.length - 1) : 0;
   useEffect(() => setCursor(0), [text]);
+  const slashing = text.startsWith("/");
+  useEffect(() => {
+    if (slashing) onSlash();
+  }, [slashing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = (t: string) => {
     if (!t && !images.length) return;
@@ -919,8 +956,17 @@ function SlashMenu({ items, at, onHover, onPick }: { items: SlashItem[]; at: num
           onPointerMove={() => i !== at && onHover(i)}
           onClick={() => onPick(c)}
         >
-          <span className="w-28 shrink-0 font-mono text-xs">{c.label}</span>
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
+          {c.wide ? (
+            <>
+              <span className="min-w-0 flex-1 truncate text-xs">{c.label}</span>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{c.desc}</span>
+            </>
+          ) : (
+            <>
+              <span className="w-28 shrink-0 font-mono text-xs">{c.label}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.desc}</span>
+            </>
+          )}
           {!c.send && <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />}
         </button>
       ))}

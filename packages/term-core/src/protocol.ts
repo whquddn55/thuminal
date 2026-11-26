@@ -328,6 +328,16 @@ export interface ClaudeModel {
   efforts?: string[];
 }
 
+/** 이어 갈 수 있는 지난 claude 대화 하나 (`agent_sessions`) */
+export interface AgentSession {
+  /** claude 세션 id (`/resume` 에 붙일 값) */
+  id: string;
+  /** claude 가 붙인 제목. 없으면 사용자 글의 앞머리 */
+  title: string;
+  /** 기록을 마지막으로 쓴 때 (ms) */
+  modified: number;
+}
+
 /** 대화 기록에서 읽은 에이전트 상태. 이번에 읽은 줄에 없던 것은 null 이고, 화면은 앞서 받은 값을 그대로 둔다 */
 export interface ChatStatus {
   /** 마지막 답의 모델 id (`claude-sonnet-5-5`)나 `/model` 이 알린 이름 (`Sonnet 5.5`) */
