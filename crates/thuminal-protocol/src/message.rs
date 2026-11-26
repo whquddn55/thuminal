@@ -238,6 +238,10 @@ pub enum ChatItem {
         text: String,
         #[serde(default)]
         images: Vec<String>,
+        /// 기록에서 이 글의 앞 줄 (`parentUuid`). 같은 앞 줄을 가진 사용자 글이 뒤에 또 나오면 앞의 것부터는 버려진 갈래다
+        /// (멈춰서 입력창으로 되돌린 글, 되감기). 화면이 그 갈래를 감춘다. 옛 데몬은 보내지 않는다
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
     },
     /// 에이전트의 답 (마크다운)
     Assistant { id: String, at: u64, text: String },

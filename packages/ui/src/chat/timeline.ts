@@ -30,7 +30,30 @@ export interface Timeline {
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
-export function buildTimeline(items: ChatItem[]): Timeline {
+/**
+ * 버려진 갈래를 뺀다. 막 보낸 글을 멈추면(또는 되감으면) claude 는 그 글을 대화에서 빼고 입력창에 되돌려 놓는다.
+ * 기록에는 그 글이 남고, 다음 글이 같은 앞 줄(`parent`)에 다시 붙는다. 같은 앞 줄의 사용자 글이 또 나오면
+ * 앞의 것부터 그 사이는 모두 버려진 갈래다 (claude 터미널 화면에서도 사라진다)
+ */
+export function dropAbandoned(items: ChatItem[]): ChatItem[] {
+  const out: ChatItem[] = [];
+  const starts = new Map<string, number>();
+  for (const it of items) {
+    if (it.type === "user" && it.parent) {
+      const from = starts.get(it.parent);
+      if (from !== undefined) {
+        out.length = from;
+        for (const [k, v] of starts) if (v >= from) starts.delete(k);
+      }
+      starts.set(it.parent, out.length);
+    }
+    out.push(it);
+  }
+  return out;
+}
+
+export function buildTimeline(all: ChatItem[]): Timeline {
+  const items = dropAbandoned(all);
   const rows: Row[] = [];
   const calls = new Map<string, ToolCall>();
   for (const it of items) {

@@ -312,7 +312,7 @@ export interface ProcessReport {
  */
 export type ChatItem =
   /** 사용자가 보낸 글. images 는 같이 붙인 그림 id (`agentImage` 로 받는다) */
-  | { type: "user"; id: string; at: number; text: string; images?: string[] }
+  | { type: "user"; id: string; at: number; text: string; images?: string[]; /** 기록에서 이 글의 앞 줄. 같은 앞 줄의 사용자 글이 뒤에 또 오면 앞의 것부터는 버려진 갈래다 */ parent?: string | null }
   | { type: "assistant"; id: string; at: number; text: string }
   | { type: "thinking"; id: string; at: number; text: string }
   | { type: "tool_use"; id: string; at: number; name: string; input: unknown }

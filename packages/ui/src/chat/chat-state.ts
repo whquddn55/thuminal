@@ -151,9 +151,17 @@ export interface ChatSnapshot {
   error: string | null;
   /** 기록에서 읽은 모델 · 생각 강도 · 컨텍스트 (아는 것만) */
   status: ChatStatus;
+  /** 감출 조각 id: 멈춰서 입력창으로 되돌린 글 (기록에는 남지만 claude 대화에서는 빠졌다) */
+  hidden: ReadonlySet<string>;
 }
 
-const EMPTY: ChatSnapshot = { items: [], more: false, loaded: false, pending: [], error: null, status: {} };
+const EMPTY: ChatSnapshot = { items: [], more: false, loaded: false, pending: [], error: null, status: {}, hidden: new Set() };
+
+/** 되돌린 글이 기록에 늦게 나타나는 것을 기다리는 시간 (ms). 이 뒤에 같은 글을 다시 보내면 그것은 새 글이다 */
+const RETRACT_WAIT_MS = 2500;
+
+/** 줄바꿈 자리(터미널이 접은 줄)와 그림 표시를 빼고 견줄 때 쓴다 */
+export const flatText = (t: string) => t.replace(/\[Image #\d+\]/g, "").replace(/\s+/g, "");
 
 /** 새로 읽은 상태를 얹는다. 이번에 없던 값(null)은 앞서 받은 값을 둔다 */
 function mergeStatus(prev: ChatStatus, next: ChatStatus | undefined): ChatStatus {
@@ -178,6 +186,8 @@ export class ChatFeed {
   private dirty = false;
   private stale = true;
   private nextPending = 1;
+  /** 되돌렸지만 아직 기록에 나타나지 않은 글 (나타나면 감춘다) */
+  private retracting: { key: string; until: number }[] = [];
 
   constructor(
     private readonly host: HostApi,
@@ -236,7 +246,16 @@ export class ChatFeed {
         // claude 가 글을 감싸거나(붙여 넣은 글 꼬리표) 그림 표시를 붙이기도 해서 앞머리가 들어 있으면 같은 글로 본다
         const pending = arrived.length ? this.snap.pending.filter((p) => !arrived.some((t) => t.includes(norm(p.text).slice(0, 80)))) : this.snap.pending;
         release(this.snap.pending.filter((p) => !pending.includes(p)));
-        this.emit({ items, more: chat.reset ? chat.more : this.snap.more, loaded: true, pending, error: null, status: mergeStatus(chat.reset ? {} : this.snap.status, chat.status) });
+        // 되돌린 글이 이제야 기록에 나타났으면 감춘다
+        let hidden = this.snap.hidden;
+        this.retracting = this.retracting.filter((r) => r.until > Date.now());
+        for (const i of chat.items) {
+          const at = i.type === "user" ? this.retracting.findIndex((r) => r.key === flatText(i.text)) : -1;
+          if (at < 0) continue;
+          this.retracting.splice(at, 1);
+          hidden = new Set(hidden).add(i.id);
+        }
+        this.emit({ items, hidden, more: chat.reset ? chat.more : this.snap.more, loaded: true, pending, error: null, status: mergeStatus(chat.reset ? {} : this.snap.status, chat.status) });
       } while (this.dirty);
     } catch (e) {
       this.emit({ loaded: true, error: e instanceof Error ? e.message : String(e) });
@@ -245,7 +264,25 @@ export class ChatFeed {
     }
   }
 
+  /**
+   * 멈춰서 입력창으로 되돌린 글을 대화에서 감춘다. 이미 기록에 나타난 것은 바로, 아직이면 잠깐 기다렸다 나타날 때 감춘다.
+   * 다음 글이 오면 데몬이 알려 준 갈래(`parent`)로 가려지므로 다시 켜도 감춰진다
+   */
+  retract(texts: string[]) {
+    const hidden = new Set(this.snap.hidden);
+    const users = this.snap.items.flatMap((i) => (i.type === "user" ? [i] : [])).slice(-8).reverse();
+    for (const t of texts) {
+      const key = flatText(t);
+      const hit = users.find((u) => !hidden.has(u.id) && flatText(u.text) === key);
+      if (hit) hidden.add(hit.id);
+      else this.retracting.push({ key, until: Date.now() + RETRACT_WAIT_MS });
+    }
+    this.emit({ hidden });
+  }
+
   addPending(text: string, images: ChatDraft["images"] = []) {
+    // 새로 보내는 글은 되돌린 글과 같아도 감추지 않는다
+    this.retracting = [];
     this.emit({ pending: [...this.snap.pending, { id: this.nextPending++, text, at: Date.now(), images }] });
   }
 

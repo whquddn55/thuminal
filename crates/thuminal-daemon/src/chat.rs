@@ -123,7 +123,7 @@ fn notice(id: &str, at: u64, kind: &str, text: impl Into<String>) -> ChatItem {
 }
 
 /// 사용자 글 하나를 조각으로. 슬래시 명령 · 명령 출력 · 멈춤 표시는 알림으로, 그 밖은 사용자 글로 낸다
-fn user_text(id: &str, at: u64, text: &str, images: Vec<String>, out: &mut Vec<ChatItem>) {
+fn user_text(id: &str, at: u64, text: &str, images: Vec<String>, parent: Option<&str>, out: &mut Vec<ChatItem>) {
     if let Some(name) = tag(text, "command-name") {
         let args = tag(text, "command-args").unwrap_or("").trim();
         let line = if args.is_empty() { name.trim().to_string() } else { format!("{} {args}", name.trim()) };
@@ -153,7 +153,7 @@ fn user_text(id: &str, at: u64, text: &str, images: Vec<String>, out: &mut Vec<C
             let body = rest[head_end + 1..close].trim();
             let part = if n == 0 { id.to_string() } else { format!("{id}:{n}") };
             if from == "team-lead" {
-                out.push(ChatItem::User { id: part, at, text: body.to_string(), images: Vec::new() });
+                out.push(ChatItem::User { id: part, at, text: body.to_string(), images: Vec::new(), parent: None });
             } else if !body.is_empty() {
                 out.push(notice(&part, at, "teammate", format!("{from}\n{body}")));
             }
@@ -170,7 +170,7 @@ fn user_text(id: &str, at: u64, text: &str, images: Vec<String>, out: &mut Vec<C
     if text.is_empty() && images.is_empty() {
         return;
     }
-    out.push(ChatItem::User { id: id.to_string(), at, text, images });
+    out.push(ChatItem::User { id: id.to_string(), at, text, images, parent: parent.map(str::to_string) });
 }
 
 /// 도구 결과 내용(문자열이나 조각 배열)을 글로
@@ -245,6 +245,8 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
     let mut out = Vec::new();
     match v.get("type").and_then(Value::as_str) {
         Some("user") => {
+            // 사용자가 친 글에만 앞 줄을 싣는다 (화면이 버려진 갈래를 가린다)
+            let parent = v.get("parentUuid").and_then(Value::as_str);
             if flag("isCompactSummary") || flag("isVisibleInTranscriptOnly") {
                 return out;
             }
@@ -254,7 +256,7 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
                     if s.contains("<local-command-stdout>") {
                         status_from_output(&strip_ansi(s), st);
                     }
-                    user_text(id, at, s, Vec::new(), &mut out);
+                    user_text(id, at, s, Vec::new(), parent, &mut out);
                 }
                 Some(Value::Array(parts)) => {
                     let mut text = String::new();
@@ -278,7 +280,7 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
                         }
                     }
                     if !text.is_empty() || !images.is_empty() {
-                        user_text(id, at, &text, images, &mut out);
+                        user_text(id, at, &text, images, parent, &mut out);
                     }
                 }
                 _ => {}
@@ -346,7 +348,7 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
                 }
                 Some("local_command") => {
                     status_from_output(&strip_ansi(content), st);
-                    user_text(id, at, content, Vec::new(), &mut out);
+                    user_text(id, at, content, Vec::new(), None, &mut out);
                 }
                 Some("informational") if !content.is_empty() => out.push(notice(id, at, "info", clip(content, RESULT_MAX).0)),
                 Some("api_error") => {
@@ -364,10 +366,10 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
             let get = |k: &str| a.and_then(|a| a.get(k)).and_then(Value::as_str);
             if get("type") == Some("queued_command") && get("commandMode") == Some("prompt") {
                 match a.and_then(|a| a.get("prompt")) {
-                    Some(Value::String(s)) => user_text(id, at, s, Vec::new(), &mut out),
+                    Some(Value::String(s)) => user_text(id, at, s, Vec::new(), None, &mut out),
                     Some(Value::Array(parts)) => {
                         let text: Vec<&str> = parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect();
-                        user_text(id, at, &text.join("\n"), Vec::new(), &mut out);
+                        user_text(id, at, &text.join("\n"), Vec::new(), None, &mut out);
                     }
                     _ => {}
                 }
@@ -563,7 +565,7 @@ mod tests {
     #[test]
     fn user_lines() {
         let got = items(json!({"type":"user","uuid":"u1","timestamp":"2026-11-20T04:29:28.542Z","message":{"role":"user","content":"고쳐 줘"}}));
-        assert_eq!(got, vec![ChatItem::User { id: "u1".into(), at: 1_795_148_968_542, text: "고쳐 줘".into(), images: vec![] }]);
+        assert_eq!(got, vec![ChatItem::User { id: "u1".into(), at: 1_795_148_968_542, text: "고쳐 줘".into(), images: vec![], parent: None }]);
         // 동반 줄 · 서브에이전트 · 압축 요약은 뺀다
         assert!(items(json!({"type":"user","uuid":"u","isMeta":true,"message":{"content":"스킬 본문"}})).is_empty());
         assert!(items(json!({"type":"user","uuid":"u","isSidechain":true,"message":{"content":"x"}})).is_empty());
@@ -580,18 +582,18 @@ mod tests {
         let l = line(json!({"type":"user","uuid":"p","message":{"content":[
             {"type":"text","text":"<system-reminder>몰라도 됨</system-reminder>이것 봐"},
             {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}}));
-        assert_eq!(items_in_line(&l, 77), vec![ChatItem::User { id: "p".into(), at: 0, text: "이것 봐".into(), images: vec!["77:1".into()] }]);
+        assert_eq!(items_in_line(&l, 77), vec![ChatItem::User { id: "p".into(), at: 0, text: "이것 봐".into(), images: vec!["77:1".into()], parent: None }]);
         // 팀원이 보낸 글은 알림, 리더가 준 일은 프롬프트
         let got = items(json!({"type":"user","uuid":"m","message":{"content":"Another Claude session sent a message:\n<teammate-message teammate_id=\"scout\" color=\"blue\" summary=\"요약\">\n다 했다\n</teammate-message>\n\nThis came from another Claude session"}}));
         assert_eq!(got, vec![notice("m", 0, "teammate", "scout\n다 했다")]);
         let got = items(json!({"type":"user","uuid":"m","message":{"content":"<teammate-message teammate_id=\"team-lead\">\n읽어라\n</teammate-message>"}}));
-        assert_eq!(got, vec![ChatItem::User { id: "m".into(), at: 0, text: "읽어라".into(), images: vec![] }]);
+        assert_eq!(got, vec![ChatItem::User { id: "m".into(), at: 0, text: "읽어라".into(), images: vec![], parent: None }]);
         // 붙여 넣은 글의 꼬리표는 뺀다
         let got = items(json!({"type":"user","uuid":"pc","message":{"content":"<pasted_content id=\"f3ac\">\n아래를 해 줘.\n1. ls\n</pasted_content id=\"f3ac\">"}}));
-        assert_eq!(got, vec![ChatItem::User { id: "pc".into(), at: 0, text: "아래를 해 줘.\n1. ls".into(), images: vec![] }]);
+        assert_eq!(got, vec![ChatItem::User { id: "pc".into(), at: 0, text: "아래를 해 줘.\n1. ls".into(), images: vec![], parent: None }]);
         // 줄 서 있다가 들어간 글
         let got = items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"하나 더"}}));
-        assert_eq!(got, vec![ChatItem::User { id: "q".into(), at: 0, text: "하나 더".into(), images: vec![] }]);
+        assert_eq!(got, vec![ChatItem::User { id: "q".into(), at: 0, text: "하나 더".into(), images: vec![], parent: None }]);
         assert!(items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>"}})).is_empty());
     }
 

@@ -53,3 +53,16 @@ describe("claude 터미널 화면의 입력창 읽기", () => {
     expect(tuiInputBox("Do you want to proceed?\n❯ 1. Yes")).toBeNull();
   });
 });
+
+describe("버려진 갈래 가리기", () => {
+  it("같은 앞 줄의 사용자 글이 또 오면 앞의 것부터 그 사이를 뺀다", async () => {
+    const { dropAbandoned } = await import("../src/chat/timeline");
+    const u = (id: string, parent: string | null, text = id) => ({ type: "user" as const, id, at: 0, text, parent });
+    const a = (id: string) => ({ type: "assistant" as const, id, at: 0, text: id });
+    // u1 → 답 → (u2 보냈다 멈춰 되돌림) → u3 가 u2 와 같은 앞 줄에 붙는다
+    const got = dropAbandoned([u("u1", "root"), a("a1"), u("u2", "a1"), a("partial"), u("u3", "a1"), a("a3")]);
+    expect(got.map((i) => i.id)).toEqual(["u1", "a1", "u3", "a3"]);
+    // 앞 줄을 모르는 글(옛 데몬)은 그대로 둔다
+    expect(dropAbandoned([u("x", null), u("y", null)]).map((i) => i.id)).toEqual(["x", "y"]);
+  });
+});

@@ -20,7 +20,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn } from "../lib/utils";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
-import { type ChatDraft, chatFeed, type ChatFeed, draftKey, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
+import { type ChatDraft, chatFeed, type ChatFeed, draftKey, flatText as flat, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
 import { claudeCommands, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
 import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary, tuiInputBox } from "./timeline";
 
@@ -47,12 +47,10 @@ function agoLabel(at: number): string {
 /** 멈춘 뒤 claude 가 글을 입력창에 되돌려 놓았는지 보는 때 (앞 확인부터 잰 ms) */
 const RESTORE_CHECKS_MS = [350, 500, 800];
 
-/** 줄바꿈 자리(터미널이 접은 줄)와 그림 표시를 빼고 견준다 */
-const flat = (t: string) => t.replace(/\[Image #\d+\]/g, "").replace(/\s+/g, "");
-
 /** 세션에 키 · 글을 보내는 것들 */
 function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
   return useMemo(() => {
+    let reclaims = 0;
     // 대화 보기는 터미널에 붙지 않는다. 붙은 세션에만 닿는 `input` 대신 요청(`send_text`)으로 넣는다
     const raw = (text: string) => host.sendText(session, text);
     const keys = async (list: string[]) => {
@@ -89,18 +87,37 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
        * 화면의 입력창 글이 우리가 보낸 글과 같을 때만 한다 (claude 가 흐리게 보이는 제안 글 · 터미널에서 직접 친 글은 건드리지 않는다)
        */
       interruptAndReclaim: async (): Promise<ChatDraft | null> => {
+        // 잇달아 멈추면 맨 나중 것만 입력창을 비운다 (⌃C 가 두 번 가면 claude 가 끝난다)
+        const mine = ++reclaims;
         await raw("\x1b");
         for (const wait of RESTORE_CHECKS_MS) {
           await new Promise((r) => setTimeout(r, wait));
           const box = tuiInputBox(await host.readScreen(session, false).catch(() => ""));
+          if (mine !== reclaims) return null;
           if (!box) continue;
+          const want = flat(box);
+          const withImage = /\[Image #\d+\]/.test(box);
+          if (!want && !withImage) continue;
           const snap = feed.get();
-          const pending = [...snap.pending].reverse().find((p) => flat(p.text) === flat(box) && (p.text || p.images.length));
-          const sent = pending ? null : [...snap.items].reverse().find((i) => i.type === "user");
-          const text = pending?.text ?? (sent?.type === "user" && flat(sent.text) === flat(box) ? sent.text : null);
-          if (text === null) continue;
+          // 줄 서 있던 글 여럿은 한 덩어리로 돌아온다. 끝에서부터 이어 붙여 같은 것을 찾는다
+          const tail = <T,>(list: T[], text: (x: T) => string): T[] | null => {
+            for (let k = 1; k <= list.length; k++) {
+              const run = list.slice(-k);
+              if (flat(run.map(text).join("")) === want) return run;
+            }
+            return null;
+          };
+          const pending = tail(snap.pending, (p) => p.text);
+          // 그림만 보낸 글은 글이 비어 있어 그림 표시로 가린다
+          if (pending && !want && !pending.some((p) => p.images.length)) continue;
+          const sent = pending ? null : want ? tail(snap.items.flatMap((i) => (i.type === "user" ? [i.text] : [])).slice(-4), (t) => t) : null;
+          if (!pending && !sent) continue;
           await raw("\x03");
-          return { text, images: (pending && feed.takePending(pending.id)?.images) || [] };
+          const taken = (pending ?? []).map((p) => feed.takePending(p.id) ?? p);
+          const texts = (pending ? taken.map((p) => p.text) : sent!).filter(Boolean);
+          // claude 대화에서는 빠진 글이다. 말풍선으로 남기지 않는다
+          feed.retract(texts);
+          return { text: texts.join("\n"), images: taken.flatMap((p) => p.images) };
         }
         return null;
       },
@@ -135,7 +152,7 @@ export function ChatView({
   const send = useSender(host, session, feed);
   // 쓰다 만 글은 세션마다 따로 둔다 (칸이 사라졌다 돌아와도 남는다)
   const draft = draftKey(model.hostKey, session, useApp((s) => s.sessions[session]?.created_at ?? 0));
-  const timeline = useMemo(() => buildTimeline(snap.items), [snap.items]);
+  const timeline = useMemo(() => buildTimeline(snap.hidden.size ? snap.items.filter((i) => !snap.hidden.has(i.id)) : snap.items), [snap.items, snap.hidden]);
 
   const actions = useMemo<ChatActions>(
     () => ({
