@@ -1,6 +1,6 @@
 // 오른쪽 아래에 쌓아 띄우는 카드: 오류와 알릴 것 (store.ts `toasts`). 저절로 사라지고, 마우스를 올려 둔 동안은 남는다.
 
-import { CheckIcon, CopyIcon, InfoIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
+import { CheckIcon, CopyIcon, XIcon } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "./lib/utils";
@@ -33,6 +33,7 @@ function ToastCard({ toast }: { toast: Toast }) {
   }, [hover, toast.id, toast.kind, model]);
   const error = toast.kind === "error";
   const icon = "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground";
+  const body = "thm-scroll max-h-52 cursor-text overflow-y-auto text-[13px] leading-relaxed break-words whitespace-pre-wrap select-text";
   return (
     <div
       data-browser-cover
@@ -44,16 +45,26 @@ function ToastCard({ toast }: { toast: Toast }) {
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
     >
-      <div className="flex items-center gap-1.5">
-        {error ? <WarningCircleIcon weight="fill" className="size-4 shrink-0 text-destructive" /> : <InfoIcon weight="fill" className="size-4 shrink-0 text-muted-foreground" />}
-        <span className="min-w-0 flex-1 text-sm font-semibold">{error ? "오류" : "알림"}</span>
-        {error && <CopyButton text={toast.text} className={icon} />}
-        <button className={icon} aria-label="닫기" onClick={close}>
-          <XIcon className="size-4" />
-        </button>
-      </div>
       {/* 글은 골라 복사할 수 있다 (경로가 든 오류를 claude 에게 그대로 넘기게) */}
-      <div className="thm-scroll max-h-52 cursor-text overflow-y-auto text-[13px] leading-relaxed break-words whitespace-pre-wrap select-text">{toast.text}</div>
+      {error ? (
+        <>
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 text-sm font-semibold text-destructive">오류</span>
+            <CopyButton text={toast.text} className={icon} />
+            <button className={icon} aria-label="닫기" onClick={close}>
+              <XIcon className="size-4" />
+            </button>
+          </div>
+          <div className={body}>{toast.text}</div>
+        </>
+      ) : (
+        <div className="flex items-start gap-1.5">
+          <div className={cn(body, "min-w-0 flex-1 py-0.5")}>{toast.text}</div>
+          <button className={icon} aria-label="닫기" onClick={close}>
+            <XIcon className="size-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

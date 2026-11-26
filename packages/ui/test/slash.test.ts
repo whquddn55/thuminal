@@ -67,18 +67,14 @@ describe("버려진 갈래 가리기", () => {
   });
 });
 
-describe("스킬 · 명령 이름표", () => {
-  it("종류와 출처를 한 줄로 적는다", async () => {
-    const { commandTag, defPath: shortPath } = await import("../src/chat/slash");
-    expect(commandTag({ name: "brand", kind: "skill", source: "project" })).toBe("스킬 · 프로젝트");
-    expect(commandTag({ name: "ship", kind: "command", source: "user" })).toBe("명령 · 사용자");
-    expect(commandTag({ name: "thuthi:setup", kind: "skill", source: "user", plugin: "thuthi" })).toBe("스킬 · thuthi 플러그인 · 사용자");
-    expect(commandTag({ name: "x:y", kind: "command", source: "local", plugin: "x" })).toBe("명령 · x 플러그인 · 로컬");
-    expect(commandTag({ name: "docx", kind: "skill", source: "account" })).toBe("스킬 · 사용자(계정)");
-    // 옛 데몬: 출처가 없으면 이름의 앞머리로 플러그인만 안다
-    expect(commandTag({ name: "thuthi:setup" })).toBe("thuthi 플러그인");
-    expect(commandTag({ name: "docx" })).toBe("");
-    expect(shortPath("/Users/a/work/repo/.claude/skills/brand/SKILL.md", "/Users/a/work/repo")).toBe(".claude/skills/brand/SKILL.md");
-    expect(shortPath("/Users/a/.claude/skills/mine/SKILL.md", "/Users/a/work/repo")).toBe("~/.claude/skills/mine/SKILL.md");
+describe("스킬 · 명령의 종류와 범위", () => {
+  it("종류와 정의된 범위를 따로 준다", async () => {
+    const { commandTags } = await import("../src/chat/slash");
+    expect(commandTags({ kind: "skill", source: "project" })).toEqual({ kind: "스킬", scope: "프로젝트" });
+    expect(commandTags({ kind: "command", source: "user" })).toEqual({ kind: "명령", scope: "사용자" });
+    expect(commandTags({ kind: "skill", source: "local" })).toEqual({ kind: "스킬", scope: "로컬" });
+    expect(commandTags({ kind: "skill", source: "account" })).toEqual({ kind: "스킬", scope: "계정" });
+    // 옛 데몬은 둘 다 주지 않는다
+    expect(commandTags({})).toEqual({ kind: "", scope: "" });
   });
 });

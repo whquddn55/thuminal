@@ -7,7 +7,7 @@
 //   값을 붙여 보내면(`/model sonnet`) claude 가 고르는 창을 띄우지 않고 바로 바꾼다. 값 없이는 보내지 않는다.
 //   `/resume` 의 값은 데몬이 읽어 준 지난 대화 목록이다 (받지 못했으면 목록에 올리지 않는다).
 // - 스킬 · 사용자 명령은 데몬이 claude 에게 물어 받은 것을 그 뒤에 잇는다 (claude 의 `/` 목록과 같다).
-//   줄마다 무엇이고 어디에 정의됐는지(`tag`: "스킬 · 프로젝트")와 정의 파일(`where`)을 같이 보인다.
+//   줄마다 종류(`kind`: 스킬 · 명령 · 내장)와 정의된 범위(`scope`: 프로젝트 · 사용자 …)를 칸으로 보인다. 정의 파일(`where`)은 툴팁이다.
 // - 목록에 없는 명령(/config …)은 쳐서 보낼 수 있지만 claude 가 터미널 화면에 창을 띄운다. 그때는 원본에서 잇는다.
 
 export interface SlashChoice {
@@ -22,30 +22,23 @@ export interface SlashCommand {
   desc: string;
   /** 붙여 보낼 수 있는 값. 값을 붙이면 창 없이 바로 된다 */
   args?: SlashChoice[];
-  /** 무엇이고 어느 범위에 정의됐는지 ("내장", "스킬 · 프로젝트", "명령 · thuthi 플러그인 · 사용자") */
-  tag?: string;
+  /** 종류: "내장" · "스킬" · "명령" */
+  kind?: string;
+  /** 정의된 범위: "프로젝트" · "사용자" · "로컬" … (플러그인 것은 플러그인을 설치한 범위) */
+  scope?: string;
   /** 정의 파일 경로 (스킬 · 사용자 명령) */
   where?: string;
 }
 
 /** 정의된 범위의 화면 이름 */
-const SCOPES: Record<string, string> = { managed: "조직", project: "프로젝트", user: "사용자", local: "로컬", account: "사용자(계정)", app: "앱" };
+const SCOPES: Record<string, string> = { managed: "조직", project: "프로젝트", user: "사용자", local: "로컬", account: "계정", app: "앱" };
 
 /**
- * 스킬 · 사용자 명령의 종류, 플러그인, 정의된 범위를 한 줄 이름표로. 스킬 · 명령 파일의 범위는 조직 · 사용자 · 프로젝트이고,
- * 로컬은 플러그인을 그 폴더에서 나만 쓰게 설치했을 때만 있다
+ * 스킬 · 사용자 명령의 종류와 정의된 범위. 스킬 · 명령 파일의 범위는 조직 · 사용자 · 프로젝트이고,
+ * 로컬은 플러그인을 그 폴더에서 나만 쓰게 설치했을 때만 있다. 플러그인 이름은 명령 이름(`플러그인:이름`)에 이미 있어 적지 않는다
  */
-export function commandTag(c: { name: string; kind?: string; source?: string; plugin?: string }): string {
-  const kind = c.kind === "skill" ? "스킬" : c.kind === "command" ? "명령" : "";
-  // 옛 데몬은 플러그인 이름을 주지 않는다. `플러그인:이름` 꼴이면 이름에서 읽는다
-  const plugin = c.plugin || (c.name.includes(":") && !c.source ? c.name.split(":")[0] : "");
-  return [kind, plugin && `${plugin} 플러그인`, SCOPES[c.source ?? ""]].filter(Boolean).join(" · ");
-}
-
-/** 정의 파일 경로를 짧게: 워크트리 안이면 그 밑 경로, 홈 폴더 안이면 `~/…` */
-export function defPath(path: string, root?: string): string {
-  if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
-  return path.replace(/^\/(?:Users|home)\/[^/]+\//, "~/").replace(/^[A-Za-z]:\\Users\\[^\\]+\\/, "~\\");
+export function commandTags(c: { kind?: string; source?: string }): { kind: string; scope: string } {
+  return { kind: c.kind === "skill" ? "스킬" : c.kind === "command" ? "명령" : "", scope: SCOPES[c.source ?? ""] ?? "" };
 }
 
 /** 모델 목록을 claude 에게서 받지 못했을 때 쓰는 이름 (claude 가 받는 줄임 이름) */
@@ -82,7 +75,7 @@ export function claudeCommands(
     { name: "review", desc: "지금 변경을 리뷰" },
     { name: "exit", desc: "claude 를 끝내고 터미널로" },
   ];
-  const own = builtin.map((c) => ({ ...c, tag: "내장" }));
+  const own = builtin.map((c) => ({ ...c, kind: "내장" }));
   return [...own, ...skills.filter((s) => !own.some((c) => c.name === s.name))];
 }
 
@@ -95,8 +88,9 @@ export interface SlashItem {
   send: boolean;
   /** 이름이 긴 글(대화 제목)이다: 이름에 자리를 넓게 주고 설명은 오른쪽 끝에 둔다 */
   wide?: boolean;
-  /** 명령의 이름표와 정의 파일 (`SlashCommand` 것 그대로) */
-  tag?: string;
+  /** 명령의 종류 · 범위 · 정의 파일 (`SlashCommand` 것 그대로) */
+  kind?: string;
+  scope?: string;
   where?: string;
 }
 
@@ -125,7 +119,8 @@ export function slashItems(text: string, commands: SlashCommand[]): SlashItem[] 
     // 값이 있는 명령은 값 목록으로 넘어간다
     text: c.args ? `/${c.name} ` : `/${c.name}`,
     send: !c.args,
-    tag: c.tag,
+    kind: c.kind,
+    scope: c.scope,
     where: c.where,
   }));
 }
