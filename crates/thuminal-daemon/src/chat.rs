@@ -379,7 +379,14 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
                     Some(Value::String(s)) => user_text(id, at, s, Vec::new(), None, &mut out),
                     Some(Value::Array(parts)) => {
                         let text: Vec<&str> = parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect();
-                        user_text(id, at, &text.join("\n"), Vec::new(), None, &mut out);
+                        // 같이 붙인 그림은 줄 위치와 조각 차례로 가리킨다 (`images.rs` 가 그 줄만 다시 읽는다)
+                        let images = parts
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| !sidechain && p.get("type").and_then(Value::as_str) == Some("image") && p.pointer("/source/type").and_then(Value::as_str) == Some("base64"))
+                            .map(|(j, _)| format!("qc:{pos}:{j}"))
+                            .collect();
+                        user_text(id, at, &text.join("\n"), images, None, &mut out);
                     }
                     _ => {}
                 }
@@ -605,6 +612,10 @@ mod tests {
         let got = items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"하나 더"}}));
         assert_eq!(got, vec![ChatItem::User { id: "q".into(), at: 0, text: "하나 더".into(), images: vec![], parent: None }]);
         assert!(items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>"}})).is_empty());
+        // 그림을 붙여 보낸 글: 그림은 줄 위치와 조각 차례로 가리킨다
+        let got = items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"prompt","prompt":[
+            {"type":"text","text":"[Image #3] 봐"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]}}));
+        assert_eq!(got, vec![ChatItem::User { id: "q".into(), at: 0, text: "[Image #3] 봐".into(), images: vec!["qc:0:1".into()], parent: None }]);
     }
 
     #[test]

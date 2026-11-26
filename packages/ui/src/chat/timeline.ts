@@ -106,7 +106,8 @@ export function toolSummary(t: ToolCall): string {
   const first = (s: string) => s.split("\n")[0];
   switch (t.name) {
     case "Bash":
-      return first(str(i.command));
+      // claude 터미널 화면처럼 claude 가 붙인 설명을 먼저 보인다 (명령은 펴면 보인다)
+      return str(i.description) || first(str(i.command));
     case "Read":
     case "Write":
     case "Edit":

@@ -495,7 +495,10 @@ function ToolRow({
           )}
         </span>
         <span className="shrink-0 font-mono text-xs font-medium">{tool.name}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{summary}</span>
+        <span className={cn("min-w-0 flex-1 truncate text-xs text-muted-foreground", !(tool.name === "Bash" && str(tool.input.description)) && "font-mono")} title={tool.name === "Bash" ? str(tool.input.command) : undefined}>
+          {summary}
+        </span>
+        {running && <Elapsed since={tool.at} />}
         <CaretRightIcon className={cn("size-3 shrink-0 text-muted-foreground opacity-0 transition-transform group-hover:opacity-100", open && "rotate-90 opacity-100")} />
       </button>
       {/* 결과에 든 그림(Read 로 그림 파일을 읽었을 때 등)은 접어 둔 채로도 보인다 */}
@@ -514,6 +517,17 @@ function ToolRow({
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+/** 도는 도구에 걸린 시간 (1초마다 다시 그린다) */
+function Elapsed({ since }: { since: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  if (!since) return null;
+  return <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">{duration(Math.max(0, Date.now() - since))}</span>;
+}
 /** claude 에게만 주는 안내라 보여 줄 것이 없는 도구 결과 (서브에이전트 · 팀원을 띄웠다는 알림) */
 const INTERNAL_RESULT = /^(Async agent launched successfully|Spawned successfully)/;
 
