@@ -293,8 +293,9 @@ pub struct ClaudeCommand {
     /// 무엇인지: `skill`(`SKILL.md`) · `command`(명령 md). 정의 파일을 찾지 못했으면 빈 글 (아래 셋도 minor 13 의 뒤 빌드부터)
     #[serde(default)]
     pub kind: String,
-    /// 어느 범위에 정의됐는지: `project`(폴더의 `.claude`) · `user`(`~/.claude`) · `local`(그 폴더에서 나만 쓰게 깐 플러그인) ·
-    /// `account`(claude.ai 계정에서 내려받은 스킬) · `app`(thuminal 이 얹는 플러그인). 플러그인 것은 플러그인을 설치한 범위다. 모르면 빈 글
+    /// 어느 범위에 정의됐는지: `managed`(조직이 관리하는 폴더) · `user`(`~/.claude`) · `project`(폴더의 `.claude`) ·
+    /// `account`(claude.ai 계정에서 내려받은 스킬). 플러그인 것은 플러그인을 설치한 범위다: `user` · `project` ·
+    /// `local`(그 폴더에서 나만 쓰게 깐 것. 스킬 자체에는 없는 범위다) · `app`(thuminal 이 얹는 플러그인). 모르면 빈 글
     #[serde(default)]
     pub source: String,
     /// 플러그인 이름 (플러그인이 준 것일 때)

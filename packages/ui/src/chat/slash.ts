@@ -29,9 +29,12 @@ export interface SlashCommand {
 }
 
 /** 정의된 범위의 화면 이름 */
-const SCOPES: Record<string, string> = { project: "프로젝트", user: "사용자", local: "로컬", account: "사용자(계정)", app: "앱" };
+const SCOPES: Record<string, string> = { managed: "조직", project: "프로젝트", user: "사용자", local: "로컬", account: "사용자(계정)", app: "앱" };
 
-/** 스킬 · 사용자 명령의 종류, 플러그인, 정의된 범위(프로젝트 · 사용자 · 로컬)를 한 줄 이름표로 */
+/**
+ * 스킬 · 사용자 명령의 종류, 플러그인, 정의된 범위를 한 줄 이름표로. 스킬 · 명령 파일의 범위는 조직 · 사용자 · 프로젝트이고,
+ * 로컬은 플러그인을 그 폴더에서 나만 쓰게 설치했을 때만 있다
+ */
 export function commandTag(c: { name: string; kind?: string; source?: string; plugin?: string }): string {
   const kind = c.kind === "skill" ? "스킬" : c.kind === "command" ? "명령" : "";
   // 옛 데몬은 플러그인 이름을 주지 않는다. `플러그인:이름` 꼴이면 이름에서 읽는다

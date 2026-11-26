@@ -191,11 +191,17 @@ fn plugin_dirs(home: &Path, extra: Option<&Path>, cwd: &Path) -> Vec<PluginDir> 
             let name = key.split('@').next().unwrap_or(key);
             let entries: Vec<&Value> = entries.as_array().map(|a| a.iter().collect()).unwrap_or_else(|| vec![entries]);
             let text = |e: &Value, k: &str| e.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-            let rank = |e: &&Value| match (text(e, "scope").as_str(), e.get("projectPath").and_then(Value::as_str)) {
-                ("local", Some(p)) if cwd.starts_with(p) => Some(0),
-                ("project", Some(p)) if cwd.starts_with(p) => Some(1),
-                ("local" | "project", _) => None,
-                _ => Some(2),
+            // 프로젝트 · 로컬 것에 폴더가 적혀 있으면 그 밑에서만 잡는다 (폴더가 없는 기록이면 그대로 받는다)
+            let rank = |e: &&Value| {
+                let order = match text(e, "scope").as_str() {
+                    "local" => 0,
+                    "project" => 1,
+                    _ => 2,
+                };
+                match e.get("projectPath").and_then(Value::as_str) {
+                    Some(p) if order < 2 && !cwd.starts_with(p) => None,
+                    _ => Some(order),
+                }
             };
             let best = entries.iter().filter_map(|e| rank(e).map(|r| (r, e))).min_by_key(|(r, _)| *r);
             if let Some((_, e)) = best
@@ -229,11 +235,29 @@ fn find_def(base: &Path, name: &str) -> Option<(&'static str, PathBuf)> {
     walk(&base.join("commands"), &format!("{name}.md"), 2).map(|p| ("command", p))
 }
 
-/// 스킬 · 명령의 정의 파일을 찾아 종류 · 범위 · 경로를 채운다. 찾는 차례는 claude 가 읽는 곳과 같다:
-/// `플러그인:이름` 은 그 플러그인 폴더(범위는 플러그인을 설치한 범위), 나머지는 `cwd` 와 그 위 폴더들의 `.claude`(프로젝트) →
-/// claude 설정 폴더(사용자) → 설정 폴더의 `skills/synced/*`(claude.ai 계정에서 내려받은 스킬).
-/// 못 찾으면 claude 가 설명에 적어 준 것만 남는다
+/// 조직이 관리하는 설정 폴더 (그 밑 `.claude/skills` 에 조직 스킬이 있다). 문서에는 Linux 경로만 적혀 있고,
+/// macOS · Windows 는 관리 설정 파일이 있는 폴더를 같은 식으로 본다
+fn managed_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        PathBuf::from("/Library/Application Support/ClaudeCode")
+    } else if cfg!(windows) {
+        PathBuf::from(r"C:\Program Files\ClaudeCode")
+    } else {
+        PathBuf::from("/etc/claude-code")
+    }
+}
+
+/// 스킬 · 명령의 정의 파일을 찾아 종류 · 범위 · 경로를 채운다. claude 가 스킬을 읽는 곳을 문서의 우선순위대로 본다
+/// (code.claude.com/docs/en/skills): 조직(관리 폴더) → 사용자(claude 설정 폴더) → 프로젝트(`cwd` 와 그 위 폴더들의 `.claude`)
+/// → claude.ai 계정에서 내려받은 스킬(`skills/synced/*`). claude 가 설명에 범위를 적어 줬으면 그곳을 먼저 본다.
+/// `플러그인:이름` 은 그 플러그인 폴더이고 범위는 플러그인을 설치한 범위다 (스킬 자체에는 로컬 범위가 없다).
+/// 플러그인이 아닌 `a:b` 는 하위 폴더의 명령(`commands/a/b.md`)이나 하위 폴더의 스킬(`a/.claude/skills/b`)이다.
+/// `--add-dir` 로 더한 폴더의 것은 데몬이 알 수 없어 못 찾는다. 못 찾으면 claude 가 설명에 적어 준 것만 남는다
 pub fn locate(c: &mut ClaudeCommand, cwd: &Path, home: &Path, plugins: &[PluginDir]) {
+    locate_in(c, cwd, home, &managed_dir().join(".claude"), plugins)
+}
+
+fn locate_in(c: &mut ClaudeCommand, cwd: &Path, home: &Path, managed: &Path, plugins: &[PluginDir]) {
     let set = |c: &mut ClaudeCommand, source: &str, plugin: &str, hit: Option<(&'static str, PathBuf)>| {
         c.source = source.to_string();
         c.plugin = plugin.to_string();
@@ -247,27 +271,55 @@ pub fn locate(c: &mut ClaudeCommand, cwd: &Path, home: &Path, plugins: &[PluginD
         let dirs = std::fs::read_dir(home.join("skills/synced")).ok()?;
         dirs.flatten().map(|e| e.path().join(name).join("SKILL.md")).filter(|p| p.is_file()).max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok()).map(|p| ("skill", p))
     };
-    if let Some((prefix, rest)) = c.name.clone().split_once(':') {
+    let name = c.name.clone();
+    if let Some((prefix, rest)) = name.split_once(':') {
         if let Some(p) = plugins.iter().find(|p| p.name == prefix) {
             return set(c, &p.scope, prefix, find_def(&p.dir, rest));
         }
         if let Some(hit) = synced(rest) {
             return set(c, "account", "", Some(hit));
         }
-        return;
+        // 플러그인 것이 아니다 (claude 가 붙여 준 플러그인 이름은 지운다)
+        c.plugin.clear();
     }
-    let name = c.name.clone();
     // 홈 폴더의 `.claude` 는 사용자 것이라 프로젝트로 치지 않는다
     let user_root = home.parent();
-    for dir in cwd.ancestors().take_while(|d| Some(*d) != user_root) {
-        if let Some(hit) = find_def(&dir.join(".claude"), &name) {
-            return set(c, "project", "", Some(hit));
+    let project_dirs: Vec<&Path> = cwd.ancestors().take_while(|d| Some(*d) != user_root).collect();
+    // `a/b:c` 는 하위 폴더 `a/b` 의 스킬 `c` 이거나 명령 `commands/a/b/c.md` 다
+    let (sub, leaf) = name.rsplit_once(':').map_or(("", name.as_str()), |(a, b)| (a, b));
+    let sub: PathBuf = sub.split([':', '/']).filter(|p| !p.is_empty() && *p != "..").collect();
+    let in_base = |base: &Path| -> Option<(&'static str, PathBuf)> {
+        if sub.as_os_str().is_empty() {
+            return find_def(base, leaf);
+        }
+        let cmd = base.join("commands").join(&sub).join(format!("{leaf}.md"));
+        cmd.is_file().then_some(("command", cmd))
+    };
+    let project = || -> Option<(&'static str, PathBuf)> {
+        project_dirs.iter().find_map(|d| {
+            in_base(&d.join(".claude")).or_else(|| {
+                let nested = d.join(&sub).join(".claude/skills").join(leaf).join("SKILL.md");
+                (!sub.as_os_str().is_empty() && nested.is_file()).then_some(("skill", nested))
+            })
+        })
+    };
+    let hint = c.source.clone();
+    let order: [&str; 3] = match hint.as_str() {
+        "project" => ["project", "managed", "user"],
+        "user" => ["user", "managed", "project"],
+        _ => ["managed", "user", "project"],
+    };
+    for scope in order {
+        let hit = match scope {
+            "managed" => in_base(managed),
+            "user" => in_base(home),
+            _ => project(),
+        };
+        if hit.is_some() {
+            return set(c, scope, "", hit);
         }
     }
-    if let Some(hit) = find_def(home, &name) {
-        return set(c, "user", "", Some(hit));
-    }
-    if let Some(hit) = synced(&name) {
+    if let Some(hit) = synced(leaf).filter(|_| sub.as_os_str().is_empty()) {
         set(c, "account", "", Some(hit));
     }
 }
@@ -338,7 +390,7 @@ mod tests {
         let plugins = vec![PluginDir { name: "thuthi".into(), dir: root.join("plugins/thuthi"), scope: "local".into() }];
         let find = |name: &str| {
             let mut c = ClaudeCommand { name: name.into(), description: String::new(), argument_hint: String::new(), kind: String::new(), source: String::new(), plugin: String::new(), path: String::new() };
-            locate(&mut c, &cwd, &home, &plugins);
+            locate_in(&mut c, &cwd, &home, &root.join("managed/.claude"), &plugins);
             (c.kind, c.source, c.plugin, c.path)
         };
         let s = |a: &str, b: &str, c: &str, d: &str| (a.to_string(), b.to_string(), c.to_string(), d.to_string());
@@ -352,6 +404,20 @@ mod tests {
         // 플러그인 폴더는 알지만 정의 파일이 없으면 출처만 남는다
         assert_eq!(find("thuthi:gone"), s("", "local", "thuthi", ""));
         assert_eq!(find("nowhere"), s("", "", "", ""));
+        // 하위 폴더의 명령은 `폴더:이름`, 하위 폴더의 스킬은 `폴더:이름` 으로 뜬다
+        let nested_cmd = touch("home/work/repo/.claude/commands/frontend/component.md");
+        let nested_skill = touch("home/work/repo/apps/web/.claude/skills/deploy/SKILL.md");
+        assert_eq!(find("frontend:component"), s("command", "project", "", &nested_cmd));
+        assert_eq!(find("apps/web:deploy"), s("skill", "project", "", &nested_skill));
+        // 같은 이름이면 조직 → 사용자 → 프로젝트 차례다 (문서의 우선순위)
+        let user_brand = touch("home/.claude/skills/brand/SKILL.md");
+        assert_eq!(find("brand"), s("skill", "user", "", &user_brand));
+        let managed_brand = touch("managed/.claude/skills/brand/SKILL.md");
+        assert_eq!(find("brand"), s("skill", "managed", "", &managed_brand));
+        // claude 가 설명에 범위를 적어 줬으면 그곳 것이다
+        let mut hinted = ClaudeCommand { name: "brand".into(), description: String::new(), argument_hint: String::new(), kind: String::new(), source: "project".into(), plugin: String::new(), path: String::new() };
+        locate_in(&mut hinted, &cwd, &home, &root.join("managed/.claude"), &plugins);
+        assert_eq!((hinted.source.as_str(), hinted.path.as_str()), ("project", project_skill.as_str()));
 
         // 설치 기록: 프로젝트 · 로컬 것은 그 폴더 밑에서만 잡히고 사용자 것보다 먼저다
         let proj = root.join("home/work/repo");
@@ -359,12 +425,13 @@ mod tests {
         let installed = serde_json::json!({ "version": 2, "plugins": {
             "a@m": [{ "scope": "user", "installPath": "/u/a" }, { "scope": "local", "projectPath": proj.to_str().unwrap(), "installPath": "/l/a" }],
             "b@m": [{ "scope": "project", "projectPath": "/somewhere/else", "installPath": "/p/b" }],
+            "d@m": [{ "scope": "local", "installPath": "/l/d" }],
             "c@m": [{ "scope": "user", "installPath": "/u/c" }],
         }});
         std::fs::write(home.join("plugins/installed_plugins.json"), installed.to_string()).unwrap();
         let mut got: Vec<(String, String, String)> = plugin_dirs(&home, None, &cwd).into_iter().map(|p| (p.name, p.scope, p.dir.to_string_lossy().into_owned())).collect();
         got.sort();
-        assert_eq!(got, vec![("a".into(), "local".into(), "/l/a".into()), ("c".into(), "user".into(), "/u/c".into())]);
+        assert_eq!(got, vec![("a".into(), "local".into(), "/l/a".into()), ("c".into(), "user".into(), "/u/c".into()), ("d".into(), "local".into(), "/l/d".into())]);
     }
 
     #[test]
