@@ -47,12 +47,14 @@ export interface MarkdownPreviewProps {
   /** 앵커로 옮겨 갈 때 스크롤하는 틀 */
   scroller: () => HTMLElement | null;
   openFile: (file: string, line?: number) => void;
-  /** inApp: 앱 안 브라우저 칸으로 연다 (⌘⇧+클릭) */
+  /** inApp: 앱 안 브라우저 칸으로 연다 (⌘⇧+클릭, `terminalLinks` 면 ⇧ 없이) */
   openUrl: (url: string, inApp: boolean) => void;
   notice: (text: string) => void;
+  /** 주소 링크를 터미널과 같은 규칙으로 연다: 누르면 앱 안 브라우저, ⇧ 를 같이 누르면 기본 브라우저 (대화 보기) */
+  terminalLinks?: boolean;
 }
 
-function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openUrl, notice }: MarkdownPreviewProps) {
+function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openUrl, notice, terminalLinks }: MarkdownPreviewProps) {
   const root = useRef<HTMLDivElement>(null);
 
   const goAnchor = (id: string) => {
@@ -71,8 +73,8 @@ function MarkdownPreview({ host, worktree, file, text, scroller, openFile, openU
   // 링크 처리는 늘 마지막 props 를 본다. components 가 바뀌면 react-markdown 이 칸을 새로 만들어 mermaid 를 다시 그리므로 묶지 않는다
   // 워크트리 workspace 면 그 경로로 `../` 가 밖으로 나가는 링크를 절대 경로로 푼다
   const wtRoot = isWorktreeWorkspace(worktree) ? worktree : undefined;
-  const latest = useRef({ file, root: wtRoot, openFile, openUrl, notice, goAnchor });
-  latest.current = { file, root: wtRoot, openFile, openUrl, notice, goAnchor };
+  const latest = useRef({ file, root: wtRoot, openFile, openUrl, notice, goAnchor, terminalLinks });
+  latest.current = { file, root: wtRoot, openFile, openUrl, notice, goAnchor, terminalLinks };
 
   const components = useMemo<Components>(
     () => ({
@@ -116,6 +118,7 @@ interface LinkHandlers {
   openUrl: MarkdownPreviewProps["openUrl"];
   notice: MarkdownPreviewProps["notice"];
   goAnchor: (id: string) => void;
+  terminalLinks?: boolean;
 }
 
 /** 미리보기 안 링크를 누르면: 앵커는 문서 안에서, 주소는 기본 브라우저(⌘⇧ 면 앱 안 브라우저), 파일은 파일 칸으로 */
@@ -127,7 +130,7 @@ function onLink(h: LinkHandlers, href: string | undefined, e: React.MouseEvent) 
       h.goAnchor(t.id);
       return;
     case "url":
-      h.openUrl(t.url, primaryMod(e) && e.shiftKey && /^https?:/i.test(t.url));
+      h.openUrl(t.url, /^https?:/i.test(t.url) && (h.terminalLinks ? !e.shiftKey : primaryMod(e) && e.shiftKey));
       return;
     case "file":
       h.openFile(t.file, t.line);

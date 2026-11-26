@@ -129,6 +129,14 @@ function spans(text: string): Span[] {
   return out;
 }
 
+/** 글 한 덩이 속 링크 후보와 자리 (대화 보기가 ⌘+클릭한 자리의 링크를 찾는다) */
+export function findLinks(text: string): { start: number; end: number; target: LinkTarget }[] {
+  return spans(text).flatMap((s) => {
+    const target = toTarget(s);
+    return target ? [{ start: s.start, end: s.end, target }] : [];
+  });
+}
+
 function toTarget(s: Span): LinkTarget | null {
   if (s.url) return parseHyperlink(s.text) ?? { kind: "url", url: s.text };
   const p = splitLine(s.text);

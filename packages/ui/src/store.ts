@@ -46,6 +46,7 @@ import { pageKey, setPage } from "./browser-state";
 import { DEFAULT_GROUP_NAME, moveRepo, NEW_GROUP_NAME, normalizeGroups, removeGroup, shiftGroup } from "./groups";
 import { activeTab, focusedPane, paneOfSession, panesOf, sameDoc, sessionsOf } from "./layout";
 import type { Services } from "./services";
+import type { LinkTarget } from "./links";
 import { logNotice, markNoticesRead } from "./notice-log";
 import { chatCapable, chatChanged, chatKey, chatReconnected, chatRemoved, chatViewStore, setAgentView } from "./chat/chat-state";
 import { allowed, loadNotifySettings, type Notice, noticeFor, type NotifySettings, saveNotifySettings } from "./notifications";
@@ -871,6 +872,18 @@ export class AppModel {
     const all = [s?.cwd, s?.agent?.cwd, ws && ws !== OTHER_WORKSPACE && ws !== FLOATING_WORKSPACE ? ws : null];
     return [...new Set(all.filter((p): p is string => !!p && isAbsolutePath(p)))];
   }
+
+  /**
+   * 글에서 찾은 링크(주소 · 경로)를 연다. 경로는 터미널 링크와 같은 기준 폴더로 풀어 있는 것만 연다.
+   * 대화 보기의 ⌘+클릭이 쓴다 (터미널과 같은 규칙: ⌘ 는 thuminal 안, ⌘⇧ 는 기본 앱)
+   */
+  openTextLink = (id: SessionId, target: LinkTarget, mode: "system" | "app") => {
+    if (target.kind === "url") return this.openLink(id, target, mode);
+    void this.services.host.resolvePath(target.path, this.linkBases(id)).then(
+      (hit) => (hit ? this.openLink(id, { kind: "path", ...hit, line: target.line, col: target.col }, mode) : this.notice(`파일을 찾지 못했어요: ${target.path}`)),
+      (e) => this.fail(e),
+    );
+  };
 
   /** 링크를 연다. app: thuminal 안(⌘+클릭), system: 기본 앱(⌘⇧+클릭) */
   openLink = (id: SessionId, link: ResolvedLink, mode: "system" | "app") => {

@@ -17,7 +17,9 @@ import type { AgentInfo, ChatStatus, HostApi, SessionId, WorkspaceId } from "@th
 
 import { Button } from "../components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { findLinks, type LinkTarget } from "../links";
 import { cn } from "../lib/utils";
+import { primaryMod } from "../platform";
 import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
 import { type ChatDraft, chatFeed, type ChatFeed, draftKey, flatText as flat, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
@@ -46,6 +48,26 @@ function agoLabel(at: number): string {
 
 /** 멈춘 뒤 claude 가 글을 입력창에 되돌려 놓았는지 보는 때 (앞 확인부터 잰 ms) */
 const RESTORE_CHECKS_MS = [350, 500, 800];
+
+/** 화면 한 점에 있는 글자의 링크 (주소 · 경로). 그 글자가 든 덩이(문단 · 코드 · 칸)의 글 전체에서 찾는다 */
+function linkAt(x: number, y: number): LinkTarget | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const pos = doc.caretPositionFromPoint?.(x, y);
+  const range = pos ? null : doc.caretRangeFromPoint?.(x, y);
+  const node = pos?.offsetNode ?? range?.startContainer;
+  const offset = pos?.offset ?? range?.startOffset ?? 0;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  const block = node.parentElement?.closest("pre, code, p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, div");
+  if (!block) return null;
+  const before = document.createRange();
+  before.setStart(block, 0);
+  before.setEnd(node, offset);
+  const at = before.toString().length;
+  return findLinks(block.textContent ?? "").find((l) => l.start <= at && at < l.end)?.target ?? null;
+}
 
 /** 세션에 키 · 글을 보내는 것들 */
 function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
@@ -236,6 +258,14 @@ export function ChatView({
       <div
         ref={scroller}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain thm-scroll"
+        // 글 속 주소 · 경로는 터미널처럼 ⌘+클릭으로 thuminal 안에서 연다 (⌘⇧ 는 기본 앱). 마크다운 링크는 자기가 연다
+        onClick={(e) => {
+          if (e.defaultPrevented || !primaryMod(e)) return;
+          const target = linkAt(e.clientX, e.clientY);
+          if (!target) return;
+          e.preventDefault();
+          model.openTextLink(session, target, e.shiftKey ? "system" : "app");
+        }}
         onWheel={touched}
         onTouchMove={touched}
         onPointerDown={touched}
@@ -368,7 +398,7 @@ const RowView = memo(function RowView({
       return (
         <div className="thm-chat-md min-w-0">
           <Suspense fallback={<div className="whitespace-pre-wrap">{row.text}</div>}>
-            <Markdown host={host} worktree={ws} file="" text={row.text} scroller={() => scroller.current} openFile={actions.openFile} openUrl={actions.openUrl} notice={actions.notice} />
+            <Markdown host={host} worktree={ws} file="" text={row.text} scroller={() => scroller.current} openFile={actions.openFile} openUrl={actions.openUrl} notice={actions.notice} terminalLinks />
           </Suspense>
           {row.turnMs !== undefined && row.turnMs >= 1000 && <p className="mt-1.5 text-[11px] text-muted-foreground/70" title="턴에 걸린 시간">{duration(row.turnMs)}</p>}
         </div>
