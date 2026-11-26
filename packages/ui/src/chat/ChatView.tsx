@@ -450,6 +450,7 @@ function ToolRow({
   actions: ChatActions;
   scroller: React.RefObject<HTMLDivElement | null>;
 }) {
+  const model = useModel();
   const [open, setOpen] = useState(false);
   const failed = tool.result?.isError;
   const summary = shortPath(toolSummary(tool), ws);
@@ -467,6 +468,14 @@ function ToolRow({
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{summary}</span>
         <CaretRightIcon className={cn("size-3 shrink-0 text-muted-foreground opacity-0 transition-transform group-hover:opacity-100", open && "rotate-90 opacity-100")} />
       </button>
+      {/* 결과에 든 그림(Read 로 그림 파일을 읽었을 때 등)은 접어 둔 채로도 보인다 */}
+      {!!tool.result?.images.length && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5 pb-1 pl-6">
+          {tool.result.images.map((id) => (
+            <ChatImage key={id} host={model.services.host} session={session} id={id} alt="도구 결과 그림" />
+          ))}
+        </div>
+      )}
       {failed && !open && <p className="truncate pl-6 font-mono text-xs text-agent-failed">{tool.result!.text.split("\n").find((l) => l.trim()) ?? "실패"}</p>}
       {open && <ToolDetail tool={tool} />}
       {open && (tool.name === "Agent" || tool.name === "Task") && <SubagentChat tool={tool} ws={ws} session={session} actions={actions} scroller={scroller} />}
@@ -543,7 +552,7 @@ function SubagentChat({ tool, ws, session, actions, scroller }: { tool: ToolCall
 }
 
 /** 사용자가 붙여 보낸 그림의 작은 판 */
-function ChatImage({ host, session, id }: { host: HostApi; session: SessionId; id: string }) {
+function ChatImage({ host, session, id, alt = "붙인 그림" }: { host: HostApi; session: SessionId; id: string; alt?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -560,15 +569,15 @@ function ChatImage({ host, session, id }: { host: HostApi; session: SessionId; i
   return (
     <>
       <button className="cursor-zoom-in rounded" aria-label="크게 보기" onClick={() => setOpen(true)}>
-        <img src={src} alt="붙인 그림" className="max-h-28 rounded border" />
+        <img src={src} alt={alt} className="max-h-28 rounded border" />
       </button>
-      {open && <ImagePopup host={host} session={session} id={id} thumb={src} onClose={() => setOpen(false)} />}
+      {open && <ImagePopup host={host} session={session} id={id} thumb={src} title={alt} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
 /** 붙인 그림을 창 가득 크게 본다. 원본을 받는 동안은 작은 판을 늘려 보인다. Esc 나 그림 밖을 누르면 닫는다 */
-function ImagePopup({ host, session, id, thumb, onClose }: { host: HostApi; session: SessionId; id: string; thumb: string; onClose: () => void }) {
+function ImagePopup({ host, session, id, thumb, title, onClose }: { host: HostApi; session: SessionId; id: string; thumb: string; title: string; onClose: () => void }) {
   const [full, setFull] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -587,14 +596,14 @@ function ImagePopup({ host, session, id, thumb, onClose }: { host: HostApi; sess
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80" />
         <DialogPrimitive.Content aria-describedby={undefined} className="fixed inset-0 z-50 flex flex-col outline-none" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
           <div className="flex h-10 shrink-0 items-center px-4 text-xs text-white/80">
-            <DialogPrimitive.Title className="font-medium text-white">붙인 그림</DialogPrimitive.Title>
+            <DialogPrimitive.Title className="font-medium text-white">{title}</DialogPrimitive.Title>
             {error && <span className="ml-3 text-white/60">원본을 읽지 못했어요: {error}</span>}
             <DialogPrimitive.Close className="ml-auto flex size-7 items-center justify-center rounded-md hover:bg-white/15" title="닫기 (Esc)">
               <XIcon className="size-4" />
             </DialogPrimitive.Close>
           </div>
           <div className="flex min-h-0 flex-1 items-center justify-center px-8 pb-6" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-            <img src={full ?? thumb} alt="붙인 그림" className={cn("max-h-full max-w-full object-contain shadow-2xl", !full && "min-h-[40%] blur-[1px]")} draggable={false} />
+            <img src={full ?? thumb} alt={title} className={cn("max-h-full max-w-full object-contain shadow-2xl", !full && "min-h-[40%] blur-[1px]")} draggable={false} />
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

@@ -316,7 +316,7 @@ export type ChatItem =
   | { type: "assistant"; id: string; at: number; text: string }
   | { type: "thinking"; id: string; at: number; text: string }
   | { type: "tool_use"; id: string; at: number; name: string; input: unknown }
-  | { type: "tool_result"; id: string; at: number; text: string; is_error?: boolean; truncated?: boolean }
+  | { type: "tool_result"; id: string; at: number; text: string; is_error?: boolean; truncated?: boolean; /** 결과에 든 그림 id (`agent_image` 에 쓴다) */ images?: string[] }
   /** kind: command(슬래시 명령) · command_output · compact · interrupted · error · info · turn(턴에 걸린 ms) · teammate(팀원이 보낸 글: 첫 줄 이름, 나머지 내용) */
   | { type: "notice"; id: string; at: number; kind: string; text: string };
 

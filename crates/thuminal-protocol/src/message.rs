@@ -258,6 +258,9 @@ pub enum ChatItem {
         /// 글이 길어 잘랐다
         #[serde(default)]
         truncated: bool,
+        /// 결과에 든 그림 id (Read 로 그림 파일을 읽었을 때 등. `AgentImage` 요청에 쓴다). 옛 데몬은 `[그림]` 글자만 보낸다
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<String>,
     },
     /// 대화 밖 알림. `kind`: `command`(슬래시 명령), `command_output`, `compact`, `interrupted`, `error`, `info`, `turn`(턴에 걸린 ms), `teammate`(팀원이 보낸 글: 첫 줄 이름, 나머지 내용)
     Notice { id: String, at: u64, kind: String, text: String },

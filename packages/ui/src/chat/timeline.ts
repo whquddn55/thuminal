@@ -12,7 +12,7 @@ export interface ToolCall {
   name: string;
   input: Record<string, unknown>;
   /** 결과가 아직 없으면 null (도는 중이거나 사용자 답을 기다린다) */
-  result: { text: string; isError: boolean; truncated: boolean } | null;
+  result: { text: string; isError: boolean; truncated: boolean; images: string[] } | null;
 }
 
 export type Row =
@@ -77,7 +77,7 @@ export function buildTimeline(all: ChatItem[]): Timeline {
       }
       case "tool_result": {
         const call = calls.get(it.id);
-        if (call) call.result = { text: it.text, isError: !!it.is_error, truncated: !!it.truncated };
+        if (call) call.result = { text: it.text, isError: !!it.is_error, truncated: !!it.truncated, images: it.images ?? [] };
         break;
       }
       case "notice": {

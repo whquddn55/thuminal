@@ -3,7 +3,8 @@
 //! claude 는 붙인 그림을 `type:"user"` 줄의 `message.content` 에 `{"type":"image","source":{"type":"base64",…}}` 로
 //! 원본 그대로 남긴다 (긴 변 2000px 까지 줄인 판). 원본 파일(임시 폴더)은 곧 지워지므로 기록이 출처다.
 //! 넣지 않는 것:
-//! - 도구 결과 그림(Read 등): content 안 `tool_result` 조각 속에 들어 있다. 맨 위 조각만 보므로 저절로 빠진다
+//! - 도구 결과 그림(Read 등): content 안 `tool_result` 조각 속에 들어 있다. 맨 위 조각만 보므로 저절로 빠진다.
+//!   대화 보기는 이 그림을 `tr:<줄 위치>:<조각>:<결과 속 조각>` id 로 따로 달라고 한다 ([`tool_result_image`])
 //! - `api-request-blob` 줄: API 로 보낸 요청 사본이라 같은 그림이 또 들어 있다
 //! - `isSidechain`(서브에이전트), `isMeta`(동반 줄) 줄
 //!
@@ -15,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -162,6 +163,27 @@ impl Scan {
         let bytes = B64.decode(data.trim()).map_err(std::io::Error::other)?;
         Ok(Some((f.info.media_type.clone(), bytes)))
     }
+}
+
+/// 도구 결과 속 그림 (`<줄 위치>:<조각>:<결과 속 조각>`). 그 줄 하나만 읽는다
+fn tool_result_image(path: &str, at: &str) -> Result<(String, Vec<u8>), String> {
+    let bad = || format!("그림을 찾지 못했어요: tr:{at}");
+    let mut n = at.split(':').map(|x| x.parse::<u64>().ok());
+    let (Some(Some(pos)), Some(Some(part)), Some(Some(block)), None) = (n.next(), n.next(), n.next(), n.next()) else { return Err(bad()) };
+    let read = || -> std::io::Result<Vec<u8>> {
+        let mut file = File::open(path)?;
+        file.seek(SeekFrom::Start(pos))?;
+        let mut buf = Vec::new();
+        BufReader::new(file).take(MAX_LINE as u64).read_until(b'\n', &mut buf)?;
+        Ok(buf)
+    };
+    let buf = read().map_err(|e| format!("대화 기록을 읽지 못했어요: {e}"))?;
+    let v: Value = serde_json::from_slice(&buf).map_err(|_| bad())?;
+    let img = v.pointer(&format!("/message/content/{part}/content/{block}")).filter(|b| b.get("type").and_then(Value::as_str) == Some("image")).ok_or_else(bad)?;
+    let data = img.pointer("/source/data").and_then(Value::as_str).ok_or_else(bad)?;
+    let media_type = img.pointer("/source/media_type").and_then(Value::as_str).unwrap_or("image/png").to_string();
+    let bytes = B64.decode(data.trim()).map_err(|_| bad())?;
+    Ok((media_type, bytes))
 }
 
 /// 한 줄에서 사용자가 붙인 그림들 (content 차례, 정보). id 는 비워 두고, 번호를 모르면 n 은 0
@@ -492,6 +514,19 @@ impl Images {
 
     /// 그림 하나 (형식, 바이트). 썸네일은 캐시에서 먼저 찾는다
     pub fn image(&self, session: SessionId, path: &str, id: &str, thumb: bool) -> Result<(String, Vec<u8>), String> {
+        if let Some(at) = id.strip_prefix("tr:") {
+            let key = (path.to_string(), id.to_string());
+            if thumb && let Some(hit) = self.thumbs.lock().unwrap().get(&key) {
+                return Ok(hit);
+            }
+            let (media_type, bytes) = tool_result_image(path, at)?;
+            if !thumb {
+                return Ok((media_type, bytes));
+            }
+            let small = thumbnail(&bytes)?;
+            self.thumbs.lock().unwrap().put(key, small.clone());
+            return Ok(small);
+        }
         if id.starts_with("draft:") {
             let (media_type, bytes, file) = self.draft_image(session, id)?;
             if !thumb {
@@ -562,6 +597,27 @@ impl ThumbCache {
                 self.bytes -= b.len();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tool_result_tests {
+    use super::*;
+
+    #[test]
+    fn reads_image_inside_tool_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.jsonl");
+        let first = "{\"type\":\"user\",\"message\":{\"content\":\"안녕\"}}\n";
+        let second = "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t\",\"content\":[{\"type\":\"text\",\"text\":\"x\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"aGk=\"}}]}]}}\n";
+        std::fs::write(&p, format!("{first}{second}")).unwrap();
+        let path = p.to_str().unwrap();
+        let at = format!("{}:0:1", first.len());
+        assert_eq!(tool_result_image(path, &at).unwrap(), ("image/png".to_string(), b"hi".to_vec()));
+        // 그림이 아닌 조각, 엉뚱한 자리, 모양이 틀린 id
+        assert!(tool_result_image(path, &format!("{}:0:0", first.len())).is_err());
+        assert!(tool_result_image(path, "3:0:1").is_err());
+        assert!(tool_result_image(path, "x:0").is_err());
     }
 }
 

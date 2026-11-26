@@ -181,7 +181,6 @@ fn result_text(content: Option<&Value>) -> String {
             .iter()
             .filter_map(|b| match b.get("type").and_then(Value::as_str) {
                 Some("text") => b.get("text").and_then(Value::as_str).map(str::to_string),
-                Some("image") => Some("[그림]".into()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -274,7 +273,18 @@ fn line_items(line: &[u8], pos: u64, sidechain: bool, st: &mut ChatStatus) -> Ve
                                 let Some(tool) = p.get("tool_use_id").and_then(Value::as_str) else { continue };
                                 let (text, truncated) = clip(&result_text(p.get("content")), RESULT_MAX);
                                 let is_error = p.get("is_error").and_then(Value::as_bool).unwrap_or(false);
-                                out.push(ChatItem::ToolResult { id: tool.to_string(), at, text, is_error, truncated });
+                                // 결과 속 그림은 줄 위치와 조각 차례로 가리킨다 (`images.rs` 가 그 줄만 다시 읽는다).
+                                // 서브에이전트 기록의 그림은 그림 요청이 본 기록만 읽어 가리킬 수 없다
+                                let images = match p.get("content") {
+                                    Some(Value::Array(blocks)) if !sidechain => blocks
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, b)| b.get("type").and_then(Value::as_str) == Some("image") && b.pointer("/source/type").and_then(Value::as_str) == Some("base64"))
+                                        .map(|(j, _)| format!("tr:{pos}:{i}:{j}"))
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                out.push(ChatItem::ToolResult { id: tool.to_string(), at, text, is_error, truncated, images });
                             }
                             _ => {}
                         }
@@ -611,8 +621,9 @@ mod tests {
         assert!(big.len() <= INPUT_STR_MAX + 3 && big.ends_with('…'));
 
         let got = items(json!({"type":"user","uuid":"r","message":{"content":[
-            {"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"Exit code 1"},{"type":"image","source":{}}]}]}}));
-        assert_eq!(got, vec![ChatItem::ToolResult { id: "t1".into(), at: 0, text: "Exit code 1\n[그림]".into(), is_error: true, truncated: false }]);
+            {"type":"text","text":"x"},
+            {"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"Exit code 1"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}},{"type":"image","source":{}}]}]}}));
+        assert_eq!(got[0], ChatItem::ToolResult { id: "t1".into(), at: 0, text: "Exit code 1".into(), is_error: true, truncated: false, images: vec!["tr:0:1:1".into()] });
         let got = items(json!({"type":"user","uuid":"r","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"나".repeat(9000)}]}}));
         let ChatItem::ToolResult { text, truncated, .. } = &got[0] else { panic!() };
         assert!(*truncated && text.len() <= RESULT_MAX);
