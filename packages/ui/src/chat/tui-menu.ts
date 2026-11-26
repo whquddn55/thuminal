@@ -72,9 +72,9 @@ function numberedMenu(lines: string[]): TuiMenu | null {
     if (options.length < 2 || cursor < 0) return null;
     // 질문은 창 바로 위 몇 줄 안의 `?` 로 끝나는 줄
     let title = "";
-    for (let i = start - 1; i >= Math.max(0, start - 4); i--) {
+    for (let i = start - 1; i >= Math.max(0, start - 6); i--) {
       const t = lines[i].trim();
-      if (t.endsWith("?")) {
+      if (t.endsWith("?") || t.endsWith(":")) {
         title = t;
         break;
       }

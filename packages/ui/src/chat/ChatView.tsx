@@ -296,8 +296,8 @@ export function ChatView({
   useEffect(() => {
     if (tuiMenu) menuShown.current = true;
     if (!rewinding || tuiMenu) return;
-    // 되감기 창이 닫혔다 (골랐거나 Esc). 창이 뜨지 않았으면 조금 기다렸다 닫는다
-    const t = window.setTimeout(() => setRewinding(false), menuShown.current ? 300 : 2500);
+    // 되감기 창이 닫혔다 (골랐거나 Esc). 다시 그리는 사이 한 번 못 읽을 수 있어 조금 기다렸다 닫는다
+    const t = window.setTimeout(() => setRewinding(false), menuShown.current ? 1500 : 3500);
     return () => window.clearTimeout(t);
   }, [rewinding, tuiMenu]);
   const insertRef = useRef<((text: string) => void) | null>(null);
@@ -313,7 +313,18 @@ export function ChatView({
   const startRewind = () => {
     menuShown.current = false;
     setRewinding(true);
-    void send.keys(["\x1b", "\x1b"]);
+    void (async () => {
+      // claude 입력창에 흐린 제안 글이 떠 있으면 첫 Esc 는 그것을 지운다. 목록이 안 떴으면 한 번 더 누른다
+      // (목록이 늦게 그려지는데 다시 누르면 Esc 가 목록을 닫으므로 1.5초까지 기다려 본 뒤에만 다시 누른다)
+      for (let i = 0; i < 2; i++) {
+        await send.keys(["\x1b", "\x1b"]);
+        for (let t = 0; t < 6; t++) {
+          await new Promise((r) => setTimeout(r, 250));
+          const m = parseTuiMenu(await host.readScreen(session, false).catch(() => ""));
+          if (m?.kind === "rewind") return;
+        }
+      }
+    })();
   };
   // 쓴 글 기록 (입력창 ↑ ↓). 기록의 사용자 글, 오래된 것부터
   const history = useMemo(() => {
@@ -1083,9 +1094,12 @@ function Composer({
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const matches = closedFor === text ? null : slashItems(text, commands);
+  // 쓴 글 불러오기 (↑ ↓): 불러온 차례와 불러오기 전에 쓰던 글
+  const recall = useRef<{ at: number; draft: string } | null>(null);
   // `@낱말` 을 치는 중이면 워크트리 파일 목록 (claude 가 그 파일을 읽는다)
   const [caret, setCaret] = useState(0);
-  const atWord = closedFor === text ? null : /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+  // 불러온 글(↑)이 `@경로` 로 끝나도 목록을 띄우지 않는다 (↓ 가 목록으로 가 버린다)
+  const atWord = closedFor === text || recall.current ? null : /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
   const [files, setFiles] = useState<string[] | null>(null);
   useEffect(() => {
     if (atWord && files === null && listFiles) void listFiles().then(setFiles, () => setFiles([]));
@@ -1104,8 +1118,6 @@ function Composer({
   };
   // 값이 있는 명령(/model)은 값 목록으로 넘어가고, 나머지는 바로 보낸다
   const choose = (item: SlashItem) => (fileMode ? insertFile(item.text) : item.send ? send(item.text) : setText(item.text));
-  // 쓴 글 불러오기 (↑ ↓): 불러온 차례와 불러오기 전에 쓰던 글
-  const recall = useRef<{ at: number; draft: string } | null>(null);
   const lastEsc = useRef(0);
   // 바깥에서 글을 넣는다: 쓰던 글 앞에
   useEffect(() => {
