@@ -280,6 +280,15 @@ export class ChatFeed {
     this.emit({ hidden });
   }
 
+  /** 이 조각부터 뒤를 모두 감춘다 (되감기로 대화를 되돌렸다. 다음 글이 오면 데몬이 알려 준 갈래로도 가려진다) */
+  hideFrom(id: string) {
+    const at = this.snap.items.findIndex((i) => i.id === id);
+    if (at < 0) return;
+    const hidden = new Set(this.snap.hidden);
+    for (const i of this.snap.items.slice(at)) hidden.add(i.id);
+    this.emit({ hidden });
+  }
+
   addPending(text: string, images: ChatDraft["images"] = []) {
     // 새로 보내는 글은 되돌린 글과 같아도 감추지 않는다
     this.retracting = [];

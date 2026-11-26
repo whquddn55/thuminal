@@ -32,6 +32,8 @@ export interface Zoom {
   terminal: number;
   /** 앱 화면 배율 */
   ui: number;
+  /** 대화 보기 배율 단계 (0.1 씩, ⌘+ ⌘- 를 대화 입력창에서) */
+  chat?: number;
 }
 
 function load<T>(key: string, fallback: T): T {

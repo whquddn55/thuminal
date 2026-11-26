@@ -1463,6 +1463,13 @@ export class AppModel {
     this.setZoom({ ...s.zoom, terminal });
   };
 
+  /** ⌘+ ⌘- ⌘0 을 대화 보기에서: 대화 글자 크기를 10% 씩 (60% ~ 200%), 0 이면 처음 크기로 */
+  zoomChat = (dir: 1 | -1 | 0) => {
+    const s = this.get();
+    const chat = dir === 0 ? 0 : Math.max(-4, Math.min(10, (s.zoom.chat ?? 0) + dir));
+    this.setZoom({ ...s.zoom, chat });
+  };
+
   /** ⌘+ ⌘- ⌘0 을 터미널 밖에서: 앱 화면 배율. 껍데기가 확대를 못 하면(웹) false 를 돌려 브라우저에 맡긴다 */
   zoomUi = (dir: 1 | -1 | 0): boolean => {
     const host = this.services.host;

@@ -252,3 +252,9 @@
 .thm-chat-md .markdown-preview h4 {
   font-size: 1.05em;
 }
+
+/* 대화 보기: ⌘ 를 누르고 올린 주소 · 경로 (chat/ChatView.tsx showLinkHover) */
+::highlight(thm-link) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

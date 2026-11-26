@@ -13,10 +13,11 @@ import { ArrowDownIcon, ArrowUpIcon, CaretRightIcon, CheckIcon, StopIcon, Termin
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentInfo, ChatStatus, HostApi, SessionId, WorkspaceId } from "@thuminal/term-core";
+import { type AgentInfo, type ChatStatus, type HostApi, isWorktreeWorkspace, type SessionId, type WorkspaceId } from "@thuminal/term-core";
 
 import { Button } from "../components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { matchFiles } from "../file-match";
 import { findLinks, type LinkTarget } from "../links";
 import { cn } from "../lib/utils";
 import { primaryMod } from "../platform";
@@ -24,6 +25,7 @@ import { useApp, useModel } from "../store";
 import { toBase64 } from "../terminal-controller";
 import { type ChatDraft, chatFeed, type ChatFeed, draftKey, flatText as flat, loadDraft, type PendingSend, saveDraft, useAgentSessions, useChat, useClaudeCommands, useClaudeModels } from "./chat-state";
 import { claudeCommands, commandTags, effortChoices, modelLabel, needsArg, SEED_EFFORTS, SEED_MODELS, type SlashChoice, type SlashCommand, type SlashItem, slashItems, tokenLabel, unknownCommand } from "./slash";
+import { ansiPieces, parseTuiMenu, rewindKeys, type TuiMenu } from "./tui-menu";
 import { type Answer, answerKeys, buildTimeline, duration, type Question, questionsOf, type Row, type ToolCall, toolSummary, tuiInputBox } from "./timeline";
 
 const Markdown = lazy(() => import("../markdown"));
@@ -49,8 +51,8 @@ function agoLabel(at: number): string {
 /** 멈춘 뒤 claude 가 글을 입력창에 되돌려 놓았는지 보는 때 (앞 확인부터 잰 ms) */
 const RESTORE_CHECKS_MS = [350, 500, 800];
 
-/** 화면 한 점에 있는 글자의 링크 (주소 · 경로). 그 글자가 든 덩이(문단 · 코드 · 칸)의 글 전체에서 찾는다 */
-function linkAt(x: number, y: number): LinkTarget | null {
+/** 화면 한 점에 있는 글자의 링크 (주소 · 경로)와 그 글자 범위. 그 글자가 든 덩이(문단 · 코드 · 칸)의 글 전체에서 찾는다 */
+function linkHit(x: number, y: number): { target: LinkTarget; range: Range } | null {
   const doc = document as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -66,7 +68,32 @@ function linkAt(x: number, y: number): LinkTarget | null {
   before.setStart(block, 0);
   before.setEnd(node, offset);
   const at = before.toString().length;
-  return findLinks(block.textContent ?? "").find((l) => l.start <= at && at < l.end)?.target ?? null;
+  const hit = findLinks(block.textContent ?? "").find((l) => l.start <= at && at < l.end);
+  if (!hit) return null;
+  // 덩이 글자 자리를 글자 마디 자리로 바꿔 범위를 만든다
+  const out = document.createRange();
+  const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  let seen = 0;
+  for (let t = walk.nextNode() as Text | null; t; t = walk.nextNode() as Text | null) {
+    const len = t.data.length;
+    if (seen <= hit.start && hit.start <= seen + len) out.setStart(t, hit.start - seen);
+    if (seen <= hit.end && hit.end <= seen + len) {
+      out.setEnd(t, hit.end - seen);
+      break;
+    }
+    seen += len;
+  }
+  return { target: hit.target, range: out };
+}
+
+type HighlightRegistry = { set: (name: string, h: unknown) => void; delete: (name: string) => void };
+/** ⌘ 를 누르고 올린 링크에 밑줄 (CSS Custom Highlight). 없는 브라우저면 아무것도 하지 않는다 */
+function showLinkHover(range: Range | null) {
+  const reg = (globalThis.CSS as unknown as { highlights?: HighlightRegistry } | undefined)?.highlights;
+  const Hl = (globalThis as unknown as { Highlight?: new (r: Range) => unknown }).Highlight;
+  if (!reg || !Hl) return;
+  if (range) reg.set("thm-link", new Hl(range));
+  else reg.delete("thm-link");
 }
 
 /** 세션에 키 · 글을 보내는 것들 */
@@ -103,6 +130,24 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
         await raw("\r");
       },
       interrupt: () => raw("\x1b"),
+      /**
+       * 되감기에서 대화를 되돌리면 claude 는 그 글을 자기 입력창에 되돌려 놓는다. 그 글이 기록의 사용자 글이면
+       * claude 입력창은 비우고(⌃C) 그 글을 돌려준다 (대화 보기 입력창에 넣는다). 그 글부터 뒤는 화면에서 감춘다
+       */
+      reclaimRewound: async (): Promise<string | null> => {
+        for (const wait of RESTORE_CHECKS_MS) {
+          await new Promise((r) => setTimeout(r, wait));
+          const box = tuiInputBox(await host.readScreen(session, false).catch(() => ""));
+          const want = box ? flat(box) : "";
+          if (!want) continue;
+          const hit = [...feed.get().items].reverse().find((i) => i.type === "user" && flat(i.text) === want);
+          if (hit?.type !== "user") continue;
+          await raw("\x03");
+          feed.hideFrom(hit.id);
+          return hit.text;
+        }
+        return null;
+      },
       /**
        * 일하는 claude 를 멈춘다. 막 보낸 글을 답이 나오기 전에 멈추면 claude 는 그 글을 자기 입력창에 되돌려 놓는다.
        * 그대로 두면 다음에 보내는 글이 그 뒤에 붙으므로, claude 입력창은 비우고(⌃C) 그 글을 돌려준다 (대화 보기 입력창에 넣는다).
@@ -244,6 +289,40 @@ export function ChatView({
   const waiting = state === "needs_attention";
   const working = state === "working";
   const questions = waiting && timeline.open ? questionsOf(timeline.open) : null;
+  // claude 화면에 뜬 고르기 창 (권한 묻기 · 계획 승인 · 되감기). 기다리는 동안과 되감는 동안만 읽는다
+  const [rewinding, setRewinding] = useState(false);
+  const menuShown = useRef(false);
+  const tuiMenu = useTuiMenu(host, session, (waiting && !questions) || rewinding);
+  useEffect(() => {
+    if (tuiMenu) menuShown.current = true;
+    if (!rewinding || tuiMenu) return;
+    // 되감기 창이 닫혔다 (골랐거나 Esc). 창이 뜨지 않았으면 조금 기다렸다 닫는다
+    const t = window.setTimeout(() => setRewinding(false), menuShown.current ? 300 : 2500);
+    return () => window.clearTimeout(t);
+  }, [rewinding, tuiMenu]);
+  const insertRef = useRef<((text: string) => void) | null>(null);
+  const pickMenu = (i: number) => {
+    if (!tuiMenu) return;
+    const opt = tuiMenu.options[i];
+    if (tuiMenu.kind === "rewind") return void send.keys(rewindKeys(tuiMenu, i));
+    void send.raw(opt.key ?? String(i + 1)).then(() => {
+      // 대화를 되돌리면 claude 가 그 글을 입력창에 되돌려 놓는다
+      if (rewinding && /restore/i.test(opt.label)) void send.reclaimRewound().then((t) => t && insertRef.current?.(t));
+    });
+  };
+  const startRewind = () => {
+    menuShown.current = false;
+    setRewinding(true);
+    void send.keys(["\x1b", "\x1b"]);
+  };
+  // 쓴 글 기록 (입력창 ↑ ↓). 기록의 사용자 글, 오래된 것부터
+  const history = useMemo(() => {
+    const out: string[] = [];
+    for (const i of snap.items) if (i.type === "user" && i.text.trim() && out[out.length - 1] !== i.text) out.push(i.text);
+    return out.slice(-100);
+  }, [snap.items]);
+  const chatZoom = useApp((s) => s.zoom.chat ?? 0);
+  const listFiles = useMemo(() => (isWorktreeWorkspace(ws) ? () => host.files.all(ws).then((r) => r.files) : null), [host, ws]);
   // 훅이 기록보다 먼저 온다. 묻는 도구가 기록에 나타날 틈을 주고, 그래도 없을 때만 "원본에서 확인" 카드를 띄운다
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -254,17 +333,34 @@ export function ChatView({
   }, [waiting, !!questions]);
 
   return (
-    <div className={cn("absolute inset-0 z-[7] flex flex-col bg-background text-foreground", compact ? "text-[15px]" : "text-[13px]")} onPointerDown={onActivate}>
+    <div
+      data-chat-view
+      className={cn("absolute inset-0 z-[7] flex flex-col bg-background text-foreground", compact ? "text-[15px]" : "text-[13px]")}
+      // ⌘+ ⌘- 로 대화 글자 크기 (입력창에 포커스가 있을 때)
+      style={chatZoom ? { zoom: 1 + chatZoom / 10 } : undefined}
+      onPointerDown={onActivate}
+    >
       <div
         ref={scroller}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain thm-scroll"
         // 글 속 주소 · 경로는 터미널처럼 ⌘+클릭으로 thuminal 안에서 연다 (⌘⇧ 는 기본 앱). 마크다운 링크는 자기가 연다
         onClick={(e) => {
           if (e.defaultPrevented || !primaryMod(e)) return;
-          const target = linkAt(e.clientX, e.clientY);
-          if (!target) return;
+          const hit = linkHit(e.clientX, e.clientY);
+          if (!hit) return;
           e.preventDefault();
-          model.openTextLink(session, target, e.shiftKey ? "system" : "app");
+          showLinkHover(null);
+          model.openTextLink(session, hit.target, e.shiftKey ? "system" : "app");
+        }}
+        // ⌘ 를 누르고 올리면 링크에 밑줄을 긋고 손가락 모양을 보인다 (터미널과 같다)
+        onMouseMove={(e) => {
+          const hit = primaryMod(e) ? linkHit(e.clientX, e.clientY) : null;
+          showLinkHover(hit?.range ?? null);
+          e.currentTarget.style.cursor = hit ? "pointer" : "";
+        }}
+        onMouseLeave={(e) => {
+          showLinkHover(null);
+          e.currentTarget.style.cursor = "";
         }}
         onWheel={touched}
         onTouchMove={touched}
@@ -307,12 +403,28 @@ export function ChatView({
         </button>
       )}
       <div className={cn("mx-auto w-full max-w-4xl shrink-0", compact ? "px-2 pb-2" : "px-4 pb-3")}>
-        {waiting &&
+        {tuiMenu && !questions ? (
+          <TuiMenuCard
+            menu={tuiMenu}
+            plan={
+              waiting && timeline.open?.name === "ExitPlanMode" && str(timeline.open.input.plan) ? (
+                <Suspense fallback={<div className="whitespace-pre-wrap">{str(timeline.open.input.plan)}</div>}>
+                  <Markdown host={host} worktree={ws} file="" text={str(timeline.open.input.plan)} scroller={() => scroller.current} openFile={actions.openFile} openUrl={actions.openUrl} notice={actions.notice} terminalLinks />
+                </Suspense>
+              ) : null
+            }
+            onPick={pickMenu}
+            onCancel={() => void send.interrupt()}
+            onTerminal={onTerminal}
+          />
+        ) : (
+          waiting &&
           (questions ? (
             <AskCard key={timeline.open!.id} questions={questions} onAnswer={(answers) => void send.keys(answerKeys(questions, answers))} onCancel={() => void send.interrupt()} onTerminal={onTerminal} />
           ) : !settled ? null : (
             <WaitCard tool={timeline.open} agent={agent!} onAllow={() => void send.raw("1")} onDeny={() => void send.interrupt()} onTerminal={onTerminal} />
-          ))}
+          ))
+        )}
         {slash && (
           <div className="mb-1.5 flex items-center gap-2 px-1 text-xs text-muted-foreground">
             <span className="min-w-0 flex-1 truncate">
@@ -343,6 +455,10 @@ export function ChatView({
           onInterrupt={() => send.interruptAndReclaim().catch(() => null)}
           onError={model.fail}
           onSlash={() => setSlashTick((n) => n + 1)}
+          history={history}
+          listFiles={listFiles}
+          onRewind={startRewind}
+          insertRef={insertRef}
           commands={commands}
         />
         <StatusLine
@@ -562,7 +678,7 @@ function ToolDetail({ tool }: { tool: ToolCall }) {
       {input}
       {tool.result && tool.result.text.trim() && !INTERNAL_RESULT.test(tool.result.text) && (
         <pre className={cn(block, tool.result.isError && "border-agent-failed/40 text-agent-failed")}>
-          {tool.result.text}
+          {tool.result.text.includes("\x1b") ? <AnsiText text={tool.result.text} /> : tool.result.text}
           {tool.result.truncated && "\n… (뒤는 잘렸어요)"}
         </pre>
       )}
@@ -662,7 +778,13 @@ function PendingRow({ p, working, onDrop }: { p: PendingSend; working: boolean; 
         {p.images.length > 0 && (
           <span className="mb-1 flex flex-wrap gap-1.5">
             {p.images.map((i) => (
-              <img key={i.path} src={i.url} alt="붙인 그림" className="h-14 rounded border object-cover" />
+              i.url ? (
+                <img key={i.path} src={i.url} alt="붙인 그림" className="h-14 rounded border object-cover" />
+              ) : (
+                <span key={i.path} className="flex h-14 max-w-40 items-center truncate rounded border px-2 text-xs" title={i.path}>
+                  {i.path.split(/[\\/]/).pop()}
+                </span>
+              )
             ))}
           </span>
         )}
@@ -912,7 +1034,19 @@ function Composer({
   onSlash,
   commands,
   draft,
+  history,
+  listFiles,
+  onRewind,
+  insertRef,
 }: {
+  /** 쓴 글 기록, 오래된 것부터 (↑ ↓ 로 불러온다) */
+  history: string[];
+  /** `@` 뒤에 띄울 워크트리 파일 목록 (워크트리가 아니면 null) */
+  listFiles: (() => Promise<string[]>) | null;
+  /** 비어 있는 입력창에서 Esc 를 두 번 누르면 claude 되감기 창을 연다 */
+  onRewind: () => void;
+  /** 바깥(되감기 · 끌어 놓기)이 입력창에 글을 넣을 때 쓴다 */
+  insertRef: React.RefObject<((text: string) => void) | null>;
   /** 쓰다 만 글 · 붙인 그림을 둘 곳 (`draftKey`). 이 키가 바뀌면 입력창을 새로 만든다 */
   draft: string;
   /** `/` 목록에 올릴 명령 */
@@ -949,9 +1083,58 @@ function Composer({
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const matches = closedFor === text ? null : slashItems(text, commands);
-  const menu = matches?.length ? matches : null;
+  // `@낱말` 을 치는 중이면 워크트리 파일 목록 (claude 가 그 파일을 읽는다)
+  const [caret, setCaret] = useState(0);
+  const atWord = closedFor === text ? null : /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+  const [files, setFiles] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (atWord && files === null && listFiles) void listFiles().then(setFiles, () => setFiles([]));
+  }, [!!atWord]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fileItems: SlashItem[] | null =
+    atWord && files?.length
+      ? (atWord[1] ? matchFiles(files, atWord[1], 30) : [...files].sort((a, b) => a.length - b.length).slice(0, 30)).map((f) => ({ key: f, label: f, desc: "", text: f, send: false, wide: true }))
+      : null;
+  const fileMode = !!fileItems?.length;
+  const menu = fileMode ? fileItems : matches?.length ? matches : null;
+  const insertFile = (f: string) => {
+    const before = text.slice(0, caret).replace(/@[^\s@]*$/, `@${f} `);
+    setText(before + text.slice(caret));
+    setCaret(before.length);
+    requestAnimationFrame(() => ref.current?.setSelectionRange(before.length, before.length));
+  };
   // 값이 있는 명령(/model)은 값 목록으로 넘어가고, 나머지는 바로 보낸다
-  const choose = (item: SlashItem) => (item.send ? send(item.text) : setText(item.text));
+  const choose = (item: SlashItem) => (fileMode ? insertFile(item.text) : item.send ? send(item.text) : setText(item.text));
+  // 쓴 글 불러오기 (↑ ↓): 불러온 차례와 불러오기 전에 쓰던 글
+  const recall = useRef<{ at: number; draft: string } | null>(null);
+  const lastEsc = useRef(0);
+  // 바깥에서 글을 넣는다: 쓰던 글 앞에
+  useEffect(() => {
+    insertRef.current = (t: string) => {
+      setText((cur) => (cur ? `${t}\n${cur}` : t));
+      ref.current?.focus();
+    };
+    return () => {
+      insertRef.current = null;
+    };
+  }, [insertRef]);
+  // 운영체제에서 파일을 끌어 놓았다 (App.tsx `useFileDrop` 이 이 입력창에 보낸다): 그림은 붙이고, 나머지는 경로를 넣는다
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const on = (e: Event) => {
+      const paths = (e as CustomEvent<string[]>).detail;
+      const pics = paths.filter((p) => IMAGE_FILE.test(p));
+      const rest = paths.filter((p) => !IMAGE_FILE.test(p));
+      if (pics.length) setImages((list) => [...list, ...pics.map((path) => ({ path, url: "" }))]);
+      if (rest.length) {
+        const q = rest.map((p) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`)).join(" ");
+        setText((cur) => (cur && !/\s$/.test(cur) ? `${cur} ${q} ` : `${cur}${q} `));
+      }
+      el.focus();
+    };
+    el.addEventListener("thuminal-drop-paths", on);
+    return () => el.removeEventListener("thuminal-drop-paths", on);
+  }, []);
   const pickAt = menu ? Math.min(cursor, menu.length - 1) : 0;
   useEffect(() => {
     setCursor(0);
@@ -1008,17 +1191,25 @@ function Composer({
         className="flex flex-col gap-1.5 rounded-lg border bg-card p-1.5 focus-within:border-ring"
         onDragOver={(e) => e.dataTransfer.types.includes("Files") && e.preventDefault()}
         onDrop={(e) => {
-          const files = imagesOf(e.dataTransfer.files);
-          if (!files.length) return;
+          if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
-          void attach(files);
+          const files = imagesOf(e.dataTransfer.files);
+          if (files.length) return void attach(files);
+          // 브라우저는 파일 경로를 알려 주지 않는다 (데스크톱 앱은 운영체제가 알려 준 경로를 넣는다)
+          onError("이 화면에서는 그림 파일만 붙일 수 있어요");
         }}
       >
         {images.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-1 pt-1">
             {images.map((img) => (
               <span key={img.path} className="group relative">
-                <img src={img.url} alt="붙인 그림" className="h-14 rounded border object-cover" />
+                {img.url ? (
+                  <img src={img.url} alt="붙인 그림" className="h-14 rounded border object-cover" />
+                ) : (
+                  <span className="flex h-14 max-w-40 items-center truncate rounded border px-2 text-xs text-muted-foreground" title={img.path}>
+                    {img.path.split(/[\\/]/).pop()}
+                  </span>
+                )}
                 <button
                   className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full border bg-popover text-popover-foreground shadow-sm hover:bg-accent"
                   title="그림 빼기"
@@ -1038,7 +1229,13 @@ function Composer({
             placeholder="메시지 입력"
             value={text}
             enterKeyHint="send"
-            onChange={(e) => setText(e.target.value)}
+            data-chat-composer
+            onChange={(e) => {
+              recall.current = null;
+              setText(e.target.value);
+              setCaret(e.target.selectionStart);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onPaste={(e) => {
               const files = imagesOf(e.clipboardData.files);
               if (!files.length) return;
@@ -1056,6 +1253,7 @@ function Composer({
                 }
                 if (e.key === "Tab") {
                   e.preventDefault();
+                  if (fileMode) return insertFile(menu[pickAt].text);
                   return setText(menu[pickAt].send ? `${menu[pickAt].text} ` : menu[pickAt].text);
                 }
                 if (e.key === "Escape") {
@@ -1067,12 +1265,42 @@ function Composer({
                   return choose(menu[pickAt]);
                 }
               }
+              const el = e.currentTarget;
+              // 쓴 글 불러오기: 첫 줄에서 ↑ 는 이전 글, 마지막 줄에서 ↓ 는 다음 글 (불러오기 전에 쓰던 글로 돌아온다)
+              if (e.key === "ArrowUp" && !e.shiftKey && history.length && !el.value.slice(0, el.selectionStart).includes("\n")) {
+                const at = recall.current ? recall.current.at - 1 : history.length - 1;
+                if (at < 0) return;
+                e.preventDefault();
+                recall.current = { at, draft: recall.current?.draft ?? text };
+                return setText(history[at]);
+              }
+              if (e.key === "ArrowDown" && !e.shiftKey && recall.current && !el.value.slice(el.selectionEnd).includes("\n")) {
+                e.preventDefault();
+                const at = recall.current.at + 1;
+                if (at >= history.length) {
+                  setText(recall.current.draft);
+                  recall.current = null;
+                } else {
+                  recall.current = { ...recall.current, at };
+                  setText(history[at]);
+                }
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
                 e.preventDefault();
+                recall.current = null;
                 submit();
               } else if (e.key === "Escape" && working) {
                 e.preventDefault();
                 interrupt();
+              } else if (e.key === "Escape" && !text && !images.length) {
+                // 빈 입력창에서 Esc 두 번: 되감기 (claude 터미널 화면과 같다)
+                e.preventDefault();
+                const now = Date.now();
+                if (now - lastEsc.current < 600) {
+                  lastEsc.current = 0;
+                  onRewind();
+                } else lastEsc.current = now;
               }
             }}
           />
@@ -1248,5 +1476,103 @@ function StatusLine({
         {u?.account && <span className="max-w-40 truncate" title={u.account}>{u.account.split("@")[0]}</span>}
       </span>
     </div>
+  );
+}
+
+/** 그림으로 붙일 파일 (끌어 놓은 경로) */
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|heic)$/i;
+
+/** claude 화면의 고르기 창을 0.7초마다 읽는다 (active 인 동안만) */
+function useTuiMenu(host: HostApi, session: SessionId, active: boolean): TuiMenu | null {
+  const [menu, setMenu] = useState<TuiMenu | null>(null);
+  const last = useRef("");
+  useEffect(() => {
+    if (!active) {
+      last.current = "";
+      setMenu(null);
+      return;
+    }
+    let alive = true;
+    const read = () =>
+      host.readScreen(session, false).then(
+        (text) => {
+          if (!alive) return;
+          const m = parseTuiMenu(text);
+          const key = JSON.stringify(m);
+          if (key === last.current) return;
+          last.current = key;
+          setMenu(m);
+        },
+        () => undefined,
+      );
+    void read();
+    const t = window.setInterval(() => void read(), 700);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [host, session, active]);
+  return menu;
+}
+
+/**
+ * claude 화면에 뜬 고르기 창을 카드로 그린다. 번호 창(권한 묻기 · 계획 승인 · 되감기 확인)은 누르면 그 번호를,
+ * 되감기 목록은 그 줄로 옮겨 Enter 를 넣는다. 항목 글은 claude 가 띄운 그대로다
+ */
+function TuiMenuCard({ menu, plan, onPick, onCancel, onTerminal }: { menu: TuiMenu; plan: React.ReactNode; onPick: (i: number) => void; onCancel: () => void; onTerminal: () => void }) {
+  return (
+    <div className="mb-2 flex flex-col gap-2 rounded-lg border border-agent-attention/50 bg-card p-3">
+      {plan && <div className="thm-chat-md thm-scroll max-h-72 overflow-y-auto rounded border bg-background/60 px-3 py-2">{plan}</div>}
+      <p className="font-medium">{menu.kind === "rewind" ? "되감기" : menu.title || "claude가 묻고 있어요"}</p>
+      <div className="flex flex-col gap-1">
+        {menu.options.map((o, i) => (
+          <button
+            key={`${i}:${o.label}`}
+            className={cn("flex items-baseline gap-2 rounded-md border px-2.5 py-1.5 text-left hover:bg-accent active:bg-accent/70", i === menu.cursor && "border-ring")}
+            onClick={() => onPick(i)}
+          >
+            {o.key && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{o.key}</span>}
+            <span className="min-w-0 flex-1 break-words">{o.label}</span>
+            {o.detail && <span className="shrink-0 text-xs text-muted-foreground">{o.detail}</span>}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="xs" variant="outline" onClick={onCancel}>
+          취소
+        </Button>
+        <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={onTerminal}>
+          원본
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 터미널 기본 색 16개 (도구 결과의 색 코드) */
+const ANSI_CLASS = [
+  "text-muted-foreground",
+  "text-red-600 dark:text-red-400",
+  "text-green-600 dark:text-green-400",
+  "text-yellow-600 dark:text-yellow-400",
+  "text-blue-600 dark:text-blue-400",
+  "text-fuchsia-600 dark:text-fuchsia-400",
+  "text-cyan-600 dark:text-cyan-400",
+  "text-foreground",
+];
+
+function AnsiText({ text }: { text: string }) {
+  return (
+    <>
+      {ansiPieces(text).map((p, i) =>
+        p.fg === undefined && !p.bold ? (
+          p.text
+        ) : (
+          <span key={i} className={cn(p.fg !== undefined && ANSI_CLASS[p.fg % 8], p.bold && "font-semibold")}>
+            {p.text}
+          </span>
+        ),
+      )}
+    </>
   );
 }

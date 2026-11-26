@@ -76,6 +76,8 @@ function runAction(root: AppModel, model: AppModel, id: string, digit: number): 
   // ⌘+ ⌘- ⌘0 : 터미널에 포커스가 있으면 터미널 글자 크기, 아니면 앱 화면 배율 (웹은 브라우저 확대에 맡긴다)
   const zoom = (dir: 1 | -1 | 0) => {
     if (document.activeElement?.classList.contains("thm-input")) return root.zoomTerminal(dir);
+    // 대화 보기 입력창이면 대화 글자 크기 (그 칸이 든 호스트 것이 아니라 창 전체 설정이다)
+    if (document.activeElement?.closest("[data-chat-view]")) return root.zoomChat(dir);
     return root.zoomUi(dir);
   };
   switch (id) {
@@ -178,11 +180,15 @@ function useFileDrop(root: AppModel) {
   useEffect(() => {
     const quote = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
     return root.services.host.onFileDrop?.((paths, x, y) => {
-      const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-pane]");
+      const at = document.elementFromPoint(x, y);
+      const el = at?.closest<HTMLElement>("[data-drop-pane]");
       if (!el) return;
       const model = root.hostModel(hostAt(el));
       if (!model) return;
       if (model.services.host.isRemote) return model.notice("원격 컴퓨터 터미널에는 아직 파일을 끌어 놓을 수 없어요");
+      // 대화 보기 칸이면 입력창에 넣는다 (그림은 붙이고 나머지는 경로). PTY 에 바로 넣으면 대화 보기에 보이지 않는다
+      const composer = at?.closest("[data-chat-view]")?.querySelector("[data-chat-composer]");
+      if (composer) return void composer.dispatchEvent(new CustomEvent("thuminal-drop-paths", { detail: paths }));
       const id = Number(el.dataset.dropPane);
       const pane = Object.values(model.get().layouts)
         .flatMap((l) => l.tabs)
