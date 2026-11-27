@@ -262,7 +262,7 @@ pub enum ChatItem {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<String>,
     },
-    /// 대화 밖 알림. `kind`: `command`(슬래시 명령), `command_output`, `compact`, `interrupted`, `error`, `info`, `turn`(턴에 걸린 ms), `teammate`(팀원이 보낸 글: 첫 줄 이름, 나머지 내용)
+    /// 대화 밖 알림. `kind`: `command`(슬래시 명령), `command_output`, `shell_output`(셸 모드 `!` 의 출력), `compact`, `interrupted`, `error`, `info`, `turn`(턴에 걸린 ms), `teammate`(팀원이 보낸 글: 첫 줄 이름, 나머지 내용)
     Notice { id: String, at: u64, kind: String, text: String },
 }
 

@@ -123,8 +123,15 @@ function useSender(host: HostApi, session: SessionId, feed: ChatFeed) {
           if (!text) return void (await raw("\r"));
           await raw(" ");
         }
-        const typed = !text.includes("\n") && text.length <= 400;
-        await raw(typed ? text : `\x1b[200~${text}\x1b[201~`);
+        // 셸 모드: claude 는 빈 입력창에 `!` 를 쳐야 셸 모드로 바뀐다 (붙여 넣은 `!` 는 글자다). `!` 를 먼저 치고 나머지를 넣는다
+        const shell = text.startsWith("!");
+        if (shell) {
+          await raw("!");
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        const body = shell ? text.slice(1) : text;
+        const typed = !body.includes("\n") && body.length <= 400;
+        await raw(typed ? body : `\x1b[200~${body}\x1b[201~`);
         // 붙여 넣은 글을 claude 가 받아 그릴 시간을 준다 (Orca 도 붙여넣기 뒤 0.5초 기다린다)
         await new Promise((r) => setTimeout(r, typed ? 80 : 500));
         await raw("\r");
@@ -509,6 +516,14 @@ const RowView = memo(function RowView({
 }) {
   switch (row.kind) {
     case "user":
+      // 셸 모드로 친 명령
+      if (row.text.startsWith("!") && !row.images.length)
+        return (
+          <div className="max-w-[80%] self-end rounded-2xl rounded-br-md bg-muted px-3.5 py-2 font-mono text-xs break-words whitespace-pre-wrap">
+            <span className="mr-1.5 text-agent-attention">!</span>
+            {row.text.slice(1)}
+          </div>
+        );
       return (
         <div className="max-w-[80%] self-end rounded-2xl rounded-br-md bg-muted px-3.5 py-2 break-words whitespace-pre-wrap">
           {row.images.length > 0 && (
@@ -555,6 +570,7 @@ function NoticeRow({ type, text }: { type: string; text: string }) {
     case "command":
       return <p className="font-mono text-xs text-muted-foreground">{text}</p>;
     case "command_output":
+    case "shell_output":
       return <pre className="overflow-x-auto border-l pl-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground">{text}</pre>;
     case "teammate": {
       const [from, ...body] = text.split("\n");
@@ -1200,7 +1216,7 @@ function Composer({
     <div className="relative">
       {menu && <SlashMenu items={menu} at={pickAt} onHover={setCursor} onPick={choose} />}
       <div
-        className="flex flex-col gap-1.5 rounded-lg border bg-card p-1.5 focus-within:border-ring"
+        className={cn("flex flex-col gap-1.5 rounded-lg border bg-card p-1.5 focus-within:border-ring", text.startsWith("!") && "border-agent-attention/60 focus-within:border-agent-attention")}
         onDragOver={(e) => e.dataTransfer.types.includes("Files") && e.preventDefault()}
         onDrop={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
@@ -1237,7 +1253,7 @@ function Composer({
           <textarea
             ref={ref}
             rows={1}
-            className={cn("min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 outline-none placeholder:text-muted-foreground/70 thm-scroll", compact && "text-[16px]")}
+            className={cn("min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 outline-none placeholder:text-muted-foreground/70 thm-scroll", compact && "text-[16px]", text.startsWith("!") && "font-mono")}
             placeholder="메시지 입력"
             value={text}
             enterKeyHint="send"

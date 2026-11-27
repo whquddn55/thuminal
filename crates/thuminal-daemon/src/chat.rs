@@ -5,6 +5,7 @@
 //!
 //! 읽는 줄:
 //! - `type:"user"`: 글(문자열이나 `text` 조각) → [`ChatItem::User`], `tool_result` 조각 → [`ChatItem::ToolResult`].
+//!   셸 모드(`!`)의 `<bash-input>` 은 `!명령` 사용자 글로, `<bash-stdout>` · `<bash-stderr>` 는 알림(`shell_output`)으로 낸다
 //!   슬래시 명령(`<command-name>`)과 그 출력(`<local-command-stdout>`), 멈춤 표시, 팀원이 보낸 글(`<teammate-message>`)은
 //!   [`ChatItem::Notice`] 로 낸다
 //! - `type:"assistant"`: `text` → [`ChatItem::Assistant`], `thinking` → [`ChatItem::Thinking`](내용이 있을 때만),
@@ -136,6 +137,18 @@ fn user_text(id: &str, at: u64, text: &str, images: Vec<String>, parent: Option<
         if !body.trim().is_empty() {
             out.push(notice(id, at, "command_output", clip(body.trim(), RESULT_MAX).0));
         }
+        return;
+    }
+    // 셸 모드(`!`): 친 명령은 `!명령` 사용자 글로, 출력은 알림(`shell_output`)으로 낸다
+    if let Some(cmd) = tag(text, "bash-input") {
+        out.push(ChatItem::User { id: id.to_string(), at, text: format!("!{cmd}"), images: Vec::new(), parent: parent.map(str::to_string) });
+        return;
+    }
+    if text.contains("<bash-stdout>") || text.contains("<bash-stderr>") {
+        let stdout = strip_ansi(tag(text, "bash-stdout").unwrap_or(""));
+        let stderr = strip_ansi(tag(text, "bash-stderr").unwrap_or(""));
+        let body = [stdout.trim_end(), stderr.trim_end()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join("\n");
+        out.push(notice(id, at, "shell_output", clip(&body, RESULT_MAX).0));
         return;
     }
     if text.starts_with("<local-command-caveat>") || text.starts_with("<task-notification>") {
@@ -612,6 +625,11 @@ mod tests {
         let got = items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"하나 더"}}));
         assert_eq!(got, vec![ChatItem::User { id: "q".into(), at: 0, text: "하나 더".into(), images: vec![], parent: None }]);
         assert!(items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>"}})).is_empty());
+        // 셸 모드
+        let got = items(json!({"type":"user","uuid":"b","parentUuid":"p","message":{"content":"<bash-input>echo hi && ls</bash-input>"}}));
+        assert_eq!(got, vec![ChatItem::User { id: "b".into(), at: 0, text: "!echo hi && ls".into(), images: vec![], parent: Some("p".into()) }]);
+        let got = items(json!({"type":"user","uuid":"o","message":{"content":"<bash-stdout>hi\na.txt</bash-stdout><bash-stderr>\u{1b}[31mwarn\u{1b}[0m</bash-stderr>"}}));
+        assert_eq!(got, vec![notice("o", 0, "shell_output", "hi\na.txt\nwarn")]);
         // 그림을 붙여 보낸 글: 그림은 줄 위치와 조각 차례로 가리킨다
         let got = items(json!({"type":"attachment","uuid":"q","attachment":{"type":"queued_command","commandMode":"prompt","prompt":[
             {"type":"text","text":"[Image #3] 봐"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]}}));
